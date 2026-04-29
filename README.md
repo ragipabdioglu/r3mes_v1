@@ -1,79 +1,199 @@
-# R3MES Monorepo
+# R3MES v1
 
-Merkeziyetsiz yapay zeka uygulama platformu — Qwen2.5-3B tabanlı çıkarım, RAG knowledge katmanı, opsiyonel behavior LoRA, Fastify API ve Next.js dApp.
+R3MES is a local-first AI application platform for retrieval-backed chat, knowledge management, and optional behavior LoRA adapters. The current MVP path uses **Qwen2.5-3B**, **RAG**, **hybrid retrieval**, a Fastify backend, a FastAPI AI proxy, and a Next.js dApp.
 
-**Aktif runtime envanteri:** [infrastructure/ACTIVE_RUNTIME.md](./infrastructure/ACTIVE_RUNTIME.md). **Yerel servisler / portlar / golden path (tek giriş):** [docs/LOCAL_DEV.md](./docs/LOCAL_DEV.md) — ayrıntı [infrastructure/README.md](./infrastructure/README.md).
+The project is intentionally pivoted away from "train knowledge into LoRA". Knowledge lives in the retrieval layer; LoRA is only an optional behavior, tone, role, or persona layer.
 
-## Gereksinimler
+## Current Product Path
 
-- Node.js ≥ 20, **pnpm** 9
-- Docker (isteğe bağlı: yerel PostgreSQL, Redis, IPFS yığını için)
-- Python 3.11+ (**apps/ai-engine** FastAPI / uvicorn için)
+| Layer | Active choice |
+| --- | --- |
+| Base model | Qwen2.5-3B GGUF |
+| Inference | `llama-server` on `8080` |
+| AI proxy | `apps/ai-engine` on `8000` |
+| Backend | `apps/backend-api` on `3000` |
+| Frontend | `apps/dApp` on `3001` |
+| Relational store | PostgreSQL + pgvector |
+| Vector memory | Qdrant |
+| Queue/cache | Redis |
+| Artifact storage | IPFS / local gateway |
+| Knowledge | RAG collections with `PRIVATE` / `PUBLIC` visibility |
+| LoRA | Optional behavior/style/persona adapter |
 
-## Hızlı başlatma (Büyük Başlatıcı)
+See the canonical runtime inventory: [infrastructure/ACTIVE_RUNTIME.md](./infrastructure/ACTIVE_RUNTIME.md).
 
-```bash
-# Depo kökünde
-chmod +x start-all.sh infrastructure/scripts/start-all.sh
-./start-all.sh
+## Architecture
+
+```mermaid
+flowchart LR
+  User["User / Wallet"] --> DApp["Next.js dApp :3001"]
+  DApp --> API["Fastify backend :3000"]
+  API --> Auth["Wallet auth / fee / access control"]
+  API --> Router["Query router + metadata routing"]
+  Router --> Hybrid["Hybrid retrieval"]
+  Hybrid --> Qdrant["Qdrant vector candidates"]
+  Hybrid --> Postgres["Postgres lexical + Prisma source of truth"]
+  Hybrid --> Prune["Rerank + context pruning"]
+  Prune --> Evidence["Evidence extraction"]
+  Evidence --> AI["AI engine :8000"]
+  AI --> Llama["llama-server Qwen2.5-3B :8080"]
+  Llama --> AI
+  AI --> Safety["Safety gate + source metadata"]
+  Safety --> DApp
+  API --> IPFS["IPFS / gateway"]
 ```
 
-veya:
+## What Works Today
 
-```bash
-make start-all
+- Knowledge upload and storage through backend-owned collections.
+- `PRIVATE` and `PUBLIC` knowledge visibility boundaries.
+- Retrieval-backed chat with source citations.
+- Domain / metadata-aware routing that can adapt to newly indexed knowledge.
+- Hybrid candidate retrieval through Qdrant and Prisma/Postgres.
+- Rerank/pruning before the 3B model sees context.
+- Optional behavior LoRA flow without making LoRA the knowledge source.
+- Local evaluation commands for adaptive RAG and grounded-answer checks.
+
+## Monorepo Layout
+
+| Path | Purpose |
+| --- | --- |
+| [apps/backend-api](./apps/backend-api) | Fastify API, Prisma, RAG orchestration, chat proxy, safety gates |
+| [apps/ai-engine](./apps/ai-engine) | FastAPI proxy around llama-compatible inference, embeddings, rerank routes |
+| [apps/dApp](./apps/dApp) | Next.js product UI for Studio, chat, wallet flows |
+| [packages/shared-types](./packages/shared-types) | Shared API contracts and runtime types |
+| [packages/sui-contracts](./packages/sui-contracts) | Sui Move contracts |
+| [packages/sui-indexer](./packages/sui-indexer) | Sui event indexing |
+| [packages/qa-sandbox](./packages/qa-sandbox) | Optional QA / evaluation sandbox |
+| [infrastructure](./infrastructure) | Docker, runtime docs, evals, local scripts, training notes |
+| [docs](./docs) | Local dev, API, architecture, and operational docs |
+
+## Requirements
+
+- Node.js `>=20.10`
+- `pnpm` `9.15`
+- Python `3.11+`
+- Docker Desktop, for PostgreSQL, Redis, Qdrant, and IPFS
+- A local Qwen2.5-3B GGUF file for full inference
+
+Large local assets such as model files, datasets, checkpoints, logs, caches, and runtime binaries are intentionally not tracked in Git.
+
+## Quick Start
+
+Install workspace dependencies:
+
+```powershell
+pnpm install
 ```
 
-Betik sırasıyla:
+Start the local infrastructure, wait for health checks, and apply migrations:
 
-1. `apps/backend-api`, `apps/dApp`, `packages/sui-indexer` için `.env` yoksa `.env.example` kopyalar.
-2. `docker-compose.postgres.yml` ve `docker-compose.storage.yml` ile konteynerleri `up -d` dener (Docker yoksa uyarı verir, devam eder).
-3. `pnpm db:migrate` çalıştırır.
-4. **ai-engine**’i arka planda uvicorn ile **:8000** portunda başlatır (log: `.r3mes-ai-engine.log`).
-5. Ön planda **Turbo** ile Fastify **:3000** ve Next.js **:3001** sunar.
+```powershell
+pnpm bootstrap
+```
 
-**Yerel portlar ve “hangi süreç ne?”:** Önce **[docs/LOCAL_DEV.md](./docs/LOCAL_DEV.md)**; derinlemesine adımlar → [`infrastructure/README.md`](infrastructure/README.md). Docker = yalnızca Postgres/Redis/IPFS/gateway; uygulamalar ayrı süreç.
+Start the application processes:
 
----
+```powershell
+pnpm dev
+```
 
-## 7 Adımlı Uçtan Uca Mutlu Yol (Happy Path) Testi
+Or use the local system helper:
 
-Bu rehber; demo, QA ve yeni geliştiricilerin sistemi uçtan uca doğrulaması içindir. Önkoşul: yukarıdaki başlatıcı veya eşdeğer servislerin ayakta olması; Sui cüzdan eklentisi (ör. Sui Wallet) kurulu olması.
+```powershell
+pnpm local:start
+pnpm local:status
+pnpm local:stop
+```
 
-1. **Cüzdan bağla**  
-   Tarayıcıda dApp’i açın (`http://localhost:3001`). Sui uyumlu Web3 cüzdanını bağlayın; ağın projenin kullandığı testnet/devnet ile uyumlu olduğundan emin olun.
+Open the dApp:
 
-2. **Sui Web3 cüzdan ile imza (Auth) ver**  
-   Oturum / challenge akışında sunucunun istediği mesajı cüzdanla imzalayın; API’nin beklediği `Authorization` veya imza başlıkları oluştuğunu doğrulayın (backend `.env` ve auth moduna göre).
+```text
+http://localhost:3001
+```
 
-3. **Studio’dan knowledge verisi yükle**  
-   Stüdyo akışı `.txt`, `.md` veya `.json` knowledge dosyası ile çalışır. Yükleme tamamlandığında IPFS pin, chunking ve embedding yazımının hatasız bittiğini doğrulayın.
+The backend health endpoint should be available at:
 
-4. **Private/public durumunu doğrula**  
-   Yüklenen collection’ın önce `PRIVATE` oluştuğunu, ardından istenirse explicit publish ile `PUBLIC` olabildiğini doğrulayın.
+```text
+http://127.0.0.1:3000/health
+```
 
-5. **Chat’te collection seçip prompt yaz**  
-   Sohbet arayüzünde ilgili knowledge collection’ı seçip kısa bir prompt gönderin; isteğin backend üzerinden retrieval ve inference zincirine gittiğini doğrulayın.
+For the full golden path, ports, Windows notes, and troubleshooting, start here:
 
-6. **Kaynaklı cevabı doğrula**  
-   Cevapla birlikte source/citation alanlarının döndüğünü ve kullanılan doküman/chunk bilgisinin beklendiği gibi göründüğünü kontrol edin.
+- [docs/LOCAL_DEV.md](./docs/LOCAL_DEV.md)
+- [docs/GOLDEN_PATH_STARTUP.md](./docs/GOLDEN_PATH_STARTUP.md)
+- [docs/SINGLE_TEST_RUNTIME.md](./docs/SINGLE_TEST_RUNTIME.md)
 
-7. **İşlem bitiminde gas / fee kesimini teyit et**  
-   Sui cüzdanında veya zincir gezgininde son işlemleri inceleyin; sohbet veya stake ile ilişkili mikro ücret / gas hareketinin beklendiği gibi gerçekleştiğini doğrulayın (testnet faucet ve kontrat ayarlarına bağlıdır).
+## Model and LoRA Notes
 
----
+R3MES v1 targets **Qwen2.5-3B**, not Qwen 0.5B. The current quality strategy is to keep the base model small and make the surrounding pipeline stronger:
 
-## Ek komutlar
+- route the query before retrieval,
+- retrieve broadly,
+- rerank and prune aggressively,
+- send only compact usable facts to the model,
+- keep LoRA optional and behavior-only,
+- apply deterministic safety and source checks after generation.
 
-| Komut | Açıklama |
-|--------|-----------|
-| `pnpm dev` | Tüm `dev` script’li paketleri paralel çalıştırır (ai-engine çift başlatmayı önlemek için `start-all` tercih edin). |
-| `pnpm db:migrate` | Prisma migrate deploy (backend-api). |
-| `make docker-up` | Yalnızca Docker compose (postgres + storage). |
-| `pnpm --filter @r3mes/backend-api run eval:adaptive-rag` | Aktif RAG pipeline için domain/source/safety regression eval’i. |
+LoRA adapters should not be treated as factual memory. If an answer needs domain knowledge, that knowledge should come from RAG sources.
 
-Lisans ve ürün detayları için depodaki `R3MES.md` ve `R3MES_MASTER_PLAN.md` dosyalarına bakın.
+## Evaluation
 
-## Legacy notu
+Common local quality gates:
 
-BitNet/QVAC ve knowledge-heavy LoRA eğitim denemeleri repoda tarihsel/R&D iz olarak durur. Bunlar ürünün mevcut golden path’ini tanımlamaz. Ana yol Qwen2.5-3B + RAG + optional behavior LoRA’dır. Tek legacy indeks: [`infrastructure/LEGACY_RND.md`](infrastructure/LEGACY_RND.md).
+```powershell
+pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit
+pnpm --filter @r3mes/backend-api run eval:adaptive-rag
+```
+
+Broader repo checks:
+
+```powershell
+pnpm run smoke:ts
+pnpm run release:check
+```
+
+Useful demo seeds:
+
+```powershell
+pnpm --filter @r3mes/backend-api seed:multi-domain-demo
+pnpm --filter @r3mes/backend-api seed:legal-basic-demo
+pnpm --filter @r3mes/backend-api seed:legal-divorce-demo
+pnpm --filter @r3mes/backend-api seed:education-basic-demo
+```
+
+## Public Repository Hygiene
+
+This repository is prepared for public GitHub use. The following are excluded by design:
+
+- `.env` and local secret files,
+- raw training datasets such as `.parquet` and local `.jsonl`,
+- model weights such as `.gguf`, `.safetensors`, `.pt`, `.bin`, `.onnx`,
+- checkpoints, training outputs, and LoRA run artifacts,
+- logs, process IDs, local caches, virtual environments, and `node_modules`,
+- generated runtime folders such as local llama binaries and Docker model caches.
+
+Template environment files such as `.env.example` are tracked so new developers can configure the stack without exposing secrets.
+
+## Legacy / R&D Boundary
+
+BitNet/QVAC materials and older knowledge-heavy LoRA experiments remain only as legacy or R&D references. They do not define the active MVP path.
+
+Legacy index:
+
+- [infrastructure/LEGACY_RND.md](./infrastructure/LEGACY_RND.md)
+
+Active path:
+
+- Qwen2.5-3B base model
+- RAG as the knowledge layer
+- optional behavior LoRA
+- hybrid retrieval and source-backed answers
+
+## Status
+
+R3MES v1 is an active MVP codebase, not a polished hosted product. The current focus is reliability of the RAG pipeline, adaptive routing for newly uploaded knowledge, source-grounded answers, and clean local development workflows.
+
+## License
+
+License information will be finalized with the public release policy. Until then, treat this repository as project-owned source code, not as an unrestricted model or dataset distribution.
