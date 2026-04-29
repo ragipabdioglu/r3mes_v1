@@ -51,28 +51,28 @@ R3MES separates those jobs into a pipeline that is easier to improve, test, and 
 
 ## Core Features 🔥
 
-- 📚 **Knowledge-first workflow**  
+- 📚 **Knowledge-first workflow**
   Upload documents into collections and use them as the factual memory layer.
 
-- 🔐 **Private / public visibility**  
+- 🔐 **Private / public visibility**
   Knowledge starts private. Publishing is explicit.
 
-- 🔎 **Hybrid retrieval**  
+- 🔎 **Hybrid retrieval**
   Combines vector search with lexical/database-backed candidates.
 
-- 🧠 **Qwen2.5-3B base model**  
+- 🧠 **Qwen2.5-3B base model**
   The MVP stays on a small local model and improves quality through pipeline design.
 
-- 🎭 **Optional behavior LoRA**  
+- 🎭 **Optional behavior LoRA**
   LoRA is used for tone, role, or response style, not for factual knowledge.
 
-- 🧾 **Source-backed answers**  
+- 🧾 **Source-backed answers**
   Chat responses can include citations, chunks, and source metadata.
 
-- 🛡️ **Safety and quality gates**  
+- 🛡️ **Safety and quality gates**
   The backend applies routing, pruning, grounding, and post-generation checks.
 
-- 🧪 **Evaluation-ready structure**  
+- 🧪 **Evaluation-ready structure**
   The repo includes local eval flows for grounded RAG and adaptive routing.
 
 ## Product Philosophy 🧭
