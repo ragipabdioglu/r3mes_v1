@@ -1,0 +1,27 @@
+{
+  "name": "@r3mes/shared-types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "contract:drift": "pnpm run build && pnpm run test",
+    "test:skip-legacy": "node ../../infrastructure/scripts/test-skip.mjs @r3mes/shared-types"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

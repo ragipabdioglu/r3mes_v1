@@ -1,0 +1,1 @@
+RegistryAdminCap objesi şu an tek bir kişidedir (Single Point of Failure). Mainnet öncesi bu yetki multisig (çoklu imza) bir adrese devredilecektir. Bu durum bilinçli olarak kabul edilmiş bir risktir.

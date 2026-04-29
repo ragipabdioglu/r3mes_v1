@@ -1,0 +1,10 @@
+{
+  "name": "@r3mes/sui-contracts",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "lint": "node -e \"console.log('[sui-contracts] run: sui move build (Move analyzer)')\"",
+    "build": "sui move build",
+    "test": "sui move test"
+  }
+}

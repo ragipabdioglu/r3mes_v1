@@ -1,0 +1,33 @@
+{
+  "name": "@r3mes/sui-indexer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "r3mes-sui-indexer": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "build": "prisma generate --schema ../../apps/backend-api/prisma/schema.prisma && tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "test": "pnpm run build && vitest run"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.45.2",
+    "@prisma/client": "^6.19.0",
+    "@r3mes/backend-api": "workspace:*"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.0"
+  }
+}

@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AdapterKind {
+  LORA
+  DORA
+}
+
+enum AdapterStatus {
+  PENDING_REVIEW
+  ACTIVE
+  REJECTED
+  SLASHED
+  DEPRECATED
+}
+
+enum AdapterArtifactFormat {
+  GGUF
+  PEFT
+}
+
+enum AdapterRuntime {
+  LLAMA_CPP
+  TRANSFORMERS
+}
+
+enum AiQueryStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum KnowledgeVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+enum KnowledgeSourceType {
+  TEXT
+  MARKDOWN
+  JSON
+}
+
+enum KnowledgeParseStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+model User {
+  id             String   @id @default(cuid())
+  walletAddress  String   @unique
+  displayName    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  adapters             Adapter[]             @relation("OwnerAdapters")
+  aiQueries            AiQuery[]
+  knowledgeCollections KnowledgeCollection[]
+}
+
+/// LoRA / DoRA adaptörü — zincir + off-chain metadata
+model Adapter {
+  id      String @id @default(cuid())
+  ownerId String
+  owner   User   @relation("OwnerAdapters", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  kind        AdapterKind @default(LORA)
+  format      AdapterArtifactFormat @default(GGUF)
+  runtime     AdapterRuntime        @default(LLAMA_CPP)
+  baseModel   String?
+  storagePath String?
+
+  weightsCid  String?
+  manifestCid String?
+
+  /// Sui `adapter_registry::Adapter` nesne ID
+  onChainObjectId String? @unique
+
+  /// Sui u64 — zincir üzerindeki sıra numarası
+  onChainAdapterId BigInt? @unique
+
+  status         AdapterStatus @default(PENDING_REVIEW)
+  benchmarkScore Decimal?      @db.Decimal(10, 6)
+  domainTags     String[]      @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  aiQueries AiQuery[]
+
+  @@index([status, benchmarkScore])
+  @@index([ownerId])
+}
+
+model KnowledgeCollection {
+  id          String              @id @default(cuid())
+  ownerId     String
+  owner       User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  visibility  KnowledgeVisibility @default(PRIVATE)
+  autoMetadata Json?
+  publishedAt DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  documents KnowledgeDocument[]
+
+  @@index([ownerId, createdAt(sort: Desc)])
+  @@index([visibility, publishedAt])
+}
+
+model KnowledgeDocument {
+  id           String               @id @default(cuid())
+  collectionId String
+  collection   KnowledgeCollection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  title        String
+  sourceType   KnowledgeSourceType
+  storageCid   String?
+  storagePath  String?
+  autoMetadata Json?
+  parseStatus  KnowledgeParseStatus @default(PENDING)
+  errorMessage String?              @db.Text
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  chunks KnowledgeChunk[]
+
+  @@index([collectionId, createdAt(sort: Desc)])
+  @@index([parseStatus, createdAt])
+}
+
+model KnowledgeChunk {
+  id         String            @id @default(cuid())
+  documentId String
+  document   KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex Int
+  content    String            @db.Text
+  tokenCount Int
+  autoMetadata Json?
+  createdAt  DateTime          @default(now())
+
+  embedding KnowledgeEmbedding?
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
+}
+
+model KnowledgeEmbedding {
+  id       String         @id @default(cuid())
+  chunkId  String         @unique
+  chunk    KnowledgeChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+  values   Float[]
+  vector   Unsupported("vector(256)")?
+  createdAt DateTime      @default(now())
+
+  @@index([chunkId])
+}
+
+model AiQuery {
+  id             String  @id @default(cuid())
+  idempotencyKey String? @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  adapterId String?
+  adapter   Adapter? @relation(fields: [adapterId], references: [id], onDelete: Restrict)
+
+  status AiQueryStatus @default(QUEUED)
+
+  queueJobId String?
+
+  promptHash    String?
+  promptPreview String?
+
+  knowledgeCollectionIds String[] @default([])
+  sourceSummary          Json?
+
+  billedAmountNano BigInt? @default(0)
+
+  resultSummary String? @db.Text
+  errorCode     String?
+  errorMessage  String? @db.Text
+
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([adapterId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+}
+
+/// Sui `queryEvents` imleri — `adapter_registry` ve `staking_pool` ayrı akış
+model IndexerCheckpoint {
+  id                  String   @id @default("singleton")
+  cursorAdapterModule String?
+  cursorStakingModule String?
+  updatedAt           DateTime @updatedAt
+}
+
+/// Wallet imza mesajındaki `jti` tek kullanımlık kayıt (replay önleme)
+model WalletAuthJti {
+  jti       String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+/// QA webhook idempotency — aynı `jobId` ile tekrar teslimatta çift on-chain/DB güncellemesi önlenir
+model QaWebhookReceipt {
+  jobId      String   @id
+  bodySha256 String
+  /// İşlem başarıyla bittiğinde set edilir; null iken aynı jobId tekrar gelirse in-flight kabul edilir
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+}
+
+/// Eğitici stake read model — `StakingPool` olaylarından türetilir
+model StakePosition {
+  id String @id @default(cuid())
+
+  trainerAddress   String
+  onChainAdapterId BigInt @unique
+
+  amountNano BigInt
+
+  poolObjectId String?
+
+  updatedAt DateTime @updatedAt
+
+  @@index([trainerAddress])
+}

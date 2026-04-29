@@ -1,0 +1,13 @@
+# Pin arşivi — b7349 + BitNet GGUF (SHA-256, küçük harf)
+# Üretim: 2026-04-14 — aynı dosyalar için yeniden üretilebilir.
+#
+# llama-b7349-bin-ubuntu-x64.zip — GitHub release (tetherto/qvac-fabric-llm.cpp)
+73dc3d43c71ad9f6d71b49a2349cf345cf48632cfc42b14ab15e81b75e645951 *llama-b7349-bin-ubuntu-x64.zip
+#
+# Docker imajı r3mes/bitnet-qvac:b7349 içi (sha256sum konteyner içinde):
+777d2f473b319e46edb431b36619eb7da446fab1607ce15c312242e9e92b3bfa *llama-server
+36c77b0a6a173bee20637dcdea7bc011c7e5ec4587a01f678a96af4b8eee28c9 *libllama.so.0.0.7349
+#
+# HF qvac/fabric-llm-bitnet-finetune (yerel models/bitnet):
+36b16cd2dde3bc34d7a17e14cf4530c508de89aa1836e5223e4c087d8f2d226d *1bitLLM-bitnet_b1_58-xl-tq2_0.gguf
+bbe998c0587adf843db34439db30eab637937da6231714659b624bfaf31e13a8 *slot0.gguf

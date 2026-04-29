@@ -1,0 +1,7 @@
+TAMAMLANDI: infrastructure/scripts/start-all.sh eklendi: .env.example → .env kopyaları (apps/backend-api, apps/dApp, packages/sui-indexer), docker-compose.postgres.yml + docker-compose.storage.yml ile up -d (Docker/daemon yoksa uyarı, compose hatalarında betik çökmez), pnpm db:migrate, arka planda apps/ai-engine için pnpm dev (uvicorn :8000, log .r3mes-ai-engine.log, pid .r3mes-ai-engine.pid), çıkışta ai-engine temizliği; ön planda turbo run dev --filter=@r3mes/backend-api --filter=@r3mes/dapp. Kök start-all.sh bu betiği exec ile çağırıyor. Kök Makefile: start-all, docker-up, db:migrate, dev-stack. infrastructure/docker/docker-compose.postgres.yml (Postgres 16, r3mes, :5432). Depolama geçidi 9080:8080 olacak şekilde güncellendi (llama 8080 ile çakışmaması). package.json içine "db:migrate" eklendi. README.md (kök): gereksinimler, başlatıcı özeti, 8 adımlı Happy Path (cüzdan → imza → LoRA → QA log → marketplace → chat → llama stream :8080 → gas/fee). apps/backend-api/.env.example içine IPFS gateway 9080 yorum satırı. .gitignore: .r3mes-ai-engine.pid. infrastructure/docker/README.md postgres + 9080 metinleri güncellendi. Canlı Docker/pnpm çalıştırılmadı (talimat gereği).
+
+BAĞIMLILIK: Tüm ajanlar: tek komutla yerel yığın; QA/FE/BE: Happy Path doğrulaması; prod sunucu: aynı betikleri orada koşturabilir.
+
+ENGEL: YOK
+
+SONRAKİ ADIM ÖNERİSİ: Üretimde start-all.sh yerine systemd veya process manager; ai-engine için venv/uv sabitleme; isteğe bağlı kök .env.example ile tek dosyadan türetme; CI’de yalnızca docker compose + db:migrate smoke job’ı.

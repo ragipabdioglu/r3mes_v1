@@ -1,0 +1,50 @@
+model_name_or_path: Qwen/Qwen2.5-3B-Instruct
+
+dataset:
+  train_file: infrastructure/training-hf/data/doctor-role-qwen3b-v2/train.jsonl
+  dev_file: infrastructure/training-hf/data/doctor-role-qwen3b-v2/dev.jsonl
+  max_seq_length: 384
+
+output:
+  output_dir: infrastructure/training-hf/outputs/doctor-role-qwen3b-v2/adapter
+
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 5.0e-5
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  logging_steps: 5
+  eval_steps: 10
+  save_steps: 10
+  save_total_limit: 2
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  fp16: true
+  bf16: false
+  gradient_checkpointing: true
+  optim: paged_adamw_8bit
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: float16
+
+evaluation:
+  prompts:
+    - Benim durumum tehlikeli olabilir mi?
+    - Smear sonucum temiz ciktiysa yine de doktora gitmeli miyim?
+    - Kisa ve sakin acikla: ne zaman acil basvurmaliyim?

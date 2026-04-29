@@ -1,0 +1,512 @@
+import { prisma } from "./prisma.js";
+import { parseKnowledgeCard } from "./knowledgeCard.js";
+import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
+
+interface KnowledgeMetadataProfile {
+  domain: string;
+  domains: string[];
+  subtopics: string[];
+  keywords: string[];
+  entities: string[];
+  summary: string;
+  questionsAnswered: string[];
+  confidence?: "low" | "medium" | "high";
+  sourceQuality?: "structured" | "inferred" | "thin";
+}
+
+export interface KnowledgeCollectionAccessItem {
+  id: string;
+  name: string;
+  visibility: "PRIVATE" | "PUBLIC";
+  autoMetadata?: unknown;
+  documents?: Array<{
+    title: string;
+    autoMetadata?: unknown;
+    chunks: Array<{ content: string }>;
+  }>;
+}
+
+export interface KnowledgeMetadataRouteCandidate {
+  id: string;
+  name: string;
+  score: number;
+  domain: string | null;
+  subtopics: string[];
+  matchedTerms: string[];
+  reason: string;
+}
+
+export interface KnowledgeRouteDecision {
+  mode: "strict" | "broad" | "suggest" | "no_source";
+  primaryDomain: DomainRoutePlan["domain"] | null;
+  confidence: "low" | "medium" | "high";
+  selectedCollectionIds: string[];
+  usedCollectionIds: string[];
+  suggestedCollectionIds: string[];
+  rejectedCollectionIds: string[];
+  reasons: string[];
+}
+
+function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const stringArray = (input: unknown): string[] =>
+    Array.isArray(input) ? input.filter((item): item is string => typeof item === "string") : [];
+  const profile = record.profile && typeof record.profile === "object" ? record.profile as Record<string, unknown> : null;
+  if (profile) {
+    const domains = stringArray(profile.domains);
+    if (domains.length > 0) {
+      return {
+        domain: domains[0],
+        domains,
+        subtopics: stringArray(profile.subtopics),
+        keywords: stringArray(profile.keywords),
+        entities: stringArray(profile.entities),
+        summary: typeof profile.summary === "string" ? profile.summary : "",
+        questionsAnswered: stringArray(profile.sampleQuestions),
+        confidence: profile.confidence === "high" || profile.confidence === "medium" || profile.confidence === "low" ? profile.confidence : undefined,
+        sourceQuality: profile.sourceQuality === "structured" || profile.sourceQuality === "inferred" || profile.sourceQuality === "thin" ? profile.sourceQuality : undefined,
+      };
+    }
+  }
+  if (typeof record.domain !== "string") return null;
+  return {
+    domain: record.domain,
+    domains: [record.domain],
+    subtopics: stringArray(record.subtopics),
+    keywords: stringArray(record.keywords),
+    entities: stringArray(record.entities),
+    summary: typeof record.summary === "string" ? record.summary : "",
+    questionsAnswered: stringArray(record.questionsAnswered),
+  };
+}
+
+function metadataText(value: unknown): string {
+  const profile = readMetadataProfile(value);
+  if (!profile) return "";
+  const parts = [
+    ...profile.domains,
+    ...profile.subtopics,
+    ...profile.keywords,
+    ...profile.entities,
+    profile.summary,
+    ...profile.questionsAnswered,
+  ];
+  return parts.join(" ");
+}
+
+function collectionMetadataText(collection: KnowledgeCollectionAccessItem): string {
+  const docs = collection.documents ?? [];
+  const parts = [collection.name, metadataText(collection.autoMetadata)];
+  for (const doc of docs.slice(0, 5)) {
+    const content = doc.chunks[0]?.content ?? "";
+    const card = content ? parseKnowledgeCard(content) : null;
+    parts.push(doc.title, metadataText(doc.autoMetadata), card?.topic ?? "", ...(card?.tags ?? []));
+  }
+  return parts.join(" ");
+}
+
+function collectionMetadataProfiles(collection: KnowledgeCollectionAccessItem): KnowledgeMetadataProfile[] {
+  return [
+    readMetadataProfile(collection.autoMetadata),
+    ...(collection.documents ?? []).map((document) => readMetadataProfile(document.autoMetadata)),
+  ].filter((item): item is KnowledgeMetadataProfile => Boolean(item));
+}
+
+function normalize(text: string): string {
+  return text.toLocaleLowerCase("tr-TR");
+}
+
+function containsTerm(text: string, term: string): boolean {
+  const normalizedTerm = normalize(term);
+  if (!normalizedTerm) return false;
+  return normalize(text).includes(normalizedTerm);
+}
+
+function metadataProfileMatchesDomain(profile: KnowledgeMetadataProfile, domain: string): boolean {
+  const normalizedDomain = normalize(domain);
+  return profile.domains.map(normalize).includes(normalizedDomain) || normalize(metadataText(profile)).includes(normalizedDomain);
+}
+
+function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan): number {
+  let score = 0;
+  const text = normalize(metadataText(profile));
+  if (profile.domains.map(normalize).includes(normalize(routePlan.domain))) {
+    score += profile.confidence === "high" ? 70 : profile.confidence === "medium" ? 60 : 50;
+  }
+  if (profile.sourceQuality === "structured") score += 8;
+
+  for (const subtopic of routePlan.subtopics) {
+    const normalizedSubtopic = normalize(subtopic);
+    if (profile.subtopics.map(normalize).includes(normalizedSubtopic)) score += profile.confidence === "high" ? 42 : 34;
+    if (text.includes(normalizedSubtopic.replace(/_/g, " "))) score += 12;
+  }
+
+  for (const hint of routePlan.retrievalHints) {
+    if (containsTerm(text, hint)) score += 10;
+  }
+
+  for (const term of routePlan.mustIncludeTerms) {
+    if (containsTerm(text, term)) score += 6;
+  }
+
+  return score;
+}
+
+function metadataCandidateForRoute(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan | null,
+): KnowledgeMetadataRouteCandidate | null {
+  if (!routePlan || routePlan.domain === "general") return null;
+  const profiles = collectionMetadataProfiles(collection);
+  if (profiles.length === 0) return null;
+  const scored = profiles
+    .map((profile) => {
+      const text = normalize(metadataText(profile));
+      const matchedTerms = [
+        ...routePlan.subtopics.filter((subtopic) => profile.subtopics.map(normalize).includes(normalize(subtopic))),
+        ...routePlan.mustIncludeTerms.filter((term) => containsTerm(text, term)),
+        ...routePlan.retrievalHints.filter((hint) => containsTerm(text, hint)),
+      ];
+      return {
+        profile,
+        score: scoreMetadataProfile(profile, routePlan),
+        matchedTerms: [...new Set(matchedTerms)].slice(0, 8),
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score <= 0) return null;
+  return {
+    id: collection.id,
+    name: collection.name,
+    score: best.score,
+    domain: best.profile.domain,
+    subtopics: best.profile.subtopics.slice(0, 6),
+    matchedTerms: best.matchedTerms,
+    reason:
+      best.matchedTerms.length > 0
+        ? `Metadata eşleşmesi: ${best.matchedTerms.slice(0, 4).join(", ")}`
+        : `Metadata domain '${best.profile.domain}' ile eşleşti.`,
+  };
+}
+
+function collectionHasMetadataDomainSupport(
+  collection: KnowledgeCollectionAccessItem,
+  domain: string,
+): boolean {
+  return collectionMetadataProfiles(collection).some((profile) => metadataProfileMatchesDomain(profile, domain));
+}
+
+function collectionHasMetadataSubtopicSupport(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan,
+): boolean {
+  if (routePlan.subtopics.length === 0) return collectionHasMetadataDomainSupport(collection, routePlan.domain);
+  const routeSubtopics = routePlan.subtopics.map(normalize);
+  return collectionMetadataProfiles(collection).some((profile) => {
+    if (!metadataProfileMatchesDomain(profile, routePlan.domain)) return false;
+    const profileSubtopics = profile.subtopics.map(normalize);
+    if (routeSubtopics.some((subtopic) => profileSubtopics.includes(subtopic))) return true;
+    const text = normalize(metadataText(profile));
+    return routePlan.retrievalHints.some((hint) => containsTerm(text, hint)) ||
+      routePlan.mustIncludeTerms.filter((term) => containsTerm(text, term)).length >= 2;
+  });
+}
+
+export function collectionMatchesRoute(
+  collection: KnowledgeCollectionAccessItem,
+  domain: string | null | undefined,
+): boolean {
+  if (!domain || domain === "general") return true;
+  const text = collectionMetadataText(collection);
+  const route = routeQuery(text);
+  const haystack = `${text} ${route.domain} ${route.subtopics.join(" ")}`.toLocaleLowerCase("tr-TR");
+  return collectionHasMetadataDomainSupport(collection, domain) || haystack.includes(domain.toLocaleLowerCase("tr-TR"));
+}
+
+export function scoreCollectionForRoute(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan | null,
+): number {
+  const text = collectionMetadataText(collection);
+  const inferred = routeQuery(text);
+  let score = collection.visibility === "PRIVATE" ? 8 : 4;
+
+  if (!routePlan || routePlan.domain === "general") {
+    return score + (collection.documents?.length ?? 0);
+  }
+
+  const metadataScore = Math.max(
+    0,
+    ...collectionMetadataProfiles(collection).map((profile) => scoreMetadataProfile(profile, routePlan)),
+  );
+  score += metadataScore;
+
+  if (metadataScore === 0 && inferred.domain === routePlan.domain) score += 40;
+  if (collectionMatchesRoute(collection, routePlan.domain)) score += 20;
+
+  for (const subtopic of routePlan.subtopics) {
+    if (inferred.subtopics.includes(subtopic)) score += 14;
+    if (containsTerm(text, subtopic.replace(/_/g, " "))) score += 8;
+  }
+
+  for (const hint of routePlan.retrievalHints) {
+    if (containsTerm(text, hint)) score += 4;
+  }
+
+  for (const term of routePlan.mustIncludeTerms) {
+    if (containsTerm(text, term)) score += 3;
+  }
+
+  return score;
+}
+
+export function collectionHasSpecificRouteSupport(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan | null,
+): boolean {
+  if (!routePlan || routePlan.domain === "general") return true;
+
+  const text = collectionMetadataText(collection);
+  const inferred = routeQuery(text);
+  const hasDomainSupport =
+    collectionHasMetadataDomainSupport(collection, routePlan.domain) ||
+    inferred.domain === routePlan.domain ||
+    collectionMatchesRoute(collection, routePlan.domain);
+
+  if (!hasDomainSupport) return false;
+  if (routePlan.subtopics.length === 0) return true;
+  if (collectionHasMetadataSubtopicSupport(collection, routePlan)) return true;
+
+  const hasExactSubtopic = routePlan.subtopics.some(
+    (subtopic) =>
+      inferred.subtopics.includes(subtopic) ||
+      containsTerm(text, subtopic.replace(/_/g, " ")),
+  );
+  if (hasExactSubtopic) return true;
+
+  const hasHintSupport = routePlan.retrievalHints.some((hint) => containsTerm(text, hint));
+  const includeMatches = routePlan.mustIncludeTerms.filter((term) => containsTerm(text, term)).length;
+  return hasHintSupport || includeMatches >= 2;
+}
+
+export function explainCollectionRouteSuggestion(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan | null,
+): string {
+  if (!routePlan || routePlan.domain === "general") {
+    return collection.visibility === "PRIVATE"
+      ? "Private kaynak olduğu için önce denenebilir."
+      : "Erişilebilir public alternatif knowledge kaynağı.";
+  }
+
+  const text = collectionMetadataText(collection);
+  const inferred = routeQuery(text);
+  const matchedSubtopic = routePlan.subtopics.find(
+    (subtopic) =>
+      inferred.subtopics.includes(subtopic) ||
+      containsTerm(text, subtopic.replace(/_/g, " ")),
+  );
+
+  if (matchedSubtopic) {
+    return `Route domain '${routePlan.domain}' ve alt konu '${matchedSubtopic}' ile uyumlu.`;
+  }
+  return `Route domain '${routePlan.domain}' ile daha uyumlu görünüyor.`;
+}
+
+export function rankSuggestedKnowledgeCollections(opts: {
+  collections: KnowledgeCollectionAccessItem[];
+  routePlan: DomainRoutePlan | null;
+  excludedIds?: Set<string>;
+  limit?: number;
+}): KnowledgeCollectionAccessItem[] {
+  const excludedIds = opts.excludedIds ?? new Set<string>();
+  const routePlan = opts.routePlan;
+  return opts.collections
+    .filter((collection) => !excludedIds.has(collection.id))
+    .map((collection) => ({
+      collection,
+      score: scoreCollectionForRoute(collection, routePlan),
+    }))
+    .filter(({ score, collection }) => {
+      if (!routePlan || routePlan.domain === "general") return true;
+      if (routePlan.subtopics.length > 0 && collectionMetadataProfiles(collection).length > 0) {
+        return collectionHasMetadataSubtopicSupport(collection, routePlan) || score >= 100;
+      }
+      return score >= 24 || collectionMatchesRoute(collection, routePlan.domain);
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.collection.visibility !== b.collection.visibility) {
+        return a.collection.visibility === "PRIVATE" ? -1 : 1;
+      }
+      return a.collection.name.localeCompare(b.collection.name, "tr-TR");
+    })
+    .slice(0, opts.limit ?? 3)
+    .map(({ collection }) => collection);
+}
+
+export function rankMetadataRouteCandidates(opts: {
+  collections: KnowledgeCollectionAccessItem[];
+  routePlan: DomainRoutePlan | null;
+  excludedIds?: Set<string>;
+  limit?: number;
+}): KnowledgeMetadataRouteCandidate[] {
+  const excludedIds = opts.excludedIds ?? new Set<string>();
+  return opts.collections
+    .filter((collection) => !excludedIds.has(collection.id))
+    .map((collection) => metadataCandidateForRoute(collection, opts.routePlan))
+    .filter((candidate): candidate is KnowledgeMetadataRouteCandidate => Boolean(candidate))
+    .filter((candidate) => candidate.score >= 20)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
+    .slice(0, opts.limit ?? 5);
+}
+
+export function buildKnowledgeRouteDecision(opts: {
+  routePlan: DomainRoutePlan | null;
+  requestedCollectionIds: string[];
+  accessibleCollectionIds: string[];
+  usedCollectionIds: string[];
+  unusedSelectedCollectionIds: string[];
+  suggestedCollections: Array<{ id: string; name: string; reason: string }>;
+  metadataRouteCandidates: KnowledgeMetadataRouteCandidate[];
+  hasSources: boolean;
+}): KnowledgeRouteDecision {
+  const primaryDomain = opts.routePlan?.domain ?? null;
+  const suggestedCollectionIds = [
+    ...new Set([
+      ...opts.suggestedCollections.map((collection) => collection.id),
+      ...opts.metadataRouteCandidates.map((collection) => collection.id),
+    ]),
+  ];
+  const rejectedCollectionIds =
+    opts.requestedCollectionIds.length > 0
+      ? opts.unusedSelectedCollectionIds
+      : [];
+  const reasons: string[] = [];
+
+  if (!opts.routePlan || opts.routePlan.domain === "general" || opts.routePlan.confidence === "low") {
+    reasons.push("Route confidence düşük veya genel; geniş/temkinli retrieval uygun.");
+    return {
+      mode: opts.hasSources ? "broad" : suggestedCollectionIds.length > 0 ? "suggest" : "no_source",
+      primaryDomain,
+      confidence: "low",
+      selectedCollectionIds: opts.accessibleCollectionIds,
+      usedCollectionIds: opts.usedCollectionIds,
+      suggestedCollectionIds,
+      rejectedCollectionIds,
+      reasons,
+    };
+  }
+
+  if (opts.hasSources && opts.unusedSelectedCollectionIds.length === 0) {
+    reasons.push("Seçilen kaynaklar route ile uyumlu kanıt döndürdü.");
+    return {
+      mode: "strict",
+      primaryDomain,
+      confidence: opts.routePlan.confidence,
+      selectedCollectionIds: opts.accessibleCollectionIds,
+      usedCollectionIds: opts.usedCollectionIds,
+      suggestedCollectionIds,
+      rejectedCollectionIds,
+      reasons,
+    };
+  }
+
+  if (opts.hasSources) {
+    reasons.push("Bazı seçili kaynaklar kullanılmadı; kullanılan kaynaklarla cevap verildi.");
+    return {
+      mode: "broad",
+      primaryDomain,
+      confidence: "medium",
+      selectedCollectionIds: opts.accessibleCollectionIds,
+      usedCollectionIds: opts.usedCollectionIds,
+      suggestedCollectionIds,
+      rejectedCollectionIds,
+      reasons,
+    };
+  }
+
+  if (suggestedCollectionIds.length > 0) {
+    reasons.push("Seçili/erişilebilir kaynaklardan kanıt bulunamadı; daha uyumlu kaynak önerildi.");
+    return {
+      mode: "suggest",
+      primaryDomain,
+      confidence: "medium",
+      selectedCollectionIds: opts.accessibleCollectionIds,
+      usedCollectionIds: opts.usedCollectionIds,
+      suggestedCollectionIds,
+      rejectedCollectionIds,
+      reasons,
+    };
+  }
+
+  reasons.push("Bu soru için erişilebilir ve route ile uyumlu kaynak bulunamadı.");
+  return {
+    mode: "no_source",
+    primaryDomain,
+    confidence: "low",
+    selectedCollectionIds: opts.accessibleCollectionIds,
+    usedCollectionIds: opts.usedCollectionIds,
+    suggestedCollectionIds,
+    rejectedCollectionIds,
+    reasons,
+  };
+}
+
+const collectionMetadataInclude = {
+  owner: { select: { walletAddress: true } },
+  documents: {
+    select: {
+      title: true,
+      autoMetadata: true,
+      chunks: {
+        select: { content: true },
+        orderBy: { chunkIndex: "asc" as const },
+        take: 1,
+      },
+    },
+    orderBy: { createdAt: "desc" as const },
+    take: 5,
+  },
+};
+
+export async function resolveAccessibleKnowledgeCollections(opts: {
+  walletAddress: string;
+  requestedCollectionIds?: string[];
+  includePublic?: boolean;
+}) {
+  const { walletAddress, requestedCollectionIds = [], includePublic = false } = opts;
+
+  const accessible = await prisma.knowledgeCollection.findMany({
+    where: {
+      OR: [
+        { owner: { walletAddress } },
+        ...(includePublic ? [{ visibility: "PUBLIC" as const }] : []),
+      ],
+      ...(requestedCollectionIds.length > 0 ? { id: { in: requestedCollectionIds } } : {}),
+    },
+    include: collectionMetadataInclude,
+  });
+
+  return accessible;
+}
+
+export async function resolveSuggestibleKnowledgeCollections(opts: {
+  walletAddress: string;
+  includePublic?: boolean;
+  limit?: number;
+}) {
+  return prisma.knowledgeCollection.findMany({
+    where: {
+      OR: [
+        { owner: { walletAddress: opts.walletAddress } },
+        ...(opts.includePublic !== false ? [{ visibility: "PUBLIC" as const }] : []),
+      ],
+    },
+    include: collectionMetadataInclude,
+    orderBy: { updatedAt: "desc" },
+    take: opts.limit ?? 50,
+  });
+}

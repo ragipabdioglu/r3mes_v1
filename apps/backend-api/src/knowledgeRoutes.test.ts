@@ -1,0 +1,130 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseKnowledgeDetailResponse, parseKnowledgeListResponse } from "@r3mes/shared-types";
+
+vi.mock("./lib/prisma.js", () => ({
+  prisma: {
+    adapter: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+    },
+    knowledgeCollection: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+    knowledgeDocument: {
+      create: vi.fn(),
+    },
+    knowledgeChunk: {
+      create: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    knowledgeEmbedding: {
+      create: vi.fn(),
+    },
+    stakePosition: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    user: {
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+    },
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn((await import("./lib/prisma.js")).prisma)),
+    $executeRawUnsafe: vi.fn(),
+  },
+}));
+
+describe("knowledge routes access control", () => {
+  beforeEach(() => {
+    vi.stubEnv("R3MES_DISABLE_RATE_LIMIT", "1");
+    vi.stubEnv("R3MES_SKIP_CHAT_FEE", "1");
+    vi.stubEnv("R3MES_SKIP_WALLET_AUTH", "1");
+    vi.stubEnv(
+      "R3MES_DEV_WALLET",
+      "0xd5a6f9e7dd18997ed39e1e584b1ec60d636bf295fbe43ccb09cd8a906d2c0204",
+    );
+    vi.stubEnv("R3MES_QA_WEBHOOK_SECRET", "test-secret-for-hmac");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("GET /v1/knowledge scope=all returns own + public collections in canonical shape", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.knowledgeCollection.findMany).mockResolvedValueOnce([
+      {
+        id: "kc_private",
+        name: "private set",
+        visibility: "PRIVATE",
+        publishedAt: null,
+        createdAt: new Date("2026-04-22T10:00:00.000Z"),
+        updatedAt: new Date("2026-04-22T10:00:00.000Z"),
+        owner: {
+          walletAddress:
+            "0xd5a6f9e7dd18997ed39e1e584b1ec60d636bf295fbe43ccb09cd8a906d2c0204",
+        },
+        _count: { documents: 1 },
+      },
+      {
+        id: "kc_public",
+        name: "public set",
+        visibility: "PUBLIC",
+        publishedAt: new Date("2026-04-22T10:00:00.000Z"),
+        createdAt: new Date("2026-04-22T10:00:00.000Z"),
+        updatedAt: new Date("2026-04-22T10:00:00.000Z"),
+        owner: { walletAddress: "0x2222222222222222222222222222222222222222222222222222222222222222" },
+        _count: { documents: 3 },
+      },
+    ] as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: "/v1/knowledge?scope=all" });
+    expect(res.statusCode).toBe(200);
+    const parsed = parseKnowledgeListResponse(JSON.parse(res.body));
+    expect(parsed.data.map((item) => item.id)).toEqual(["kc_private", "kc_public"]);
+    await app.close();
+  });
+
+  it("GET /v1/knowledge/:id blocks private collection access for non-owner and allows public", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.knowledgeCollection.findUnique)
+      .mockResolvedValueOnce({
+        id: "kc_private",
+        name: "private set",
+        visibility: "PRIVATE",
+        publishedAt: null,
+        createdAt: new Date("2026-04-22T10:00:00.000Z"),
+        updatedAt: new Date("2026-04-22T10:00:00.000Z"),
+        owner: { walletAddress: "0x9999999999999999999999999999999999999999999999999999999999999999" },
+        documents: [],
+      } as never)
+      .mockResolvedValueOnce({
+        id: "kc_public",
+        name: "public set",
+        visibility: "PUBLIC",
+        publishedAt: new Date("2026-04-22T10:00:00.000Z"),
+        createdAt: new Date("2026-04-22T10:00:00.000Z"),
+        updatedAt: new Date("2026-04-22T10:00:00.000Z"),
+        owner: { walletAddress: "0x9999999999999999999999999999999999999999999999999999999999999999" },
+        documents: [],
+      } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+
+    const forbidden = await app.inject({ method: "GET", url: "/v1/knowledge/kc_private" });
+    expect(forbidden.statusCode).toBe(403);
+
+    const allowed = await app.inject({ method: "GET", url: "/v1/knowledge/kc_public" });
+    expect(allowed.statusCode).toBe(200);
+    parseKnowledgeDetailResponse(JSON.parse(allowed.body));
+    await app.close();
+  });
+});

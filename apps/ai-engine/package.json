@@ -1,0 +1,10 @@
+{
+  "name": "@r3mes/ai-engine",
+  "private": true,
+  "scripts": {
+    "dev": "python -m uvicorn r3mes_ai_engine.app:app --host 0.0.0.0 --port 8000 --reload --app-dir .",
+    "lint": "node -e \"process.exit(0)\"",
+    "build": "node -e \"process.exit(0)\"",
+    "test": "python -m pytest tests/ -q"
+  }
+}

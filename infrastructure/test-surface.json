@@ -1,0 +1,57 @@
+{
+  "$comment": "Workspace test yüzeyi — golden-path doğrulaması için tek kaynak. Paket test script'i değişince burayı güncelleyin.",
+  "version": 1,
+  "_meta": {
+    "whenToEdit": "Yeni workspace paketi, scripts.test değişikliği veya gerçek/skip stratejisi değişince bu dosyayı ve ilgili package.json'ı birlikte güncelleyin.",
+    "ciHook": "ci.yml içindeki 'Golden path' adımı drift'te kırılır — PR'da hemen görünür.",
+    "releaseGate": {
+      "checklist": "infrastructure/RELEASE_CHECKLIST.md — go/no-go tek cümle, rol tablosu, yerel↔CI.",
+      "default": "pnpm mvp veya pnpm release:check — validate + smoke:ts + mvp-proof + GO banner (Move yok).",
+      "full": "pnpm release:check:full — validate + tam smoke + mvp-proof --full + GO banner; Sui CLI gerekir.",
+      "smokeScope": "Kök package.json → smoke:build / smoke:test turbo --filter listeleri. Yeni özellik yeni paket gerektiriyorsa filtreye ekleyin.",
+      "e2e": "E2E şu an kapı dışı; bilinçli. Eklendiğinde RELEASE_CHECKLIST.md güncellenir."
+    }
+  },
+  "packages": {
+    "@r3mes/backend-api": {
+      "surface": "real",
+      "runner": "vitest",
+      "note": "build + vitest"
+    },
+    "@r3mes/dapp": {
+      "surface": "skip",
+      "runner": "explicit-skip",
+      "note": "test-skip.mjs — UI testleri henüz bağlanmadı"
+    },
+    "@r3mes/ai-engine": {
+      "surface": "real",
+      "runner": "pytest",
+      "note": "python -m pytest"
+    },
+    "@r3mes/shared-types": {
+      "surface": "real",
+      "runner": "vitest",
+      "note": "vitest run"
+    },
+    "@r3mes/qa-sandbox": {
+      "surface": "skip",
+      "runner": "explicit-skip",
+      "note": "test-skip.mjs — paket test yüzeyi yok"
+    },
+    "@r3mes/qa-worker": {
+      "surface": "real",
+      "runner": "pytest",
+      "note": "python -m pytest"
+    },
+    "@r3mes/sui-contracts": {
+      "surface": "real",
+      "runner": "sui-move",
+      "note": "sui move test — Sui CLI gerekir"
+    },
+    "@r3mes/sui-indexer": {
+      "surface": "real",
+      "runner": "vitest",
+      "note": "build + vitest"
+    }
+  }
+}

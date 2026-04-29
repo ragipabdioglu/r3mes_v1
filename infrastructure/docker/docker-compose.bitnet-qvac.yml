@@ -1,0 +1,39 @@
+# BitNet/QVAC — tekrarlanabilir Linux runtime (qvac b7349 + pin’li GGUF yolları)
+# Kökten: docker compose -f infrastructure/docker/docker-compose.bitnet-qvac.yml build
+# Çalıştır: host’ta ./models/bitnet/ altına base + slot GGUF koyun (ASCII yol önerilir).
+# Doğrulama: curl -sS "http://127.0.0.1:${BITNET_LLAMA_PORT:-8080}/v1/models"
+
+name: r3mes-bitnet-qvac
+
+services:
+  bitnet-qvac:
+    build:
+      context: .
+      dockerfile: Dockerfile.bitnet-qvac
+      args:
+        QVAC_RELEASE: b7349
+    image: r3mes/bitnet-qvac:b7349
+    restart: unless-stopped
+    ports:
+      - "${BITNET_LLAMA_PORT:-8080}:8080"
+    environment:
+      LLAMA_HOST: "0.0.0.0"
+      LLAMA_PORT: "8080"
+      LLAMA_BASE: /models/1bitLLM-bitnet_b1_58-xl-tq2_0.gguf
+      LLAMA_SLOT: /models/slot0.gguf
+    # Tam L2/worker slot yazımı için slot dosyasının bulunduğu mount yazılabilir olmalıdır (read_only: false).
+    volumes:
+      - type: bind
+        source: ${BITNET_MODEL_HOST_DIR:-./models/bitnet}
+        target: /models
+        read_only: false
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:8080/v1/models >/dev/null || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s

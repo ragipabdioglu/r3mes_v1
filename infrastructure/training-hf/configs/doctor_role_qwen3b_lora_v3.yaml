@@ -1,0 +1,55 @@
+model_name_or_path: Qwen/Qwen2.5-3B-Instruct
+
+dataset:
+  train_file: infrastructure/training-hf/data/doctor-role-qwen3b-v3/train.jsonl
+  dev_file: infrastructure/training-hf/data/doctor-role-qwen3b-v3/dev.jsonl
+  max_seq_length: 448
+
+output:
+  output_dir: infrastructure/training-hf/outputs/doctor-role-qwen3b-v3/adapter
+
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 3.0e-5
+  warmup_ratio: 0.05
+  lr_scheduler_type: cosine
+  logging_steps: 5
+  eval_steps: 20
+  save_steps: 20
+  save_total_limit: 3
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  fp16: true
+  bf16: false
+  gradient_checkpointing: true
+  optim: paged_adamw_8bit
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: float16
+
+evaluation:
+  prompts:
+    - Smear sonucum temiz cikti ama kasik agrim devam ediyor. Ne yapmaliyim?
+    - Bu sonuc hemen kanser demek mi, yoksa once detayli degerlendirme mi gerekir?
+    - Menopozdan sonra bir kez kanama oldu. Beklemeli miyim?
+    - "Kisa ve sakin acikla: ne zaman acil basvuru gerekir?"
+    - Jinekolojik muayeneden cekiniyorum ama sikayetim suruyor. Ertelemem dogru mu?
+    - Ultrasonda kist goruldu. Bu hemen ameliyat gerekir anlamina gelir mi?
+    - HPV cikti diye cok korkuyorum. Bunu nasil yorumlamaliyim?
+    - Patoloji sonucunu okuyunca cok panik oldum. Ilk adim ne olmali?

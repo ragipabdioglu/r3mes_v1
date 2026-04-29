@@ -1,0 +1,35 @@
+# Faz 3 — Güvenlik dilimi: skip guard, wallet auth, API sözleşmesi.
+# Ana CI (ci.yml) içindeki `turbo run test` bu paketi zaten kapsar; bu iş akışı
+# hızlı yeniden doğrulama ve workflow_dispatch ile manuel tetik içindir (çift koşum yok).
+
+name: Security regression
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backend-api-security:
+    name: backend-api (security regression bundle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Security regression tests
+        run: pnpm run test:security-regression

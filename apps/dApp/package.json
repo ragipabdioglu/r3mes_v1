@@ -1,0 +1,32 @@
+{
+  "name": "@r3mes/dapp",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "next lint",
+    "test": "node ../../infrastructure/scripts/test-skip.mjs @r3mes/dapp"
+  },
+  "dependencies": {
+    "@mysten/dapp-kit": "^1.0.4",
+    "@mysten/sui": "^2.15.0",
+    "@r3mes/shared-types": "workspace:*",
+    "@tanstack/react-query": "^5.96.2",
+    "framer-motion": "^12.38.0",
+    "next": "^14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.27",
+    "eslint-config-next": "14.2.18",
+    "postcss": "^8.5.9",
+    "tailwindcss": "3.4.17",
+    "typescript": "^5.7.2"
+  }
+}

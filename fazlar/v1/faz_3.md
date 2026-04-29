@@ -1,0 +1,7 @@
+TAMAMLANDI: packages/sui-contracts altında geçerli bir Sui Move paketi kuruldu: Move.toml (Sui framework testnet-v1.58.2 rev, @r3mes = 0x0), sources/r3mes_coin.move (R3MES_COIN FT — genesis’te tam arz mint, ardından treasury_into_supply ile mint yetkisinin kaldırılması; enflasyon yok; slash için burn_from_circulation / Supply::decrease_supply), sources/adapter_registry.move (paylaşımlı Adapter: creator, ipfs_cid (String), durum; AdapterUploadedEvent, AdapterApprovedEvent, AdapterRejectedEvent), sources/staking_pool.move (StakingPool, deposit_stake / withdraw_stake_after_approval / slash_stake_on_rejected; StakeDepositedEvent, StakeWithdrawnEvent, StakeSlashedEvent), tests/r3mes_tests.move (5 test; 2× #[expected_failure(..., location = ...)]). package.json build/test script’leri sui move build / sui move test olacak şekilde güncellendi; README.md özetlendi. Yerelde sui move build ve sui move test başarıyla geçti.
+
+BAĞIMLILIK: Backend ajanı bu modüllerden yayılan event adları ve struct alanlarını indexer / DB şemasına bağlar; Frontend cüzdan ve paket adresi (publish sonrası) ile etkileşim kurar; Güvenlik ajanı RegistryAdminCap merkezileşmesi ve oracle/benchmark entegrasyonu için tehdit modelini günceller.
+
+ENGEL: YOK.
+
+SONRAKİ ADIM ÖNERİSİ: Tek bir ProtocolConfig veya zaman kilidi ile RegistryAdminCap yolunu çoklu-imzaya bağlama; ardından gerçek publish öncesi sui move test + Move Prover / harici audit ile slash ve stake tutarlılığını doğrulama.

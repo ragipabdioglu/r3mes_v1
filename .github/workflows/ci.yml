@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+  push:
+    branches: [main, master, develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint-build-test:
+    name: Lint, build, test (Turborepo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Golden path (test surface / manifest drift)
+        run: pnpm validate
+
+      - name: Use Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Python test dependencies
+        run: |
+          pip install -r apps/ai-engine/requirements.txt
+          pip install -e "packages/qa-sandbox/worker[dev]"
+
+      - name: Install Sui CLI (Move build/test)
+        run: bash infrastructure/scripts/install-sui-ci.sh
+
+      - name: Audit dependencies (moderate+)
+        run: pnpm audit --audit-level=moderate
+
+      - name: Lint
+        run: pnpm exec turbo run lint
+
+      - name: Build
+        run: pnpm exec turbo run build
+
+      # Güvenlik dilimi (skipFlags, walletAuth, integration.contract) turbo test ile koşulur.
+      # Odaklı yeniden doğrulama: pnpm run test:security-regression — security/design_replay_idempotency_faz3.md
+      - name: Test
+        run: pnpm exec turbo run test
+
+  dependency-review:
+    name: Dependency review (PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate

@@ -1,0 +1,45 @@
+# R3MES ai-engine — qvac-fabric llama.cpp ikilileri + FastAPI proxy
+# Üretim: Ubuntu tabanlı; llama-server C++ yükü taşır; Python yalnızca proxy ve IPFS indirmedir.
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    unzip \
+    wget \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG QVAC_LLAMA_ZIP_URL=https://github.com/tetherto/qvac-fabric-llm.cpp/releases/latest/download/llama-bin-ubuntu-x64.zip
+
+RUN set -eux; \
+    wget -qO /tmp/llama-bin.zip "${QVAC_LLAMA_ZIP_URL}"; \
+    mkdir -p /tmp/llama-bin; \
+    unzip -o /tmp/llama-bin.zip -d /tmp/llama-bin; \
+    for name in llama-server llama-finetune-lora; do \
+      f="$(find /tmp/llama-bin -type f -name "$name" | head -n 1)"; \
+      if [ -n "$f" ]; then cp "$f" "/usr/local/bin/$name" && chmod +x "/usr/local/bin/$name"; fi; \
+    done; \
+    rm -rf /tmp/llama-bin /tmp/llama-bin.zip
+
+WORKDIR /app
+
+COPY pyproject.toml README.md requirements.txt model_loader.py /app/
+COPY r3mes_ai_engine /app/r3mes_ai_engine
+
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir .
+
+ENV R3MES_LLAMA_SERVER_BIN=llama-server \
+    R3MES_IPFS_GATEWAY=http://ipfs:8080
+
+EXPOSE 8000
+
+CMD ["python3", "-m", "uvicorn", "r3mes_ai_engine.app:app", "--host", "0.0.0.0", "--port", "8000"]

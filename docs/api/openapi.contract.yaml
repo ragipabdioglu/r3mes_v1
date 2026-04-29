@@ -1,0 +1,418 @@
+# R3MES — OpenAPI 3.0 alt kümesi (Faz 6 release yüzeyi)
+# Tam kanon: docs/api/INTEGRATION_CONTRACT.md
+# Runtime şema: packages/shared-types/src/schemas.ts (Zod)
+# Çelişki: önce INTEGRATION_CONTRACT, sonra bu dosya + backend
+openapi: 3.0.3
+info:
+  title: R3MES API (contract subset)
+  version: "0.2.0"
+  description: |
+    Public ve seçili iç uçların dokümantasyonu. Eksik path’ler kanonda tanımlı olabilir;
+    tam matris INTEGRATION_CONTRACT’tadır. §3.6 bilinçli 501 yüzeyleri aşağıdadır.
+
+paths:
+  /v1/adapters:
+    get:
+      summary: Adapter listesi (§3.1)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING_REVIEW, ACTIVE, REJECTED, SLASHED, DEPRECATED, all]
+      responses:
+        "200":
+          description: AdapterListResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdapterListResponse"
+        "500":
+          description: CONTRACT_INVARIANT_VIOLATION (liste şeması ihlali)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+    post:
+      summary: LoRA multipart yükleme (§3.3)
+      description: |
+        multipart/form-data — alanlar: weights (tek dosya), manifest, displayName, wallet.
+        Tek primer GGUF: ilk 4 bayt GGUF; dosya adı .gguf; çoklu weights 400.
+        Birincil weights içeriği: llama.cpp uyumlu LoRA GGUF (§3.3.1); sunucuda safetensors→GGUF dönüşümü yok.
+        Yanıt LoRAUploadAcceptedResponse. Şema doğrulaması runtime’da Zod.
+      responses:
+        "201":
+          description: LoRAUploadAcceptedResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoRAUploadAcceptedResponse"
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "500":
+          description: CONTRACT_INVARIANT_VIOLATION
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+
+  /v1/me/adapters:
+    get:
+      summary: İmzalı cüzdana ait adapter listesi (§3.1b)
+      description: |
+        X-Signature, X-Message, X-Wallet-Address gerekli (walletAuth).
+        Yanıt şekli GET /v1/adapters ile aynı; yalnızca owner filtrelenir.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING_REVIEW, ACTIVE, REJECTED, SLASHED, DEPRECATED, all]
+      responses:
+        "200":
+          description: AdapterListResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdapterListResponse"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "500":
+          description: CONTRACT_INVARIANT_VIOLATION
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+  /health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /ready:
+    get:
+      summary: DB + Redis hazırlığı
+      responses:
+        "200":
+          description: ready
+        "503":
+          description: bağımlılık yok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [unavailable] }
+                  error: { type: string }
+
+  /v1/version:
+    get:
+      summary: Sürüm etiketi
+      responses:
+        "200":
+          description: service + version
+
+  /v1/adapters/{id}:
+    get:
+      summary: Adapter detay (§3.2)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Detay (weightsCid, manifestCid ayrık)
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+
+  /v1/chat/completions:
+    post:
+      summary: Chat proxy (§3.5)
+      description: |
+        OpenAI uyumlu gövde; upstream AI engine `adapter_cid` zorunlu (§3.5.1 — adapter-only, feature-gap değil).
+        Backend `adapter_db_id` / `on_chain_adapter_id` → `adapter_cid` çözümü yapabilir.
+        Başarılı yanıt AI engine’den iletilir (status gövde ile aynı kalır).
+        walletAuth: geçersiz / eksik imza 401; ücret yolu 402/503; adapter çözümü 400.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: AI engine yanıtı (JSON veya stream)
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "402":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        default:
+          description: AI engine hata kodu iletilebilir
+
+  /v1/internal/qa-result:
+    post:
+      summary: QA webhook (§3.4)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QaResultWebhookPayload"
+      responses:
+        "200":
+          description: OK veya idempotent tekrar (duplicate)
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "409":
+          description: IDEMPOTENCY_CONFLICT
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "503":
+          description: QA_WEBHOOK_IN_FLIGHT
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  message: { type: string }
+                  jobId: { type: string }
+
+  /v1/stake:
+    post:
+      summary: Stake (§3.6 — bilinçli 501)
+      description: |
+        Sunucu stake orkestrasyonu yürütmez; yanıt gövdesi NotImplementedOnChainRestResponse.
+        İstek `walletAuthPreHandler` ile korunur (geçerli imza yoksa 401; `R3MES_SKIP_WALLET_AUTH=1` ile dev atlama).
+      responses:
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "501":
+          description: Bilinçli yüzey — ürün standardı
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedOnChainRestResponse"
+
+  /v1/user/{wallet}/rewards/claim:
+    post:
+      summary: Ödül claim (§3.6 — bilinçli 501)
+      parameters:
+        - name: wallet
+          in: path
+          required: true
+          schema: { type: string }
+          description: Sui adresi; imzalı cüzdan ile eşleşmeli (403 aksi)
+      description: |
+        Sunucu claim orkestrasyonu yürütmez. Geçersiz adres 400; yol ≠ imza 403; aksi halde 501 + NotImplementedOnChainRestResponse.
+      responses:
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorBody"
+        "501":
+          description: Bilinçli yüzey — ürün standardı
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedOnChainRestResponse"
+
+components:
+  schemas:
+    ApiErrorBody:
+      type: object
+      required: [error, message]
+      description: Çoğu REST hata yanıtı (lib/apiErrors)
+      properties:
+        error:
+          type: string
+          description: Makine kodu (ör. UNAUTHORIZED, ADAPTER_RESOLUTION_FAILED)
+        message:
+          type: string
+
+    LoRAUploadAcceptedResponse:
+      type: object
+      required:
+        [adapterId, adapterDbId, weightsCid, manifestCid, benchmarkJobId, status]
+      properties:
+        adapterId: { type: string }
+        adapterDbId: { type: string }
+        weightsCid: { type: string }
+        manifestCid: { type: string, nullable: true }
+        benchmarkJobId: { type: string }
+        status: { type: string }
+
+    AdapterListResponse:
+      type: object
+      required: [data, nextCursor]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdapterListItem"
+        nextCursor:
+          type: string
+          nullable: true
+
+    AdapterListItem:
+      type: object
+      required:
+        - id
+        - name
+        - status
+        - kind
+        - onChainAdapterId
+        - onChainObjectId
+        - ipfsCid
+        - benchmarkScore
+        - domainTags
+        - ownerWallet
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: adapterDbId (cuid)
+        name: { type: string }
+        status:
+          type: string
+          enum: [PENDING_REVIEW, ACTIVE, REJECTED, SLASHED, DEPRECATED]
+        kind: { type: string }
+        onChainAdapterId: { type: string, nullable: true }
+        onChainObjectId: { type: string, nullable: true }
+        ipfsCid:
+          type: string
+          nullable: true
+          description: weightsCid ?? manifestCid
+        benchmarkScore:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 100
+        domainTags:
+          type: array
+          items: { type: string }
+        ownerWallet: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    QaResultWebhookPayload:
+      type: object
+      required: [jobId, adapterCid, status, score]
+      properties:
+        jobId: { type: string }
+        adapterCid:
+          type: string
+          description: weightsCid ile aynı artefakt CID
+        status: { type: string }
+        score: { type: number }
+        threshold: { type: number, nullable: true }
+        error: { type: string, nullable: true }
+        metrics:
+          type: object
+          additionalProperties: true
+        requestId: { type: string }
+
+    NotImplementedOnChainRestResponse:
+      type: object
+      required: [success, code, message, surface]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        code:
+          type: string
+          enum: [NOT_IMPLEMENTED]
+        message: { type: string }
+        surface:
+          type: string
+          enum:
+            - "POST /v1/stake"
+            - "POST /v1/user/:wallet/rewards/claim"

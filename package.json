@@ -1,0 +1,41 @@
+{
+  "name": "r3mes-monorepo",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "lint": "turbo run lint",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "dev": "turbo run dev --parallel",
+    "local:start": "pwsh -File infrastructure/scripts/r3mes-local-system.ps1 start",
+    "local:stop": "pwsh -File infrastructure/scripts/r3mes-local-system.ps1 stop",
+    "local:status": "pwsh -File infrastructure/scripts/r3mes-local-system.ps1 status",
+    "db:migrate": "pnpm --filter @r3mes/backend-api exec prisma migrate deploy",
+    "bootstrap": "node infrastructure/scripts/bootstrap-local.mjs",
+    "smoke": "pnpm run smoke:ts && pnpm run smoke:contracts",
+    "smoke:ts": "pnpm run smoke:build && pnpm run smoke:test",
+    "smoke:build": "turbo run build --filter=@r3mes/shared-types --filter=@r3mes/qa-sandbox --filter=@r3mes/sui-indexer --filter=@r3mes/backend-api --filter=@r3mes/dapp --filter=@r3mes/ai-engine",
+    "smoke:test": "turbo run test --filter=@r3mes/backend-api --filter=@r3mes/sui-indexer --filter=@r3mes/qa-sandbox --filter=@r3mes/qa-worker --filter=@r3mes/ai-engine --filter=@r3mes/dapp --filter=@r3mes/shared-types --continue",
+    "smoke:contracts": "pnpm --filter @r3mes/sui-contracts run build && pnpm --filter @r3mes/sui-contracts run test",
+    "audit": "pnpm audit --audit-level=moderate",
+    "validate": "node infrastructure/scripts/golden-path.mjs",
+    "release:check": "pnpm validate && pnpm run smoke:ts && node infrastructure/scripts/mvp-proof.mjs && node infrastructure/scripts/release-gate-banner.mjs",
+    "release:check:full": "pnpm validate && pnpm smoke && node infrastructure/scripts/mvp-proof.mjs --full && node infrastructure/scripts/release-gate-banner.mjs --full",
+    "mvp": "pnpm release:check",
+    "contract:drift": "pnpm --filter @r3mes/shared-types run contract:drift",
+    "test:security-regression": "pnpm --filter @r3mes/backend-api run test:security-regression",
+    "eval:grounded-suite": "node infrastructure/scripts/run-grounded-eval-suite.mjs",
+    "eval:grounded-stress": "node infrastructure/scripts/run-grounded-stress.mjs",
+    "eval:adaptive-rag": "pnpm --filter @r3mes/backend-api run eval:adaptive-rag"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0"
+  }
+}

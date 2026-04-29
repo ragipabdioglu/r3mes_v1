@@ -1,0 +1,58 @@
+# Active Runtime Inventory
+
+This file is the short source of truth for the current MVP path. If another
+document disagrees with this inventory, treat that document as stale until it is
+updated.
+
+## Active Product Path
+
+| Layer | Active choice | Notes |
+| --- | --- | --- |
+| Base model | Qwen2.5-3B GGUF | Do not replace with Qwen 0.5B for MVP quality work. |
+| Inference server | llama-server on 8080 | Hosted locally; ai-engine forwards requests. |
+| AI proxy | apps/ai-engine on 8000 | Thin proxy around llama-compatible APIs. |
+| Backend | apps/backend-api on 3000 | Auth, access control, orchestration, RAG, safety. |
+| Frontend | apps/dApp on 3001 | Studio upload, source selection, chat UI. |
+| Vector memory | Qdrant on 6333 | Used with Prisma lexical candidates in true hybrid retrieval. |
+| Relational memory | Postgres + pgvector on 5432 | Prisma source of truth for collections, docs, chunks, metadata. |
+| Knowledge | RAG | Knowledge is not carried by LoRA. |
+| LoRA | Optional behavior/style/persona | Default local scale can be 0 for clean base/RAG evaluation. |
+
+## Active Chat Pipeline
+
+1. Wallet/dev auth and request validation.
+2. Query planner and metadata/domain routing.
+3. Access-controlled collection scope resolution.
+4. True hybrid retrieval: Qdrant candidates + Prisma lexical candidates.
+5. Strict route scope and rerank/prune to a small context.
+6. Evidence extractor builds usable facts, risks, and unsupported items.
+7. Intent-based answer composer renders the final answer when grounded.
+8. Safety gate blocks risky certainty, low-quality language, and source mismatch.
+9. UI displays sources and metadata/source suggestions.
+
+## Active Quality Gates
+
+```powershell
+pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit
+pnpm --filter @r3mes/backend-api run eval:adaptive-rag
+```
+
+Targeted unit tests for the active path live under:
+
+- `apps/backend-api/src/lib/skillPipeline.test.ts`
+- `apps/backend-api/src/lib/hybridKnowledgeRetrieval.test.ts`
+- `apps/backend-api/src/lib/domainEvidenceComposer.test.ts`
+- `apps/backend-api/src/lib/safetyGate.test.ts`
+- `apps/backend-api/src/lib/knowledgeAccess.test.ts`
+
+## Legacy / R&D Boundary
+
+The following are not active product defaults:
+
+- BitNet/QVAC runtime documents and compose files.
+- Knowledge-heavy/domain LoRA as the source of factual accuracy.
+- Old benchmark-worker quality as a proxy for RAG factual quality.
+- Qwen 0.5B model files for MVP answer quality.
+- Training outputs and local datasets as runtime dependencies.
+
+Legacy and R&D references are indexed in `infrastructure/LEGACY_RND.md`.

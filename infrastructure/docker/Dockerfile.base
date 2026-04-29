@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+# R3MES ortak taban: küçük yüzey alanı, root olmayan çalışma kullanıcısı.
+# Türetilmiş Dockerfile'lar: FROM .../Dockerfile.base veya bu dosyayı COPY ile çoğaltın.
+
+FROM node:20-alpine
+
+RUN apk add --no-cache ca-certificates tini \
+  && rm -rf /var/cache/apk/*
+
+# Sabit UID/GID — K8s securityContext.runAsUser ile hizalanabilir (ör. 65532).
+RUN addgroup -g 65532 -S app \
+  && adduser -u 65532 -S app -G app -h /home/app -s /sbin/nologin
+
+WORKDIR /app
+
+RUN chown -R app:app /app /home/app
+
+USER app:app
+
+ENV NODE_ENV=production \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+# PID 1 olarak tini — sinyal ve zombie süreç yönetimi.
+ENTRYPOINT ["/sbin/tini", "--"]

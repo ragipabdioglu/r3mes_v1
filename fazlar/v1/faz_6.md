@@ -1,0 +1,17 @@
+TAMAMLANDI: packages/qa-sandbox/worker/ altında r3mes-qa-worker Python paketi eklendi: redis ile liste kuyruğu (BLPOP → r3mes-benchmark:jobs, JSON payload) ve Redis Streams (XREADGROUP, stream r3mes-benchmark, grup qa-workers, alan data = JSON) modları; main.py sürekli döngü; job_runner.py iş akışı (payload jobId, adapterCid, isteğe bağlı ipfsCid); ipfs_download.py gateway üzerinden artefact indirme; paket içi data/hidden_dataset.json gizli soru/referans seti; metrics.py ROUGE-L F1 + sacrebleu BLEU, aggregate_quality_0_100 ile 0–100 skor, R3MES_SCORE_THRESHOLD (varsayılan 75) ile approved / rejected; inference_mock.py gerçek LLM olmadan high|medium|low sentetik yanıt (kalite odaklı); webhook.py → R3MES_BACKEND_QA_WEBHOOK_URL (varsayılan http://localhost:3000/v1/internal/qa-result) POST; pyproject.toml, worker/README.md, packages/qa-sandbox/README.md güncellendi. Pytest: tests/test_metrics.py, tests/test_job_runner.py — 4 test geçti, ruff temiz.
+
+BAĞIMLILIK: Frontend / OpenAI uyumlu istemciler — bu worker’ı doğrudan kullanmaz. Fastify backend — Redis’e iş basma (LPUSH veya XADD köprüsü) + /v1/internal/qa-result uç noktasını gerçekleştirip Sui/slash’e bağlama. Altyapı — Redis + IPFS gateway erişimi. AI / inference — ileride gerçek ai-engine çağrısı ile inference_mock yerine üretim yolu.
+
+ENGEL: BullMQ (Node) ile doğrudan protokol uyumu yok; Fastify tarafında liste/stream köprüsü veya ayrı küçük publisher gerekir. Gerçek LoRA ileri geçiş bu worker’da yok; skorlar sentetik yanıt + metrik ile üretiliyor.
+
+SONRAKİ ADIM ÖNERİSİ: Üretimde çıkarım HTTP (ai-engine) ile gizli promptları çağırıp hipotez üretin; BullMQ için resmi köprü veya ortak Redis Stream şeması dokümantasyonu; baraj ve ağırlıkları ADR ile sabitleyin.
+
+---------------------------------------------------------------------------------------
+
+TAMAMLANDI: packages/qa-sandbox/ için otonom, sertleştirilmiş sandbox eklendi: Dockerfile.sandbox (non-root sandbox kullanıcısı, Python 3.12 slim, bash/file/iproute2), scripts/sandbox-entry.sh (başlamadan önce varsayılan rota yok ve kök FS’e yazılamama kontrolleri; isteğe bağlı R3MES_INPUT_DIR ile validate-input-artifacts.sh tetikleme), scripts/validate-input-artifacts.sh (uzantı allow/deny listesi, file --mime-type, safetensors için 8 bayt LE uzunluk + JSON başlık doğrulaması), scripts/docker-run-eval.example.sh (--network none, --read-only, --tmpfs /tmp, :ro mount, no-new-privileges, cap-drop ALL örneği), packages/qa-sandbox/.dockerignore. Tehdit modeli ve MIME/başlık politikası: security/threat_model_qa.md. Shell betikleri Linux için LF satır sonlarına çevrildi.
+
+BAĞIMLILIK: AI ajanı bu imaja eval CMD’sini (ROUGE, LLM-judge vb.) bağlamalı; güvenlik tarafı yalnızca kabuk + girdi doğrulama sözleşmesini sağlar. Orkestrasyon, R3MES_HOST_INPUT / mount yollarını üretim değerlerine göre ayarlamalı.
+
+ENGEL: Bu ortamda docker komutu bulunamadığı için imaj build/test edilemedi; Docker Desktop veya CLI kurulu bir makinede docker build -f Dockerfile.sandbox ... ile doğrulama gerekir. YOK (kod teslimi için iş akışı dışı teknik engel).
+
+SONRAKİ ADIM ÖNERİSİ: CI’da docker build + örnek docker run (ağsız, salt okunur) smoke testi; eval tarafında yalnızca safetensors okuyucu API ve torch.load/pickle yasağı kod incelemesi; isteğe bağlı seccomp profili ve /tmp için noexec ile uyumluluk testi (bazı kütüphaneler geçici .so açabildiği için).

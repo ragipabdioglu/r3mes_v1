@@ -1,0 +1,120 @@
+# R3MES — Prometheus uyarı kuralları (kube-prometheus-stack / mimari ile uyumlu metrik adları).
+# Grafana Alerting / Mimir / Alertmanager ile tüketilebilir.
+#
+# Önkoşul: kube-state-metrics, cAdvisor/metrics-server veya kubelet cAdvisor metrikleri.
+# Etiket eşlemesi (cluster, namespace, pod) ortamınıza göre düzenlenmelidir.
+#
+# Bu kurallar "HPA tetik eşiğine yaklaşıldı" ve "OOM riski" için SRE gözlem ağı oluşturur;
+# gerçek HPA, Deployment manifestlerindeki metrics bölümünde tanımlanır.
+
+groups:
+  - name: r3mes.k8s.workload.hpa_signals
+    interval: 30s
+    rules:
+      - alert: R3MES_HPA_CPU_ApproachingScaleOut
+        expr: |
+          (
+            sum by (namespace, pod, container) (
+              rate(container_cpu_usage_seconds_total{container!="POD", container!=""}[2m])
+            )
+          )
+          /
+          clamp_min(
+            sum by (namespace, pod, container) (
+              kube_pod_container_resource_requests{resource="cpu", unit="core"}
+            ),
+            0.001
+          ) > 0.75
+        for: 3m
+        labels:
+          severity: warning
+          team: platform
+          r3mes_signal: hpa_cpu
+        annotations:
+          summary: "CPU kullanımı, talebe oranla HPA ölçek çıkış eşiğine yaklaşıyor"
+          description: |
+            Pod {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) için CPU kullanımı / request oranı 0.75 üzerinde 3 dk sürdü.
+            HPA averageUtilization ~70–80 ile hizalanmış dağıtımlarda ölçek artışı beklenebilir.
+
+      - alert: R3MES_HPA_Memory_ApproachingScaleOut
+        expr: |
+          (
+            sum by (namespace, pod, container) (
+              container_memory_working_set_bytes{container!="POD", container!=""}
+            )
+          )
+          /
+          clamp_min(
+            sum by (namespace, pod, container) (
+              kube_pod_container_resource_limits{resource="memory", unit="byte"}
+            ),
+            1
+          ) > 0.80
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          r3mes_signal: hpa_memory
+        annotations:
+          summary: "Bellek kullanımı limitin %80 üzerinde — ölçek veya limit gözden geçirilmeli"
+          description: |
+            {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) working set / memory limit oranı yüksek.
+            HPA memory metriği kullanılıyorsa ölçek tetiklenebilir; aksi halde OOM riski artar.
+
+  - name: r3mes.k8s.workload.oom_and_saturation
+    interval: 30s
+    rules:
+      - alert: R3MES_Container_OOMKilled
+        expr: |
+          increase(
+            kube_pod_container_status_terminated_reason{reason="OOMKilled"}[10m]
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+          r3mes_signal: oom
+        annotations:
+          summary: "Konteyner OOMKilled ile sonlandı"
+          description: |
+            Namespace {{ $labels.namespace }}, pod {{ $labels.pod }}, container {{ $labels.container }} — son 10 dk içinde OOM kill tespit edildi.
+            İstek sönümleme, limit/request ayarı ve inference kuyruk derinliği gözden geçirilmeli.
+
+      - alert: R3MES_Memory_WorkingSet_NearLimit_OOMRisk
+        expr: |
+          (
+            container_memory_working_set_bytes{container!="POD", container!=""}
+          )
+          /
+          clamp_min(
+            container_spec_memory_limit_bytes{container!="POD", container!=""},
+            1
+          ) > 0.92
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          r3mes_signal: oom_risk
+        annotations:
+          summary: "Working set bellek limitine çok yakın — OOM olasılığı yüksek"
+          description: |
+            {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) working_set/limit > 0.92.
+            HPA yatay ölçek ile baskı dağıtılmalı veya limit düşürülüp talep artırılmalı (kapasite planlaması).
+
+      - alert: R3MES_Node_Memory_Pressure
+        expr: |
+          (
+            node_memory_MemAvailable_bytes
+          )
+          /
+          clamp_min(node_memory_MemTotal_bytes, 1)
+          < 0.08
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          r3mes_signal: node_pressure
+        annotations:
+          summary: "Düğümde kullanılabilir bellek düşük — pod evictions riski"
+          description: |
+            Node {{ $labels.instance }} üzerinde kullanılabilir RAM oranı %8 altında. Yük testi / üretim patlamalarında OOM ve eviction artabilir.

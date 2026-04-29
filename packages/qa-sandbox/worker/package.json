@@ -1,0 +1,10 @@
+{
+  "name": "@r3mes/qa-worker",
+  "private": true,
+  "scripts": {
+    "dev": "python -m r3mes_qa_worker",
+    "lint": "node -e \"process.exit(0)\"",
+    "build": "node -e \"process.exit(0)\"",
+    "test": "python -m pytest tests/ -q"
+  }
+}

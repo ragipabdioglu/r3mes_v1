@@ -1,0 +1,138 @@
+# R3MES public repository hygiene
+# Keep source code, docs, migrations, seed scripts, and small examples.
+# Keep private data, model binaries, generated runtimes, logs, caches, and training outputs local only.
+
+# Dependencies / package-manager state
+node_modules/
+.pnpm-store/
+.yarn/
+.npm/
+
+# Build outputs / caches
+dist/
+build/
+out/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+storybook-static/
+
+# Environment and local config
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+*.local.*
+
+# Logs / process files
+logs/
+*.log
+*.pid
+.r3mes-*.log
+.r3mes-*.pid
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+
+# Python / ML caches
+.venv/
+venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Generated artifacts and local DB dumps
+artifacts/
+*.sqlite
+*.sqlite3
+*.db
+*.sql
+*.dump
+!apps/backend-api/prisma/migrations/**/migration.sql
+
+# Raw/private datasets and generated corpora
+*.parquet
+*.arrow
+*.feather
+*.jsonl
+!infrastructure/evals/**/*.jsonl
+!apps/backend-api/prisma/**/*.jsonl
+train-*.json
+train-*.jsonl
+doctor_role_dataset.jsonl
+jinekolojik_onkoloji_lora.jsonl
+infrastructure/knowledge-datasets/
+packages/qa-sandbox/worker/r3mes_qa_worker/data/hidden_dataset.json
+qvac-rnd-fabric-llm-bitnet-main/evaluations/
+
+# Model, adapter, checkpoint, and tokenizer binaries
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.tflite
+*.mlmodel
+*.model
+adapter_model.*
+pytorch_model.*
+optimizer.*
+checkpoints/
+.benchmark-live/
+.e2e-lora/
+
+# Hugging Face / training outputs
+.cache/huggingface/
+hf-cache/
+infrastructure/training-hf/outputs/
+infrastructure/training-hf/cache/
+infrastructure/training-hf/datasets/
+
+# Local llama/BitNet/Qwen runtimes and downloaded model bundles
+infrastructure/docker/models/
+infrastructure/llama-runtime/
+apps/ai-engine/artifacts/
+
+# LoRA trial generated outputs. Keep docs/config scripts, exclude heavy/private run data.
+infrastructure/lora-trials/candidates/**/export/*.gguf
+infrastructure/lora-trials/candidates/**/run/**/*.gguf
+infrastructure/lora-trials/candidates/**/train/checkpoints/
+infrastructure/lora-trials/candidates/**/train/logs/
+infrastructure/lora-trials/candidates/**/train/**/*.pt
+infrastructure/lora-trials/candidates/**/train/**/*.bin
+infrastructure/lora-trials/candidates/**/train/**/*.safetensors
+infrastructure/lora-trials/candidates/**/train/**/*.jsonl
+infrastructure/lora-trials/runs/
+
+# Archives and downloaded tool bundles
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+
+# Local docker/runtime volumes
+data/
+volumes/
+.docker-data/

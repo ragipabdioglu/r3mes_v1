@@ -1,0 +1,76 @@
+name: Smoke
+
+# Tam zincir (Postgres + migrate + smoke) maliyetli; her push yerine main + elle tetikleme.
+# PR doğrulaması: ci.yml (lint/build/test + validate). Yayın öncesi: burada veya yerelde release:check:full.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency:
+  group: smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  full-smoke:
+    name: Full smoke (bootstrap parity + pnpm smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: r3mes
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d r3mes"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/r3mes
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Use Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Python test dependencies
+        run: |
+          pip install -r apps/ai-engine/requirements.txt
+          pip install -e "packages/qa-sandbox/worker[dev]"
+
+      - name: Install Sui CLI
+        run: bash infrastructure/scripts/install-sui-ci.sh
+
+      - name: Database migrate
+        run: pnpm db:migrate
+
+      - name: Smoke (TS + Move)
+        run: pnpm smoke

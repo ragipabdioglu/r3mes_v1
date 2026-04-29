@@ -1,0 +1,41 @@
+# R3MES QA Sandbox — hardened evaluation image (Faz 6)
+# Build:  docker build -f Dockerfile.sandbox -t r3mes-qa-sandbox:latest .
+# Run:     see scripts/docker-run-eval.example.sh ( --network none --read-only ... )
+#
+# Bu imaj yalnızca güvenli kabuk sağlar; ROUGE/ML değerlendirme kodu AI ajanı tarafından eklenir.
+
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Minimal araçlar: ağ doğrulama (iproute2), dosya tipi (file), bayt inceleme (xxd isteğe bağlı)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    file \
+    iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 10001 --shell /bin/bash sandbox
+
+COPY scripts/sandbox-entry.sh /opt/r3mes-sandbox/sandbox-entry.sh
+COPY scripts/validate-input-artifacts.sh /opt/r3mes-sandbox/validate-input-artifacts.sh
+COPY scripts/docker-run-eval.example.sh /opt/r3mes-sandbox/docker-run-eval.example.sh
+
+RUN chmod 0555 /opt/r3mes-sandbox/sandbox-entry.sh \
+    && chmod 0555 /opt/r3mes-sandbox/validate-input-artifacts.sh \
+    && chmod 0555 /opt/r3mes-sandbox/docker-run-eval.example.sh \
+    && chown -R root:root /opt/r3mes-sandbox
+
+WORKDIR /workspace
+
+# Güvenlik: root olarak çalıştırma; değerlendirme süreci düşük ayrıcalıklı kullanıcı ile
+USER sandbox
+
+ENTRYPOINT ["/opt/r3mes-sandbox/sandbox-entry.sh"]
+
+# Varsayılan: doğrulama yardımı; gerçek eval CI/orchestrator CMD ile geçirir
+CMD ["python", "-c", "print('r3mes-qa-sandbox: set CMD to your evaluator (e.g. python -m your_eval)')"]

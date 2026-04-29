@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-r3mes-bg text-zinc-100 antialiased;
+  background-image: radial-gradient(
+      ellipse 120% 80% at 50% -20%,
+      rgba(124, 58, 237, 0.12),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 80% 50% at 100% 100%,
+      rgba(59, 130, 246, 0.06),
+      transparent 45%
+    );
+}

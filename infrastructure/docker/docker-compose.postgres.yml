@@ -1,0 +1,28 @@
+# R3MES — yerel PostgreSQL + pgvector (RAG retrieval için).
+# Başlatma: infrastructure/scripts/start-all.sh veya:
+#   docker compose -f infrastructure/docker/docker-compose.postgres.yml up -d
+
+name: r3mes-postgres
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: r3mes-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: r3mes
+    ports:
+      - "5432:5432"
+    volumes:
+      - r3mes_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d r3mes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  r3mes_pgdata:

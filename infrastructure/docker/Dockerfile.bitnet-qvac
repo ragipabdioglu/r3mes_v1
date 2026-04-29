@@ -1,0 +1,26 @@
+# BitNet / QVAC — pin’li llama-server (Linux x64 CPU)
+# Tek kaynak: infrastructure/BITNET_QVAC_PRODUCTION_MATRIX.md
+ARG QVAC_RELEASE=b7349
+FROM ubuntu:22.04
+ARG QVAC_RELEASE
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl unzip libgomp1 \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /tmp/qvac.zip \
+  "https://github.com/tetherto/qvac-fabric-llm.cpp/releases/download/${QVAC_RELEASE}/llama-${QVAC_RELEASE}-bin-ubuntu-x64.zip" \
+  && unzip -q /tmp/qvac.zip -d /tmp/qvac-unpack \
+  && QVAC_DIR="$(dirname "$(find /tmp/qvac-unpack -name llama-server -type f | head -1)")" \
+  && mkdir -p /opt/qvac \
+  && cp -a "${QVAC_DIR}/." /opt/qvac/ \
+  && chmod +x /opt/qvac/llama-server \
+  && rm -rf /tmp/qvac-unpack /tmp/qvac.zip
+
+COPY entrypoint-bitnet-qvac.sh /entrypoint-bitnet-qvac.sh
+# Windows checkout CRLF → Linux shebang hatası ("no such file") önlenir
+RUN sed -i 's/\r$//' /entrypoint-bitnet-qvac.sh && chmod +x /entrypoint-bitnet-qvac.sh
+
+WORKDIR /opt/qvac
+EXPOSE 8080
+ENTRYPOINT ["/entrypoint-bitnet-qvac.sh"]

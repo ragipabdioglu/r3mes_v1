@@ -1,0 +1,57 @@
+{
+  "name": "@r3mes/backend-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./jobProducer": {
+      "types": "./dist/jobProducer.d.ts",
+      "import": "./dist/jobProducer.js"
+    }
+  },
+  "scripts": {
+    "postinstall": "prisma generate",
+    "lint": "eslint .",
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json && node --env-file=.env --watch dist/index.js",
+    "start": "node dist/index.js",
+    "test": "pnpm run build && vitest run",
+    "eval:grounded-response": "node scripts/run-grounded-response-eval.mjs",
+    "eval:adaptive-rag": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/adaptive-rag/golden.jsonl --out artifacts/evals/adaptive-rag/latest.json",
+    "lora:scale": "node scripts/set-llama-lora-scale.mjs",
+    "seed:legal-basic-demo": "node --env-file=.env scripts/seed-legal-basic-demo.mjs",
+    "seed:legal-divorce-demo": "node --env-file=.env scripts/seed-legal-divorce-demo.mjs",
+    "seed:education-basic-demo": "node --env-file=.env scripts/seed-education-basic-demo.mjs",
+    "seed:multi-domain-demo": "node --env-file=.env scripts/seed-multi-domain-demo.mjs",
+    "knowledge:metadata:backfill": "node --env-file=.env scripts/backfill-knowledge-metadata.mjs",
+    "qdrant:reindex": "node --env-file=.env scripts/reindex-qdrant.mjs",
+    "test:security-regression": "pnpm run build && vitest run src/skipFlags.test.ts src/walletAuth.test.ts src/walletAuthJti.test.ts src/integration.contract.test.ts src/qaWebhookIdempotency.test.ts src/internalQa.test.ts",
+    "db:migrate": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "e2e:lifecycle-smoke": "node scripts/e2e-lifecycle-smoke.mjs",
+    "upload:export-gguf": "node scripts/upload-export-gguf.mjs",
+    "verify:lifecycle-chain": "node scripts/verify-lifecycle-chain.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "@r3mes/shared-types": "workspace:*",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/multipart": "^9.0.3",
+    "bullmq": "^5.58.0",
+    "fastify": "^5.6.0",
+    "ioredis": "^5.8.0",
+    "@mysten/sui": "^1.45.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prisma": "^6.19.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.0"
+  }
+}
