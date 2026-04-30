@@ -91,6 +91,11 @@ function readFinalCandidateCount(diagnostics: Record<string, unknown> | null | u
   return readNumber(diagnostics?.finalCandidateCount);
 }
 
+function readAlignmentDiagnostics(diagnostics: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  const alignment = diagnostics?.alignment;
+  return alignment && typeof alignment === "object" ? alignment as Record<string, unknown> : null;
+}
+
 function hasSourceMetadataMismatch(answer: GroundedMedicalAnswer, sources: ChatSourceCitation[]): boolean {
   if (answer.used_source_ids.length === 0 || sources.length === 0) return false;
   const available = new Set(
@@ -161,6 +166,9 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   const evidenceRedFlagCount = evidence?.redFlags.length ?? 0;
   const redFlagCount = evidenceRedFlagCount || opts.answerSpec?.caution.length || 0;
   const finalCandidateCount = readFinalCandidateCount(opts.retrievalDiagnostics);
+  const alignmentDiagnostics = readAlignmentDiagnostics(opts.retrievalDiagnostics);
+  const alignmentFastFailed = alignmentDiagnostics?.fastFailed === true;
+  const alignmentDroppedCandidateCount = readNumber(alignmentDiagnostics?.droppedCandidateCount) ?? 0;
   const sourceCollectionIds = new Set(opts.sources.map((source) => source.collectionId).filter(Boolean));
   const accessibleCollectionIds = new Set(opts.sourceSelection?.accessibleCollectionIds ?? []);
   const sourceSuggestionWithoutGrounding = routeDecision?.mode === "suggest" && opts.sources.length === 0;
@@ -188,6 +196,12 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
 
   if (typeof finalCandidateCount === "number" && finalCandidateCount > 4) {
     addRail("TOO_MANY_CONTEXT_CHUNKS_FOR_3B", "retrieval", "warn");
+  }
+
+  if (alignmentFastFailed) {
+    addRail("QUERY_SOURCE_MISMATCH", "retrieval", "rewrite");
+  } else if (alignmentDroppedCandidateCount > 0) {
+    addRail("QUERY_SOURCE_MISMATCH", "retrieval", "warn");
   }
 
   if (opts.retrievalWasUsed && hasEvidenceSignals && usableFactCount === 0) {

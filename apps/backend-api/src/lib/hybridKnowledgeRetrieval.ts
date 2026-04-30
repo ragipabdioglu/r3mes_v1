@@ -1,11 +1,18 @@
 import type { ChatSourceCitation } from "@r3mes/shared-types";
 
+import { getAlignmentConfig } from "./alignmentConfig.js";
 import type { GroundingConfidence } from "./answerSchema.js";
 import { buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
 import { rerankKnowledgeCardsWithFallback } from "./modelRerank.js";
 import { prisma } from "./prisma.js";
+import {
+  buildSourceConceptText,
+  scoreQuerySourceAlignment,
+  type AlignmentDiagnostics,
+  type AlignmentScore,
+} from "./querySourceAlignment.js";
 import { embedTextForQdrant } from "./qdrantEmbedding.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
@@ -32,6 +39,13 @@ export interface HybridKnowledgeCandidate {
   vectorScore?: number;
   lexicalScore?: number;
   preRankScore: number;
+  alignment?: AlignmentScore;
+}
+
+interface AlignableKnowledgeCandidate {
+  chunk: HybridKnowledgeChunk;
+  card: KnowledgeCard;
+  alignment?: AlignmentScore;
 }
 
 export interface HybridRetrievedKnowledgeContext {
@@ -47,6 +61,7 @@ export interface HybridRetrievedKnowledgeContext {
     preRankedCandidateCount: number;
     rerankedCandidateCount: number;
     finalCandidateCount: number;
+    alignment: AlignmentDiagnostics;
     retrievalMode: "true_hybrid";
   };
 }
@@ -87,6 +102,22 @@ function relativeScoreFloor(): number {
   return parseNonNegativeFloat(process.env.R3MES_RAG_RELATIVE_SCORE_FLOOR, 0.45);
 }
 
+function emptyAlignmentDiagnostics(overrides: Partial<AlignmentDiagnostics> = {}): AlignmentDiagnostics {
+  const config = getAlignmentConfig();
+  return {
+    enabled: config.enabled,
+    minScore: config.minScore,
+    weakScore: config.weakScore,
+    inputCandidateCount: 0,
+    alignedCandidateCount: 0,
+    weakCandidateCount: 0,
+    mismatchCandidateCount: 0,
+    droppedCandidateCount: 0,
+    fastFailed: false,
+    ...overrides,
+  };
+}
+
 function isStrictRouteScope(routePlan?: DomainRoutePlan | null): boolean {
   return Boolean(routePlan && routePlan.confidence !== "low" && routePlan.subtopics.length > 0);
 }
@@ -94,6 +125,17 @@ function isStrictRouteScope(routePlan?: DomainRoutePlan | null): boolean {
 function getRagContextMode(): "compact" | "detailed" {
   const raw = (process.env.R3MES_RAG_CONTEXT_MODE ?? "compact").trim().toLowerCase();
   return raw === "detailed" ? "detailed" : "compact";
+}
+
+function buildRerankCandidateText(candidate: AlignableKnowledgeCandidate, maxWords: number): string {
+  return buildSourceConceptText({
+    title: candidate.chunk.document.title,
+    content: candidate.chunk.content,
+    card: candidate.card,
+    chunkMetadata: candidate.chunk.autoMetadata,
+    documentMetadata: candidate.chunk.document.autoMetadata,
+    maxWords,
+  });
 }
 
 function normalize(text: string): string {
@@ -367,6 +409,59 @@ export function preRankHybridKnowledgeCandidates(opts: {
     .slice(0, opts.limit ?? preRankLimit());
 }
 
+export function alignHybridKnowledgeCandidates<T extends AlignableKnowledgeCandidate>(opts: {
+  query: string;
+  candidates: T[];
+  routePlan?: DomainRoutePlan | null;
+}): { candidates: Array<T & { alignment: AlignmentScore }>; diagnostics: AlignmentDiagnostics } {
+  const config = getAlignmentConfig();
+  if (!config.enabled) {
+    return {
+      candidates: opts.candidates.map((candidate) => ({
+        ...candidate,
+        alignment: candidate.alignment ?? {
+          mode: "aligned",
+          score: 1,
+          matchedTerms: [],
+          queryTerms: [],
+          sourceTerms: [],
+          genericMatchedTerms: [],
+          reason: "Alignment disabled.",
+        },
+      })),
+      diagnostics: emptyAlignmentDiagnostics({
+        enabled: false,
+        inputCandidateCount: opts.candidates.length,
+        alignedCandidateCount: opts.candidates.length,
+      }),
+    };
+  }
+
+  const scored = opts.candidates.map((candidate) => {
+    const alignment = scoreQuerySourceAlignment({
+      query: opts.query,
+      sourceText: buildRerankCandidateText(candidate, config.maxRerankWords),
+      routePlan: opts.routePlan,
+      minScore: config.minScore,
+      weakScore: config.weakScore,
+      genericPenalty: config.genericPenalty,
+    });
+    return { ...candidate, alignment };
+  });
+  const kept = scored.filter((candidate) => candidate.alignment.mode !== "mismatch");
+  return {
+    candidates: kept,
+    diagnostics: emptyAlignmentDiagnostics({
+      inputCandidateCount: scored.length,
+      alignedCandidateCount: scored.filter((candidate) => candidate.alignment.mode === "aligned").length,
+      weakCandidateCount: scored.filter((candidate) => candidate.alignment.mode === "weak").length,
+      mismatchCandidateCount: scored.filter((candidate) => candidate.alignment.mode === "mismatch").length,
+      droppedCandidateCount: scored.length - kept.length,
+      fastFailed: config.fastFailEnabled && scored.length > 0 && kept.length === 0,
+    }),
+  };
+}
+
 function deriveGroundingConfidence(scores: number[]): GroundingConfidence {
   if (scores.length === 0) return "low";
   const top = scores[0] ?? 0;
@@ -418,6 +513,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         preRankedCandidateCount: 0,
         rerankedCandidateCount: 0,
         finalCandidateCount: 0,
+        alignment: emptyAlignmentDiagnostics(),
         retrievalMode: "true_hybrid",
       },
     };
@@ -452,11 +548,33 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         preRankedCandidateCount: 0,
         rerankedCandidateCount: 0,
         finalCandidateCount: 0,
+        alignment: emptyAlignmentDiagnostics(),
         retrievalMode: "true_hybrid",
       },
     };
   }
   const preRanked = preRankHybridKnowledgeCandidates({ query, candidates: deduped, routePlan });
+  const alignedPreRanked = alignHybridKnowledgeCandidates({ query: evidenceQuery, candidates: preRanked, routePlan });
+  const candidatesForRerank = alignedPreRanked.candidates;
+  if (alignedPreRanked.diagnostics.fastFailed) {
+    return {
+      contextText: "",
+      sources: [],
+      lowGroundingConfidence: true,
+      groundingConfidence: "low",
+      evidence: null,
+      diagnostics: {
+        qdrantCandidateCount: qdrantCandidates.length,
+        prismaCandidateCount: prismaCandidates.length,
+        dedupedCandidateCount: deduped.length,
+        preRankedCandidateCount: preRanked.length,
+        rerankedCandidateCount: 0,
+        finalCandidateCount: 0,
+        alignment: alignedPreRanked.diagnostics,
+        retrievalMode: "true_hybrid",
+      },
+    };
+  }
   if (strictRouteScope && preRanked.length === 0) {
     return {
       contextText: "",
@@ -471,11 +589,12 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         preRankedCandidateCount: 0,
         rerankedCandidateCount: 0,
         finalCandidateCount: 0,
+        alignment: alignedPreRanked.diagnostics,
         retrievalMode: "true_hybrid",
       },
     };
   }
-  const rerankInput = preRanked.map((candidate) => ({
+  const rerankInput = candidatesForRerank.map((candidate) => ({
     chunk: candidate.chunk,
     card: candidate.card,
     lexicalScore: candidate.lexicalScore ?? candidate.preRankScore,
@@ -491,7 +610,41 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       return true;
     })
     .slice(0, limit);
-  const finalCandidates = accepted;
+  const alignedAccepted = alignHybridKnowledgeCandidates({
+    query: evidenceQuery,
+    candidates: accepted,
+    routePlan,
+  });
+  const finalCandidates = alignedAccepted.candidates;
+  const finalAlignmentDiagnostics: AlignmentDiagnostics = {
+    ...alignedPreRanked.diagnostics,
+    alignedCandidateCount: alignedAccepted.diagnostics.alignedCandidateCount,
+    weakCandidateCount: alignedAccepted.diagnostics.weakCandidateCount,
+    mismatchCandidateCount: alignedPreRanked.diagnostics.mismatchCandidateCount + alignedAccepted.diagnostics.mismatchCandidateCount,
+    droppedCandidateCount: alignedPreRanked.diagnostics.droppedCandidateCount + alignedAccepted.diagnostics.droppedCandidateCount,
+    fastFailed:
+      alignedPreRanked.diagnostics.fastFailed ||
+      (getAlignmentConfig().fastFailEnabled && accepted.length > 0 && finalCandidates.length === 0),
+  };
+  if (finalAlignmentDiagnostics.fastFailed && finalCandidates.length === 0) {
+    return {
+      contextText: "",
+      sources: [],
+      lowGroundingConfidence: true,
+      groundingConfidence: "low",
+      evidence: null,
+      diagnostics: {
+        qdrantCandidateCount: qdrantCandidates.length,
+        prismaCandidateCount: prismaCandidates.length,
+        dedupedCandidateCount: deduped.length,
+        preRankedCandidateCount: preRanked.length,
+        rerankedCandidateCount: reranked.length,
+        finalCandidateCount: 0,
+        alignment: finalAlignmentDiagnostics,
+        retrievalMode: "true_hybrid",
+      },
+    };
+  }
   const groundingConfidence = deriveGroundingConfidence(finalCandidates.map((candidate) => candidate.rerankScore));
   const lowGroundingConfidence = groundingConfidence === "low" || finalCandidates.length === 0;
 
@@ -549,6 +702,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       preRankedCandidateCount: preRanked.length,
       rerankedCandidateCount: reranked.length,
       finalCandidateCount: finalCandidates.length,
+      alignment: finalAlignmentDiagnostics,
       retrievalMode: "true_hybrid",
     },
   };

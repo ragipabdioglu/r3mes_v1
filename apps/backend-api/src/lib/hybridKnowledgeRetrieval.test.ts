@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  alignHybridKnowledgeCandidates,
   candidateMatchesRouteScope,
   dedupeHybridKnowledgeCandidates,
   preRankHybridKnowledgeCandidates,
@@ -217,5 +218,62 @@ describe("true hybrid retrieval helpers", () => {
     expect(ranked).toHaveLength(2);
     expect(ranked[0]?.chunk.id).toBe("tech-1");
     expect(ranked.map((item) => item.chunk.id)).not.toContain("legal-1");
+  });
+
+  it("drops same-domain wrong-topic candidates before evidence extraction", () => {
+    vi.stubEnv("R3MES_ALIGNMENT_MIN_SCORE", "0.34");
+    vi.stubEnv("R3MES_ALIGNMENT_WEAK_SCORE", "0.5");
+    const routePlan = {
+      domain: "medical" as const,
+      subtopics: [],
+      riskLevel: "medium" as const,
+      retrievalHints: ["ağrı değerlendirmesi"],
+      mustIncludeTerms: ["ağrı"],
+      mustExcludeTerms: [],
+      confidence: "medium" as const,
+    };
+    const result = alignHybridKnowledgeCandidates({
+      query: "Başım ağrıyor, ne yapmalıyım?",
+      routePlan,
+      candidates: [
+        candidate({
+          id: "abdominal-pain",
+          title: "karın ağrısı genel triyaj",
+          content: "Karın ağrısı, mide ve göbek bölgesi şikayetlerinde ateş ve kusma değerlendirilir.",
+        }),
+        candidate({
+          id: "headache",
+          title: "baş ağrısı genel triyaj",
+          content: "Baş ağrısı şiddeti, süresi, ateş ve nörolojik bulgularla birlikte değerlendirilir.",
+        }),
+      ],
+    });
+
+    expect(result.candidates.map((item) => item.chunk.id)).toEqual(["headache"]);
+    expect(result.diagnostics.droppedCandidateCount).toBe(1);
+    expect(result.diagnostics.fastFailed).toBe(false);
+  });
+
+  it("fast-fails when every retrieved candidate only matches generic terms", () => {
+    vi.stubEnv("R3MES_ALIGNMENT_FAST_FAIL_ENABLED", "1");
+    const result = alignHybridKnowledgeCandidates({
+      query: "Başım ağrıyor, ne yapmalıyım?",
+      candidates: [
+        candidate({
+          id: "abdominal-pain",
+          title: "karın ağrısı genel triyaj",
+          content: "Karın ağrısı, mide ve göbek bölgesi şikayetlerinde ateş ve kusma değerlendirilir.",
+        }),
+        candidate({
+          id: "pelvic-pain",
+          title: "kasık ağrısı genel triyaj",
+          content: "Kasık ağrısı ve pelvik ağrı yakınmasında kanama ve ateş değerlendirilir.",
+        }),
+      ],
+    });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.diagnostics.fastFailed).toBe(true);
+    expect(result.diagnostics.mismatchCandidateCount).toBe(2);
   });
 });

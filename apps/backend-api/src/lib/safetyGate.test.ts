@@ -272,6 +272,35 @@ describe("deterministic safety gate", () => {
     expect(result.metrics.finalCandidateCount).toBe(8);
   });
 
+  it("rewrites when alignment fast-fails all retrieved candidates", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "1. Kaynağa göre durum: Bu seçili kaynaklarda doğrudan yanıt yok.\n2. Ne yapılabilir: Daha uygun kaynak seçilmelidir.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        grounding_confidence: "low",
+        user_query: "başım ağrıyor",
+      },
+      sources: [],
+      retrievalWasUsed: false,
+      retrievalDiagnostics: {
+        finalCandidateCount: 0,
+        alignment: {
+          fastFailed: true,
+          droppedCandidateCount: 3,
+        },
+      },
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockedReasons).toContain("QUERY_SOURCE_MISMATCH");
+    expect(result.railChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "QUERY_SOURCE_MISMATCH", category: "retrieval", status: "rewrite" }),
+      ]),
+    );
+  });
+
   it("uses evidence red flags as safety rails even when the query wording is mild", () => {
     const result = evaluateSafetyGate({
       answerText: "Kaynak, durumun izlenebileceğini söylüyor.",

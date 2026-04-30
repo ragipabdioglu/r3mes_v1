@@ -177,6 +177,28 @@ function scoreCase(testCase, response) {
     failures.push(`sources:${sources.length}>${Number(testCase.maxSources)}`);
   }
 
+  const alignment = retrievalDebug?.retrievalDiagnostics?.alignment;
+  if (testCase.expectedAlignmentFastFailed != null) {
+    const actualFastFailed = alignment?.fastFailed;
+    if (actualFastFailed !== testCase.expectedAlignmentFastFailed) {
+      failures.push(`alignment_fast_failed:${actualFastFailed ?? "missing"}`);
+    }
+  }
+
+  if (testCase.expectedAlignmentMinDropped != null) {
+    const dropped = Number(alignment?.droppedCandidateCount ?? 0);
+    if (dropped < Number(testCase.expectedAlignmentMinDropped)) {
+      failures.push(`alignment_dropped:${dropped}<${Number(testCase.expectedAlignmentMinDropped)}`);
+    }
+  }
+
+  if (testCase.expectedAlignmentFinalCandidates != null) {
+    const finalCandidateCount = Number(retrievalDebug?.retrievalDiagnostics?.finalCandidateCount ?? 0);
+    if (finalCandidateCount !== Number(testCase.expectedAlignmentFinalCandidates)) {
+      failures.push(`alignment_final_candidates:${finalCandidateCount}`);
+    }
+  }
+
   if (Array.isArray(testCase.expectedConfidence) && testCase.expectedConfidence.length > 0) {
     const actual = readGroundingConfidence(response);
     if (!testCase.expectedConfidence.includes(actual)) {
@@ -340,6 +362,8 @@ function scoreCase(testCase, response) {
     fallbackMode: safetyGate?.fallbackMode ?? null,
     factCount,
     redFlagCount: Array.isArray(evidence?.redFlags) ? evidence.redFlags.length : 0,
+    alignmentFastFailed: alignment?.fastFailed ?? null,
+    alignmentDroppedCandidateCount: alignment?.droppedCandidateCount ?? null,
     selectionMode: retrievalDebug?.sourceSelection?.selectionMode ?? null,
     routeDecisionMode: routeDecision?.mode ?? null,
     routeDecisionConfidence: routeDecision?.confidence ?? null,
@@ -419,6 +443,8 @@ async function runCase(opts, testCase) {
         fallbackMode: null,
         factCount: 0,
         redFlagCount: 0,
+        alignmentFastFailed: null,
+        alignmentDroppedCandidateCount: null,
         latencyMs: Date.now() - started,
         content: text.slice(0, 500),
       };
@@ -442,6 +468,8 @@ async function runCase(opts, testCase) {
     fallbackMode: null,
     factCount: 0,
     redFlagCount: 0,
+    alignmentFastFailed: null,
+    alignmentDroppedCandidateCount: null,
     latencyMs: Date.now() - started,
     content: "",
   };
