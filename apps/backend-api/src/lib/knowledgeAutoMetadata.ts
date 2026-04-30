@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import type { KnowledgeChunkDraft } from "./knowledgeText.js";
 import { routeQuery } from "./queryRouter.js";
@@ -20,6 +22,7 @@ export interface KnowledgeAutoMetadata {
 
 export interface KnowledgeCollectionProfile {
   version: 1;
+  profileVersion: number;
   domains: string[];
   subtopics: string[];
   keywords: string[];
@@ -31,6 +34,9 @@ export interface KnowledgeCollectionProfile {
   riskLevel: KnowledgeRiskLevel;
   sourceQuality: "structured" | "inferred" | "thin";
   confidence: "low" | "medium" | "high";
+  profileText: string;
+  profileTextHash: string;
+  lastProfiledAt: string;
   updatedAt: string;
 }
 
@@ -94,9 +100,42 @@ function confidenceForProfile(items: KnowledgeAutoMetadata[], sourceQuality: Kno
   return "low";
 }
 
+function profileLine(label: string, values: string[] | string): string {
+  const value = Array.isArray(values) ? values.filter(Boolean).join(", ") : values.trim();
+  return value ? `${label}: ${value}` : "";
+}
+
+function buildProfileText(profile: Omit<KnowledgeCollectionProfile, "version" | "profileVersion" | "profileText" | "profileTextHash" | "lastProfiledAt" | "updatedAt">): string {
+  return [
+    profileLine("Domains", profile.domains),
+    profileLine("Subtopics", profile.subtopics),
+    profileLine("Keywords", profile.keywords),
+    profileLine("Entities", profile.entities),
+    profileLine("Document types", profile.documentTypes),
+    profileLine("Audiences", profile.audiences),
+    profileLine("Sample questions", profile.sampleQuestions),
+    profileLine("Summary", profile.summary),
+    profileLine("Risk level", profile.riskLevel),
+    profileLine("Source quality", profile.sourceQuality),
+    profileLine("Confidence", profile.confidence),
+  ].filter(Boolean).join("\n");
+}
+
+function hashProfileText(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+function nextProfileVersion(previousProfile: KnowledgeCollectionProfile | null | undefined, profileTextHash: string): number {
+  const previousVersion = previousProfile?.profileVersion ?? previousProfile?.version ?? 0;
+  if (previousProfile?.profileTextHash === profileTextHash && previousVersion > 0) {
+    return previousVersion;
+  }
+  return previousVersion + 1;
+}
+
 export function buildKnowledgeCollectionProfile(
   items: KnowledgeAutoMetadata[],
-  opts: { now?: Date } = {},
+  opts: { now?: Date; previousProfile?: KnowledgeCollectionProfile | null } = {},
 ): KnowledgeCollectionProfile | null {
   const cleanItems = items.filter(Boolean);
   if (cleanItems.length === 0) return null;
@@ -114,8 +153,7 @@ export function buildKnowledgeCollectionProfile(
   const documentTypes = weightedUnique(cleanItems.map((item) => item.documentType), 8);
   const audiences = weightedUnique(cleanItems.map((item) => item.audience), 8);
   const sampleQuestions = unique(cleanItems.flatMap((item) => item.questionsAnswered), 12);
-  return {
-    version: 1,
+  const baseProfile = {
     domains,
     subtopics,
     keywords,
@@ -127,7 +165,18 @@ export function buildKnowledgeCollectionProfile(
     riskLevel,
     sourceQuality,
     confidence: confidenceForProfile(cleanItems, sourceQuality),
-    updatedAt: (opts.now ?? new Date()).toISOString(),
+  };
+  const profileText = buildProfileText(baseProfile);
+  const profileTextHash = hashProfileText(profileText);
+  const timestamp = (opts.now ?? new Date()).toISOString();
+  return {
+    version: 1,
+    profileVersion: nextProfileVersion(opts.previousProfile, profileTextHash),
+    ...baseProfile,
+    profileText,
+    profileTextHash,
+    lastProfiledAt: timestamp,
+    updatedAt: timestamp,
   };
 }
 
@@ -189,8 +238,12 @@ export function inferKnowledgeAutoMetadata(opts: {
   };
 }
 
-export function mergeKnowledgeAutoMetadata(items: KnowledgeAutoMetadata[]): KnowledgeAutoMetadata | null {
+export function mergeKnowledgeAutoMetadata(
+  items: KnowledgeAutoMetadata[],
+  opts: { now?: Date } = {},
+): KnowledgeAutoMetadata | null {
   if (items.length === 0) return null;
+  const previousProfile = items.find((item) => item.profile)?.profile ?? null;
   const count = (values: string[]) => {
     const counts = new Map<string, number>();
     for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
@@ -220,7 +273,7 @@ export function mergeKnowledgeAutoMetadata(items: KnowledgeAutoMetadata[]): Know
   };
   return {
     ...mergedBase,
-    profile: buildKnowledgeCollectionProfile(items) ?? undefined,
+    profile: buildKnowledgeCollectionProfile(items, { now: opts.now, previousProfile }) ?? undefined,
   };
 }
 

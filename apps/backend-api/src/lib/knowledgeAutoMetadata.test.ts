@@ -82,6 +82,9 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(merged?.profile?.domains).toContain("technical");
     expect(merged?.profile?.subtopics).toContain("migration");
     expect(merged?.profile?.sampleQuestions.length).toBeGreaterThan(0);
+    expect(merged?.profile?.profileVersion).toBe(1);
+    expect(merged?.profile?.profileText).toContain("Domains: technical");
+    expect(merged?.profile?.profileTextHash).toHaveLength(64);
   });
 
   it("builds a weighted collection profile for adaptive routing", () => {
@@ -99,9 +102,41 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     });
 
     expect(profile?.version).toBe(1);
+    expect(profile?.profileVersion).toBe(1);
     expect(profile?.domains[0]).toBe("legal");
     expect(profile?.keywords).toEqual(expect.arrayContaining(["boşanma", "velayet", "nafaka"]));
     expect(profile?.confidence).toBe("high");
+    expect(profile?.profileText).toContain("Subtopics:");
+    expect(profile?.profileTextHash).toHaveLength(64);
+    expect(profile?.lastProfiledAt).toBe("2026-04-29T00:00:00.000Z");
     expect(profile?.updatedAt).toBe("2026-04-29T00:00:00.000Z");
+  });
+
+  it("keeps profile version stable until profile content changes", () => {
+    const first = inferKnowledgeAutoMetadata({
+      title: "db migration",
+      content: "Migration öncesinde yedek alınmalı, staging ortamında denenmeli ve rollback planı hazırlanmalıdır.",
+    });
+    const second = inferKnowledgeAutoMetadata({
+      title: "log kontrol",
+      content: "Migration sırasında loglar izlenmeli ve doğrulama çıktıları kayıt altına alınmalıdır.",
+    });
+
+    const initial = buildKnowledgeCollectionProfile([first], {
+      now: new Date("2026-04-29T00:00:00.000Z"),
+    });
+    const unchanged = buildKnowledgeCollectionProfile([first], {
+      now: new Date("2026-04-30T00:00:00.000Z"),
+      previousProfile: initial,
+    });
+    const changed = buildKnowledgeCollectionProfile([first, second], {
+      now: new Date("2026-05-01T00:00:00.000Z"),
+      previousProfile: initial,
+    });
+
+    expect(initial?.profileVersion).toBe(1);
+    expect(unchanged?.profileVersion).toBe(1);
+    expect(unchanged?.lastProfiledAt).toBe("2026-04-30T00:00:00.000Z");
+    expect(changed?.profileVersion).toBe(2);
   });
 });

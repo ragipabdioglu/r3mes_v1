@@ -10,6 +10,9 @@ interface KnowledgeMetadataProfile {
   keywords: string[];
   entities: string[];
   summary: string;
+  profileText?: string;
+  profileVersion?: number;
+  lastProfiledAt?: string;
   questionsAnswered: string[];
   confidence?: "low" | "medium" | "high";
   sourceQuality?: "structured" | "inferred" | "thin";
@@ -65,6 +68,9 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
         keywords: stringArray(profile.keywords),
         entities: stringArray(profile.entities),
         summary: typeof profile.summary === "string" ? profile.summary : "",
+        profileText: typeof profile.profileText === "string" ? profile.profileText : undefined,
+        profileVersion: typeof profile.profileVersion === "number" ? profile.profileVersion : undefined,
+        lastProfiledAt: typeof profile.lastProfiledAt === "string" ? profile.lastProfiledAt : undefined,
         questionsAnswered: stringArray(profile.sampleQuestions),
         confidence: profile.confidence === "high" || profile.confidence === "medium" || profile.confidence === "low" ? profile.confidence : undefined,
         sourceQuality: profile.sourceQuality === "structured" || profile.sourceQuality === "inferred" || profile.sourceQuality === "thin" ? profile.sourceQuality : undefined,
@@ -92,6 +98,7 @@ function metadataText(value: unknown): string {
     ...profile.keywords,
     ...profile.entities,
     profile.summary,
+    profile.profileText ?? "",
     ...profile.questionsAnswered,
   ];
   return parts.join(" ");
