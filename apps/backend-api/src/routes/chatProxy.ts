@@ -209,8 +209,8 @@ function buildSourceSelectionSummary(opts: {
       id: collection.id,
       name: collection.name,
       reason: retrievalSuggestedIds.includes(collection.id)
-        ? `${explainCollectionRouteSuggestion(collection, opts.routePlan)} Retrieval probe bu kaynaktan kanıt buldu.`
-        : explainCollectionRouteSuggestion(collection, opts.routePlan),
+        ? `${explainCollectionRouteSuggestion(collection, opts.routePlan, opts.query)} Retrieval probe bu kaynaktan kanıt buldu.`
+        : explainCollectionRouteSuggestion(collection, opts.routePlan, opts.query),
     }));
   const usedCollectionsMatchRoute =
     !opts.routePlan?.domain ||

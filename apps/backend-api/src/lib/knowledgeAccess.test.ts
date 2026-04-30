@@ -322,6 +322,86 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(metadataCandidates.map((collection) => collection.id)[0]).toBe("education-bep");
     expect(metadataCandidates[0]?.score ?? 0).toBeGreaterThan(metadataCandidates[1]?.score ?? 0);
   });
+
+  it("explains profile-backed suggestions with quality and score", async () => {
+    const { explainCollectionRouteSuggestion } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "RAM raporu sonrası BEP planını okulda nasıl konuşmalıyım?";
+    const reason = explainCollectionRouteSuggestion(
+      {
+        id: "education-bep",
+        name: "Yeni BEP ve RAM arşivi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            version: 1,
+            domains: ["education"],
+            subtopics: ["ozel_egitim"],
+            keywords: ["BEP", "RAM", "rehberlik"],
+            entities: ["RAM raporu"],
+            documentTypes: ["knowledge_note"],
+            audiences: ["student_or_parent"],
+            sampleQuestions: ["RAM raporu sonrası BEP planını okulda nasıl konuşmalıyım?"],
+            summary: "Özel eğitim desteğinde RAM raporu, BEP planı ve okul rehberlik görüşmesi notları.",
+            riskLevel: "medium",
+            sourceQuality: "structured",
+            confidence: "high",
+            sampleQuestionsEmbedding: embedKnowledgeText(query),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+      routeQuery(query),
+      query,
+    );
+
+    expect(reason).toContain("Profile eşleşmesi");
+    expect(reason).toContain("structured profile");
+    expect(reason).toContain("skor");
+  });
+
+  it("marks thin profile suggestions as cautious instead of strict evidence", async () => {
+    const { explainCollectionRouteSuggestion, rankMetadataRouteCandidates } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "Sözleşmedeki cezai şart için hangi belgeye bakmalıyım?";
+    const routePlan = routeQuery(query);
+    const collection = {
+      id: "thin-contract-upload",
+      name: "Yeni yüklenen sözleşme notu",
+      visibility: "PRIVATE" as const,
+      autoMetadata: {
+        profile: {
+          version: 1,
+          domains: ["legal"],
+          subtopics: ["sozlesme"],
+          keywords: ["sözleşme", "cezai şart"],
+          entities: [],
+          documentTypes: ["document"],
+          audiences: ["client"],
+          sampleQuestions: [],
+          summary: "Kısa sözleşme notu; profil henüz az veriyle oluştu.",
+          riskLevel: "medium",
+          sourceQuality: "thin",
+          confidence: "medium",
+          keywordsEmbedding: embedKnowledgeText("sözleşme cezai şart belge"),
+          updatedAt: "2026-04-29T00:00:00.000Z",
+        },
+      },
+      documents: [],
+    };
+
+    const candidates = rankMetadataRouteCandidates({ routePlan, query, collections: [collection], limit: 1 });
+    const reason = explainCollectionRouteSuggestion(collection, routePlan, query);
+
+    expect(candidates[0]).toMatchObject({ id: "thin-contract-upload", sourceQuality: "thin" });
+    expect(reason).toContain("thin profile");
+    expect(reason).toContain("temkinli");
+  });
 });
 
 describe("collectionHasSpecificRouteSupport", () => {

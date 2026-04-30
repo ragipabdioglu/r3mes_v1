@@ -383,11 +383,29 @@ export function collectionHasSpecificRouteSupport(
 export function explainCollectionRouteSuggestion(
   collection: KnowledgeCollectionAccessItem,
   routePlan: DomainRoutePlan | null,
+  query?: string,
 ): string {
   if (!routePlan || routePlan.domain === "general") {
     return collection.visibility === "PRIVATE"
       ? "Private kaynak olduğu için önce denenebilir."
       : "Erişilebilir public alternatif knowledge kaynağı.";
+  }
+
+  const metadataCandidate = metadataCandidateForRoute(collection, routePlan, query);
+  if (metadataCandidate) {
+    const quality =
+      metadataCandidate.sourceQuality === "structured"
+        ? "structured profile"
+        : metadataCandidate.sourceQuality === "inferred"
+          ? "inferred profile"
+          : metadataCandidate.sourceQuality === "thin"
+            ? "thin profile, temkinli öneri"
+            : "metadata profile";
+    const score = Math.round(metadataCandidate.score);
+    if (metadataCandidate.matchedTerms.length > 0) {
+      return `Profile eşleşmesi (${quality}, skor ${score}): ${metadataCandidate.matchedTerms.slice(0, 4).join(", ")}.`;
+    }
+    return `Semantik profile eşleşmesi (${quality}, skor ${score}) route domain '${routePlan.domain}' ile uyumlu.`;
   }
 
   const text = collectionMetadataText(collection);
