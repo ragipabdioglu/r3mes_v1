@@ -101,8 +101,21 @@ function sourceQualityRank(value: KnowledgeAutoMetadata["sourceQuality"]): numbe
   return 1;
 }
 
+function hasMeaningfulProfileSignal(item: KnowledgeAutoMetadata): boolean {
+  return item.domain !== "general" || item.subtopics.length > 0 || item.keywords.length >= 3 || item.entities.length > 0;
+}
+
+function collectionSourceQualityForItems(items: KnowledgeAutoMetadata[]): KnowledgeAutoMetadata["sourceQuality"] {
+  if (items.some((item) => item.sourceQuality === "structured")) return "structured";
+  const meaningfulCount = items.filter(hasMeaningfulProfileSignal).length;
+  if (items.length >= 2 && meaningfulCount >= 2 && items.some((item) => item.sourceQuality === "inferred")) {
+    return "inferred";
+  }
+  return "thin";
+}
+
 function confidenceForProfile(items: KnowledgeAutoMetadata[], sourceQuality: KnowledgeAutoMetadata["sourceQuality"]): KnowledgeCollectionProfile["confidence"] {
-  const meaningfulItems = items.filter((item) => item.domain !== "general" || item.subtopics.length > 0 || item.keywords.length >= 3);
+  const meaningfulItems = items.filter(hasMeaningfulProfileSignal);
   if (sourceQuality === "structured" && meaningfulItems.length >= 1) return "high";
   if (meaningfulItems.length >= 2) return "high";
   if (meaningfulItems.length === 1) return "medium";
@@ -263,9 +276,7 @@ export function buildKnowledgeCollectionProfile(
   const riskLevel = cleanItems
     .map((item) => item.riskLevel)
     .sort((a, b) => riskOrder.indexOf(b) - riskOrder.indexOf(a))[0] ?? "low";
-  const sourceQuality = cleanItems
-    .map((item) => item.sourceQuality)
-    .sort((a, b) => sourceQualityRank(b) - sourceQualityRank(a))[0] ?? "thin";
+  const sourceQuality = collectionSourceQualityForItems(cleanItems);
   const domains = weightedUnique(cleanItems.map((item) => item.domain), 4);
   const subtopics = weightedUnique(cleanItems.flatMap((item) => item.subtopics), 16);
   const keywords = weightedUnique(cleanItems.flatMap((item) => item.keywords), 32);
@@ -396,11 +407,7 @@ export function mergeKnowledgeAutoMetadata(
     riskLevel,
     summary: compactSummary(items.map((item) => item.summary).filter(Boolean).join(" "), 520),
     questionsAnswered: unique(items.flatMap((item) => item.questionsAnswered), 10),
-    sourceQuality: items.some((item) => item.sourceQuality === "structured")
-      ? "structured"
-      : items.some((item) => item.sourceQuality === "inferred")
-        ? "inferred"
-        : "thin",
+    sourceQuality: collectionSourceQualityForItems(items),
   };
   return {
     ...mergedBase,
