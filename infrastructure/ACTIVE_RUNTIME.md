@@ -61,6 +61,18 @@ $env:R3MES_EXPOSE_CHAT_DEBUG='1'
 
 The grounded eval runner sends the debug header automatically.
 
+## Composer Role Boundary
+
+Fallback and safety answers stay deterministic. Grounded answers can be switched explicitly:
+
+| Mode | Env | Behavior |
+| --- | --- | --- |
+| Deterministic default | `R3MES_GROUNDED_COMPOSER_MODE=deterministic` | Uses the domain evidence composer for stable MVP answers. |
+| Model synthesis | `R3MES_GROUNDED_COMPOSER_MODE=model` | Sends clean evidence to Qwen for natural synthesis when retrieval is grounded. |
+| Auto | `R3MES_GROUNDED_COMPOSER_MODE=auto` | Keeps medical on deterministic safety-first path; lets non-medical grounded answers use model synthesis. |
+
+No-source, source-suggestion, privacy-safe, and alignment-mismatch fallbacks do not depend on Qwen.
+
 ## Active Embedding / Reindex Gate
 
 Qdrant reindex must not run on silent deterministic fallback when `R3MES_EMBEDDING_PROVIDER=ai-engine` or `bge-m3`.

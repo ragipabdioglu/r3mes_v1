@@ -52,6 +52,7 @@ const DEFAULT_VALIDATOR_MAX_TOKENS = 180;
 const DEFAULT_COMPOSER_MAX_TOKENS = 160;
 const MEDICAL_COMPOSER_MAX_TOKENS = 120;
 const DEFAULT_VALIDATOR_MIN_MAX_TOKENS = 180;
+type GroundedComposerMode = "deterministic" | "model" | "auto";
 
 interface ChatRetrievalDebug {
   groundingConfidence: "high" | "medium" | "low";
@@ -99,6 +100,7 @@ interface ChatRetrievalDebug {
     directFactCount: number;
     riskFactCount: number;
     hasUsableGrounding: boolean;
+    composerMode?: GroundedComposerMode;
   };
 }
 
@@ -119,6 +121,11 @@ function shouldUseTrueHybridRetrieval(): boolean {
 function getChatResponseMode(): "natural" | "json" {
   const raw = (process.env.R3MES_CHAT_RESPONSE_MODE ?? "natural").trim().toLowerCase();
   return raw === "json" ? "json" : "natural";
+}
+
+function getGroundedComposerMode(): GroundedComposerMode {
+  const raw = (process.env.R3MES_GROUNDED_COMPOSER_MODE ?? "deterministic").trim().toLowerCase();
+  return raw === "model" || raw === "auto" ? raw : "deterministic";
 }
 
 function getComposerMaxTokens(answerDomain: DomainPolicy["domain"]): number {
@@ -324,7 +331,10 @@ function shouldUseRagFastPath(opts: {
   sourceCount: number;
   groundingConfidence: "high" | "medium" | "low";
   answerDomain: DomainPolicy["domain"];
+  composerMode?: GroundedComposerMode;
 }): boolean {
+  if (opts.composerMode === "model") return false;
+  if (opts.composerMode === "auto" && opts.answerDomain !== "medical") return false;
   const raw = (process.env.R3MES_ENABLE_RAG_FAST_PATH ?? "1").trim().toLowerCase();
   if (raw === "0" || raw === "false" || raw === "off") return false;
   if (opts.stream || !opts.hasRetrieval || opts.sourceCount === 0) return false;
@@ -1209,58 +1219,62 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         routePlan,
       });
       const domainPolicy = getDomainPolicy(answerDomain);
-        const responseMode = getChatResponseMode();
-        const retrievalSuggestedCollectionIds = retrievalQuery
-          ? await resolveRetrievalBackedSuggestionIds({
-              query: plannedRetrievalQuery,
-              evidenceQuery: retrievalQuery,
-              routePlan,
-              suggestibleCollections,
-              excludedIds: new Set([
-                ...requestedCollectionIds,
-                ...retrieval.sources.map((source) => source.collectionId),
-              ]),
-            })
-          : [];
-        const sourceSelection = buildSourceSelectionSummary({
-          query: plannedRetrievalQuery,
-          requestedCollectionIds,
-          accessibleCollectionIds,
-          suggestibleCollections,
-          sources: retrieval.sources,
-          includePublic,
-          routePlan,
-          retrievalSuggestedCollectionIds,
-        });
-        const routeDecisionQuality = {
-          sourceCount: retrieval.sources.length,
-          directFactCount: retrieval.evidence?.directAnswerFacts.length ?? retrieval.evidence?.usableFacts.length ?? 0,
-          riskFactCount: retrieval.evidence?.riskFacts.length ?? retrieval.evidence?.redFlags.length ?? 0,
-          hasUsableGrounding: retrieval.sources.length > 0 && retrieval.groundingConfidence !== "low",
-        };
-        req.log.info(
-          buildRouteDecisionLogEvent({
-            query: retrievalQuery,
+      const groundedComposerMode = getGroundedComposerMode();
+      const responseMode = getChatResponseMode();
+      const retrievalSuggestedCollectionIds = retrievalQuery
+        ? await resolveRetrievalBackedSuggestionIds({
+            query: plannedRetrievalQuery,
+            evidenceQuery: retrievalQuery,
             routePlan,
-            sourceSelection,
-            retrievalDiagnostics: retrieval.retrievalDiagnostics ?? undefined,
-            quality: routeDecisionQuality,
-          }),
-          "Knowledge route decision",
-        );
+            suggestibleCollections,
+            excludedIds: new Set([
+              ...requestedCollectionIds,
+              ...retrieval.sources.map((source) => source.collectionId),
+            ]),
+          })
+        : [];
+      const sourceSelection = buildSourceSelectionSummary({
+        query: plannedRetrievalQuery,
+        requestedCollectionIds,
+        accessibleCollectionIds,
+        suggestibleCollections,
+        sources: retrieval.sources,
+        includePublic,
+        routePlan,
+        retrievalSuggestedCollectionIds,
+      });
+      const routeDecisionQuality = {
+        sourceCount: retrieval.sources.length,
+        directFactCount: retrieval.evidence?.directAnswerFacts.length ?? retrieval.evidence?.usableFacts.length ?? 0,
+        riskFactCount: retrieval.evidence?.riskFacts.length ?? retrieval.evidence?.redFlags.length ?? 0,
+        hasUsableGrounding: retrieval.sources.length > 0 && retrieval.groundingConfidence !== "low",
+      };
+      req.log.info(
+        buildRouteDecisionLogEvent({
+          query: retrievalQuery,
+          routePlan,
+          sourceSelection,
+          retrievalDiagnostics: retrieval.retrievalDiagnostics ?? undefined,
+          quality: routeDecisionQuality,
+        }),
+        "Knowledge route decision",
+      );
 
-        const retrievalDebug: ChatRetrievalDebug | null = retrievalQuery
-          ? {
-              groundingConfidence: retrieval.groundingConfidence,
-              queryPlan: queryPlan?.output ?? null,
+      const retrievalDebug: ChatRetrievalDebug | null = retrievalQuery
+        ? {
+            groundingConfidence: retrieval.groundingConfidence,
+            queryPlan: queryPlan?.output ?? null,
             routePlan,
             evidence: retrieval.evidence,
             domain: answerDomain,
-              responseMode,
-              retrievalMode: retrieval.retrievalMode,
-              retrievalDiagnostics: retrieval.retrievalDiagnostics ?? undefined,
-              sourceSelection,
-              quality: routeDecisionQuality,
+            responseMode,
+            retrievalMode: retrieval.retrievalMode,
+            retrievalDiagnostics: retrieval.retrievalDiagnostics ?? undefined,
+            sourceSelection,
+            quality: {
+              ...routeDecisionQuality,
+              composerMode: groundedComposerMode,
+            },
           }
         : null;
 
@@ -1296,6 +1310,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           sourceCount: retrieval.sources.length,
           groundingConfidence: retrieval.groundingConfidence,
           answerDomain,
+          composerMode: groundedComposerMode,
         })
       ) {
         const deterministicAnswer = buildDeterministicGroundedAnswer({
