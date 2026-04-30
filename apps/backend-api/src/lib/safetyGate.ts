@@ -3,6 +3,7 @@ import type { ChatSourceCitation } from "@r3mes/shared-types";
 import type { GroundedMedicalAnswer } from "./answerSchema.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import { hasLowLanguageQuality } from "./answerQuality.js";
+import { composeAnswerSpec } from "./domainEvidenceComposer.js";
 import { getDomainSafetyPolicy, getRiskyCertaintyPatterns } from "./domainSafetyPolicy.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
@@ -103,7 +104,18 @@ function hasSourceMetadataMismatch(answer: GroundedMedicalAnswer, sources: ChatS
   return answer.used_source_ids.some((id) => !available.has(id));
 }
 
-function buildFallback(answer: GroundedMedicalAnswer, sources: ChatSourceCitation[]): string {
+function fallbackSections(intent: AnswerSpec["answerIntent"]): AnswerSpec["sections"] {
+  if (intent === "triage") return ["caution", "assessment", "action", "summary"];
+  if (intent === "steps") return ["action", "assessment", "caution", "summary"];
+  return ["assessment", "action", "caution", "summary"];
+}
+
+function buildFallback(
+  answer: GroundedMedicalAnswer,
+  sources: ChatSourceCitation[],
+  answerSpec: AnswerSpec | undefined,
+  fallbackMode: SafetyGateResult["fallbackMode"],
+): string {
   const policy = getDomainSafetyPolicy(answer.answer_domain);
   const sourceNote =
     sources.length > 0
@@ -112,49 +124,27 @@ function buildFallback(answer: GroundedMedicalAnswer, sources: ChatSourceCitatio
   const queryNote = answer.user_query
     ? `Sorunuz: ${answer.user_query}`
     : "Sorunuzdaki bilgi sınırlı.";
+  const assessment =
+    fallbackMode === "privacy_safe"
+      ? "Bu yanıtta kullanılmak istenen kaynak kapsamı erişim sınırlarıyla uyuşmadığı için kaynaklı cevap verilmedi."
+      : sourceNote;
+  const spec: AnswerSpec = {
+    answerDomain: answerSpec?.answerDomain ?? answer.answer_domain,
+    answerIntent: answerSpec?.answerIntent ?? answer.answer_intent,
+    groundingConfidence: "low",
+    userQuery: answerSpec?.userQuery || answer.user_query,
+    tone: "cautious",
+    sections: fallbackSections(answerSpec?.answerIntent ?? answer.answer_intent),
+    assessment,
+    action: policy.fallbackGuidance.action,
+    caution: [policy.fallbackGuidance.caution],
+    summary: `${queryNote} ${policy.fallbackGuidance.summary}`,
+    unknowns: answerSpec?.unknowns ?? [],
+    sourceIds: fallbackMode === "privacy_safe" ? [] : (answerSpec?.sourceIds ?? answer.used_source_ids),
+    facts: answerSpec?.facts ?? [],
+  };
 
-  if (answer.answer_domain === "legal") {
-    return [
-      `1. Kaynağa göre durum: ${sourceNote}`,
-      `2. Ne yapılabilir: ${policy.fallbackGuidance.action}`,
-      `3. Nelere dikkat edilmeli: ${policy.fallbackGuidance.caution}`,
-      `4. Kısa özet: ${queryNote} ${policy.fallbackGuidance.summary}`,
-    ].join("\n");
-  }
-
-  if (answer.answer_domain === "finance") {
-    return [
-      `1. Kaynağa göre durum: ${sourceNote}`,
-      `2. Ne yapılabilir: ${policy.fallbackGuidance.action}`,
-      `3. Riskler: ${policy.fallbackGuidance.caution}`,
-      `4. Kısa özet: ${queryNote} ${policy.fallbackGuidance.summary}`,
-    ].join("\n");
-  }
-
-  if (answer.answer_domain === "technical") {
-    return [
-      `1. Kaynağa göre durum: ${sourceNote}`,
-      `2. Ne yapılabilir: ${policy.fallbackGuidance.action}`,
-      `3. Dikkat edilmesi gerekenler: ${policy.fallbackGuidance.caution}`,
-      `4. Kısa özet: ${queryNote} ${policy.fallbackGuidance.summary}`,
-    ].join("\n");
-  }
-
-  if (answer.answer_domain === "education") {
-    return [
-      `1. Kaynağa göre durum: ${sourceNote}`,
-      `2. Ne yapılabilir: ${policy.fallbackGuidance.action}`,
-      `3. Dikkat edilmesi gerekenler: ${policy.fallbackGuidance.caution}`,
-      `4. Kısa özet: ${queryNote} ${policy.fallbackGuidance.summary}`,
-    ].join("\n");
-  }
-
-  return [
-    `1. Genel değerlendirme: ${sourceNote}`,
-    `2. Ne yapmalı: ${policy.fallbackGuidance.action}`,
-    `3. Ne zaman doktora başvurmalı: ${policy.fallbackGuidance.caution}`,
-    `4. Kısa özet: ${queryNote} ${policy.fallbackGuidance.summary}`,
-  ].join("\n");
+  return composeAnswerSpec(spec);
 }
 
 export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
@@ -270,7 +260,7 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
     railChecks,
     requiredRewrite: !pass,
     fallbackMode,
-    safeFallback: pass ? undefined : buildFallback(opts.answer, opts.sources),
+    safeFallback: pass ? undefined : buildFallback(opts.answer, opts.sources, opts.answerSpec, fallbackMode),
     metrics: {
       sourceCount: opts.sources.length,
       usableFactCount,

@@ -313,6 +313,83 @@ describe("deterministic safety gate", () => {
     );
   });
 
+  it("renders safety fallbacks through AnswerSpec instead of reusing unsafe model text", () => {
+    const result = evaluateSafetyGate({
+      answerText: "Bu kesin apandisittir, antibiyotik kullan.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
+        answer_intent: "triage",
+        user_query: "şiddetli karın ağrım var",
+      },
+      answerSpec: {
+        answerDomain: "medical",
+        answerIntent: "triage",
+        groundingConfidence: "medium",
+        userQuery: "şiddetli karın ağrım var",
+        tone: "direct",
+        sections: ["caution", "assessment", "action", "summary"],
+        assessment: "Kaynak ağrının şiddeti ve eşlik eden belirtilerin değerlendirilmesi gerektiğini söylüyor.",
+        action: "Yakınma sürerse sağlık profesyoneliyle görüşülmelidir.",
+        caution: ["Şiddetli ağrı ve ateş varsa gecikmeden başvurulmalıdır."],
+        summary: "Alarm bulguları varsa değerlendirme gerekir.",
+        unknowns: [],
+        sourceIds: ["doc_1"],
+        facts: ["Ağrının şiddeti ve eşlik eden belirtiler önemlidir."],
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.safeFallback).toContain("Bu kaynaklarla net ve kesin bir cevap vermek doğru olmaz");
+    expect(result.safeFallback).toContain("Ne zaman doktora başvurmalı:");
+    expect(result.safeFallback).toContain("Kesin tanı veya tedavi önermek doğru olmaz");
+    expect(result.safeFallback).not.toContain("apandisittir");
+    expect(result.safeFallback).not.toContain("antibiyotik kullan");
+  });
+
+  it("uses privacy-safe AnswerSpec fallback without exposing blocked source ids", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "1. Genel değerlendirme: Gizli kaynağa göre cevap verildi.\n2. Ne yapmalı: İşlem yapılabilir.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "legal",
+        answer_intent: "steps",
+        user_query: "özel dosyamdaki sözleşmeye göre ne yapmalıyım",
+        used_source_ids: ["private-doc-9"],
+      },
+      answerSpec: {
+        answerDomain: "legal",
+        answerIntent: "steps",
+        groundingConfidence: "medium",
+        userQuery: "özel dosyamdaki sözleşmeye göre ne yapmalıyım",
+        tone: "direct",
+        sections: ["action", "assessment", "caution", "summary"],
+        assessment: "Özel sözleşme kaynağı kullanıldı.",
+        action: "Belgeye göre işlem yapılabilir.",
+        caution: ["Hak kaybı riski olabilir."],
+        summary: "Belgeye göre ilerlenebilir.",
+        unknowns: [],
+        sourceIds: ["private-doc-9"],
+        facts: ["Özel kaynak faktı."],
+      },
+      sources: [{ ...source, collectionId: "private-other", documentId: "private-doc-9" }],
+      retrievalWasUsed: true,
+      sourceSelection: {
+        accessibleCollectionIds: ["allowed-collection"],
+        usedCollectionIds: ["private-other"],
+      },
+    });
+
+    expect(result.severity).toBe("block");
+    expect(result.safeFallback).toContain("erişim sınırlarıyla uyuşmadığı");
+    expect(result.safeFallback).toContain("Kesin hukuki görüş");
+    expect(result.safeFallback).not.toContain("private-doc-9");
+    expect(result.safeFallback).not.toContain("Özel kaynak faktı");
+  });
+
   it("uses legal safety policy for guaranteed legal outcomes", () => {
     const result = evaluateSafetyGate({
       answerText: "Davayı kesin kazanırsınız, avukata gerek yok.",
