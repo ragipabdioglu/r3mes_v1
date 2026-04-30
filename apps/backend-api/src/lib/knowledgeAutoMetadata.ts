@@ -38,6 +38,10 @@ export interface KnowledgeCollectionProfile {
   profileText: string;
   profileTextHash: string;
   profileEmbedding: number[];
+  summaryEmbedding: number[];
+  sampleQuestionsEmbedding: number[];
+  keywordsEmbedding: number[];
+  entityEmbedding: number[];
   lastProfiledAt: string;
   updatedAt: string;
 }
@@ -107,7 +111,22 @@ function profileLine(label: string, values: string[] | string): string {
   return value ? `${label}: ${value}` : "";
 }
 
-function buildProfileText(profile: Omit<KnowledgeCollectionProfile, "version" | "profileVersion" | "profileText" | "profileTextHash" | "profileEmbedding" | "lastProfiledAt" | "updatedAt">): string {
+function buildProfileText(
+  profile: Omit<
+    KnowledgeCollectionProfile,
+    | "version"
+    | "profileVersion"
+    | "profileText"
+    | "profileTextHash"
+    | "profileEmbedding"
+    | "summaryEmbedding"
+    | "sampleQuestionsEmbedding"
+    | "keywordsEmbedding"
+    | "entityEmbedding"
+    | "lastProfiledAt"
+    | "updatedAt"
+  >,
+): string {
   return [
     profileLine("Domains", profile.domains),
     profileLine("Subtopics", profile.subtopics),
@@ -178,6 +197,10 @@ export function buildKnowledgeCollectionProfile(
     profileText,
     profileTextHash,
     profileEmbedding: embedKnowledgeText(profileText),
+    summaryEmbedding: embedKnowledgeText(baseProfile.summary),
+    sampleQuestionsEmbedding: embedKnowledgeText(baseProfile.sampleQuestions.join(" ")),
+    keywordsEmbedding: embedKnowledgeText(baseProfile.keywords.join(" ")),
+    entityEmbedding: embedKnowledgeText(baseProfile.entities.join(" ")),
     lastProfiledAt: timestamp,
     updatedAt: timestamp,
   };

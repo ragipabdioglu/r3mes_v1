@@ -256,6 +256,72 @@ describe("rankSuggestedKnowledgeCollections", () => {
     });
     expect(metadataCandidates[0]?.matchedTerms).toEqual(expect.arrayContaining(["bosanma", "velayet", "nafaka"]));
   });
+
+  it("uses field-level profile embeddings for natural-language collection suggestions", async () => {
+    const { rankMetadataRouteCandidates, rankSuggestedKnowledgeCollections } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "RAM raporu sonrası BEP planını okulda nasıl konuşmalıyım?";
+    const routePlan = routeQuery(query);
+    const collections = [
+      {
+        id: "education-exam",
+        name: "Sınav itiraz arşivi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            version: 1,
+            domains: ["education"],
+            subtopics: ["sinav"],
+            keywords: [],
+            entities: [],
+            documentTypes: ["knowledge_note"],
+            audiences: ["student_or_parent"],
+            sampleQuestions: [],
+            summary: "Sınav sonucuna itiraz süresi ve resmi başvuru kanalı notları.",
+            riskLevel: "medium",
+            sourceQuality: "structured",
+            confidence: "high",
+            sampleQuestionsEmbedding: embedKnowledgeText("sınav sonucuna itiraz süresi resmi kılavuz başvuru"),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+      {
+        id: "education-bep",
+        name: "Yeni BEP ve RAM arşivi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            version: 1,
+            domains: ["education"],
+            subtopics: ["ozel_egitim"],
+            keywords: [],
+            entities: [],
+            documentTypes: ["knowledge_note"],
+            audiences: ["student_or_parent"],
+            sampleQuestions: [],
+            summary: "Özel eğitim desteğinde RAM raporu, BEP planı ve okul rehberlik görüşmesi notları.",
+            riskLevel: "medium",
+            sourceQuality: "structured",
+            confidence: "high",
+            sampleQuestionsEmbedding: embedKnowledgeText("RAM raporu sonrası BEP planını okulda nasıl konuşmalıyım"),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+    ];
+
+    const ranked = rankSuggestedKnowledgeCollections({ routePlan, query, collections, limit: 2 });
+    const metadataCandidates = rankMetadataRouteCandidates({ routePlan, query, collections, limit: 2 });
+
+    expect(ranked.map((collection) => collection.id)[0]).toBe("education-bep");
+    expect(metadataCandidates.map((collection) => collection.id)[0]).toBe("education-bep");
+    expect(metadataCandidates[0]?.score ?? 0).toBeGreaterThan(metadataCandidates[1]?.score ?? 0);
+  });
 });
 
 describe("collectionHasSpecificRouteSupport", () => {

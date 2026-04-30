@@ -86,6 +86,10 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(merged?.profile?.profileText).toContain("Domains: technical");
     expect(merged?.profile?.profileTextHash).toHaveLength(64);
     expect(merged?.profile?.profileEmbedding).toHaveLength(256);
+    expect(merged?.profile?.summaryEmbedding).toHaveLength(256);
+    expect(merged?.profile?.sampleQuestionsEmbedding).toHaveLength(256);
+    expect(merged?.profile?.keywordsEmbedding).toHaveLength(256);
+    expect(merged?.profile?.entityEmbedding).toHaveLength(256);
   });
 
   it("builds a weighted collection profile for adaptive routing", () => {
@@ -110,6 +114,10 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(profile?.profileText).toContain("Subtopics:");
     expect(profile?.profileTextHash).toHaveLength(64);
     expect(profile?.profileEmbedding).toHaveLength(256);
+    expect(profile?.summaryEmbedding).toHaveLength(256);
+    expect(profile?.sampleQuestionsEmbedding).toHaveLength(256);
+    expect(profile?.keywordsEmbedding).toHaveLength(256);
+    expect(profile?.entityEmbedding).toHaveLength(256);
     expect(profile?.lastProfiledAt).toBe("2026-04-29T00:00:00.000Z");
     expect(profile?.updatedAt).toBe("2026-04-29T00:00:00.000Z");
   });

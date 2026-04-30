@@ -13,6 +13,10 @@ interface KnowledgeMetadataProfile {
   summary: string;
   profileText?: string;
   profileEmbedding?: number[];
+  summaryEmbedding?: number[];
+  sampleQuestionsEmbedding?: number[];
+  keywordsEmbedding?: number[];
+  entityEmbedding?: number[];
   profileVersion?: number;
   lastProfiledAt?: string;
   questionsAnswered: string[];
@@ -73,6 +77,10 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
         summary: typeof profile.summary === "string" ? profile.summary : "",
         profileText,
         profileEmbedding: numberArray(profile.profileEmbedding) ?? (profileText ? embedKnowledgeText(profileText) : undefined),
+        summaryEmbedding: numberArray(profile.summaryEmbedding),
+        sampleQuestionsEmbedding: numberArray(profile.sampleQuestionsEmbedding),
+        keywordsEmbedding: numberArray(profile.keywordsEmbedding),
+        entityEmbedding: numberArray(profile.entityEmbedding),
         profileVersion: typeof profile.profileVersion === "number" ? profile.profileVersion : undefined,
         lastProfiledAt: typeof profile.lastProfiledAt === "string" ? profile.lastProfiledAt : undefined,
         questionsAnswered: stringArray(profile.sampleQuestions),
@@ -182,9 +190,21 @@ function sourceQualityScore(profile: KnowledgeMetadataProfile): number {
 }
 
 function profileEmbeddingScore(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number | null {
-  if (!profile.profileEmbedding) return null;
   const queryVector = embedKnowledgeText(routeSignalText(routePlan, query));
-  return Math.max(0, cosineSimilarity(queryVector, profile.profileEmbedding)) * 100;
+  const signals = [
+    { vector: profile.profileEmbedding, weight: 0.5 },
+    { vector: profile.summaryEmbedding, weight: 0.2 },
+    { vector: profile.sampleQuestionsEmbedding, weight: 0.15 },
+    { vector: profile.keywordsEmbedding, weight: 0.1 },
+    { vector: profile.entityEmbedding, weight: 0.05 },
+  ].filter((signal): signal is { vector: number[]; weight: number } => Array.isArray(signal.vector));
+  if (signals.length === 0) return null;
+  const weightSum = signals.reduce((sum, signal) => sum + signal.weight, 0);
+  const score = signals.reduce(
+    (sum, signal) => sum + Math.max(0, cosineSimilarity(queryVector, signal.vector)) * signal.weight,
+    0,
+  ) / Math.max(weightSum, 0.0001);
+  return score * 100;
 }
 
 function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number {
