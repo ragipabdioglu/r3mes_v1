@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { routeQuery } from "./queryRouter.js";
+import { extractQuerySignals, routeQuery } from "./queryRouter.js";
 
 describe("routeQuery", () => {
   it("routes medical questions into domain and subtopic scopes", () => {
@@ -90,5 +90,18 @@ describe("routeQuery", () => {
     expect(plan.domain).toBe("general");
     expect(plan.confidence).toBe("low");
     expect(plan.subtopics).toEqual([]);
+  });
+
+  it("extracts weak query signals without making them the final route authority", () => {
+    const signals = extractQuerySignals("Boşanma davasında velayet için hangi belgeleri hazırlamalıyım?");
+
+    expect(signals.language).toBe("tr");
+    expect(signals.intent).toBe("steps");
+    expect(signals.possibleDomains).toEqual(["legal"]);
+    expect(signals.lexicalTerms).toEqual(expect.arrayContaining(["boşanma", "velayet"]));
+    expect(signals.routeHints).toMatchObject({
+      domain: "legal",
+      confidence: "high",
+    });
   });
 });

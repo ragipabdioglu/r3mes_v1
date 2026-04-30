@@ -13,6 +13,23 @@ export interface DomainRoutePlan {
   confidence: RouteConfidence;
 }
 
+export interface QuerySignals {
+  normalizedQuery: string;
+  language: "tr" | "en" | "unknown";
+  intent: "steps" | "triage" | "explain" | "compare" | "reassure" | "unknown";
+  riskLevel: RouteRiskLevel;
+  lexicalTerms: string[];
+  namedEntities: string[];
+  possibleDomains: AnswerDomain[];
+  routeHints: {
+    domain: AnswerDomain;
+    subtopics: string[];
+    confidence: RouteConfidence;
+    retrievalHints: string[];
+    mustIncludeTerms: string[];
+  };
+}
+
 interface RouteRule {
   domain: AnswerDomain;
   subtopic: string;
@@ -55,6 +72,31 @@ function containsTerm(query: string, tokens: string[], term: string): boolean {
 
 function countMatches(query: string, tokens: string[], terms: string[]): number {
   return terms.filter((term) => containsTerm(query, tokens, term)).length;
+}
+
+function inferLanguage(text: string): QuerySignals["language"] {
+  if (!text.trim()) return "unknown";
+  if (/[ğüşöçıİĞÜŞÖÇ]/u.test(text)) return "tr";
+  const normalized = normalize(text);
+  if (/\b(the|what|how|why|when|should|before|after)\b/u.test(normalized)) return "en";
+  if (/\b(ne|nasıl|nasil|neden|hangi|önce|once|sonra|mıyım|miyim)\b/u.test(normalized)) return "tr";
+  return "unknown";
+}
+
+function inferIntent(query: string): QuerySignals["intent"] {
+  if (containsTerm(query, tokenize(query), "panik") || containsTerm(query, tokenize(query), "kork")) return "reassure";
+  if (["acil", "beklemeli", "ne zaman", "şiddetli", "siddetli", "ateş", "ates", "riskli mi"].some((term) => containsTerm(query, tokenize(query), term))) return "triage";
+  if (["ne yap", "nasıl", "nasil", "hangi", "neye dikkat", "ilk ne", "hazırla", "hazirla", "kontrol"].some((term) => containsTerm(query, tokenize(query), term))) return "steps";
+  if (["fark", "karşılaştır", "karsilastir", "hangisi"].some((term) => containsTerm(query, tokenize(query), term))) return "compare";
+  if (["nedir", "ne anlama", "yorum", "açıkla", "acikla", "neden"].some((term) => containsTerm(query, tokenize(query), term))) return "explain";
+  return "unknown";
+}
+
+function extractNamedEntities(text: string): string[] {
+  return unique(
+    text
+      .match(/\b[A-ZÇĞİÖŞÜ][\p{L}\p{N}-]*(?:\s+[A-ZÇĞİÖŞÜ][\p{L}\p{N}-]*){0,3}\b/gu) ?? [],
+  ).slice(0, 8);
 }
 
 const ROUTE_RULES: RouteRule[] = [
@@ -301,5 +343,28 @@ export function routeQuery(userQuery: string): DomainRoutePlan {
     mustIncludeTerms: unique(domainRules.flatMap((rule) => rule.include)).slice(0, 12),
     mustExcludeTerms: ["kesin kanser", "mutlaka ameliyat", "ilaç başla", "garanti getiri", "kesin sonuç"],
     confidence,
+  };
+}
+
+export function extractQuerySignals(userQuery: string): QuerySignals {
+  const routeHints = routeQuery(userQuery);
+  const tokens = unique(tokenize(userQuery)).slice(0, 24);
+  const possibleDomains = routeHints.confidence === "low" ? [] : [routeHints.domain];
+
+  return {
+    normalizedQuery: normalize(userQuery).trim(),
+    language: inferLanguage(userQuery),
+    intent: inferIntent(normalize(userQuery)),
+    riskLevel: routeHints.riskLevel,
+    lexicalTerms: tokens,
+    namedEntities: extractNamedEntities(userQuery),
+    possibleDomains,
+    routeHints: {
+      domain: routeHints.domain,
+      subtopics: routeHints.subtopics,
+      confidence: routeHints.confidence,
+      retrievalHints: routeHints.retrievalHints,
+      mustIncludeTerms: routeHints.mustIncludeTerms,
+    },
   };
 }

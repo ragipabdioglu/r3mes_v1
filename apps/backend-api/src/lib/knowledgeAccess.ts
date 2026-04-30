@@ -1,6 +1,7 @@
 import { prisma } from "./prisma.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
+import { getRouterWeights, weightedRouterScore } from "./routerConfig.js";
 
 interface KnowledgeMetadataProfile {
   domain: string;
@@ -117,6 +118,18 @@ function normalize(text: string): string {
   return text.toLocaleLowerCase("tr-TR");
 }
 
+function unique(values: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values.map((item) => item.trim()).filter(Boolean)) {
+    const key = normalize(value);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out;
+}
+
 function containsTerm(text: string, term: string): boolean {
   const normalizedTerm = normalize(term);
   if (!normalizedTerm) return false;
@@ -128,29 +141,49 @@ function metadataProfileMatchesDomain(profile: KnowledgeMetadataProfile, domain:
   return profile.domains.map(normalize).includes(normalizedDomain) || normalize(metadataText(profile)).includes(normalizedDomain);
 }
 
+function percentScore(matches: number, possible: number): number {
+  if (possible <= 0) return 0;
+  return Math.min(100, (matches / possible) * 100);
+}
+
+function sourceQualityScore(profile: KnowledgeMetadataProfile): number {
+  if (profile.sourceQuality === "structured") return 100;
+  if (profile.sourceQuality === "inferred") return 65;
+  if (profile.sourceQuality === "thin") return 20;
+  return profile.confidence === "high" ? 75 : profile.confidence === "medium" ? 55 : 35;
+}
+
 function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan): number {
-  let score = 0;
   const text = normalize(metadataText(profile));
-  if (profile.domains.map(normalize).includes(normalize(routePlan.domain))) {
-    score += profile.confidence === "high" ? 70 : profile.confidence === "medium" ? 60 : 50;
-  }
-  if (profile.sourceQuality === "structured") score += 8;
-
-  for (const subtopic of routePlan.subtopics) {
+  const profileSubtopics = profile.subtopics.map(normalize);
+  const exactDomain = profile.domains.map(normalize).includes(normalize(routePlan.domain));
+  const subtopicMatches = routePlan.subtopics.filter((subtopic) => {
     const normalizedSubtopic = normalize(subtopic);
-    if (profile.subtopics.map(normalize).includes(normalizedSubtopic)) score += profile.confidence === "high" ? 42 : 34;
-    if (text.includes(normalizedSubtopic.replace(/_/g, " "))) score += 12;
-  }
+    return profileSubtopics.includes(normalizedSubtopic) || text.includes(normalizedSubtopic.replace(/_/g, " "));
+  }).length;
+  const domainHint = Math.min(
+    100,
+    (exactDomain ? 60 : metadataProfileMatchesDomain(profile, routePlan.domain) ? 45 : 0) +
+      percentScore(subtopicMatches, Math.max(1, routePlan.subtopics.length)) * 0.4,
+  );
+  const lexicalTerms = unique([...routePlan.mustIncludeTerms, ...routePlan.retrievalHints]);
+  const lexicalMatches = lexicalTerms.filter((term) => containsTerm(text, term)).length;
+  const lexicalKeyword = percentScore(lexicalMatches, Math.min(Math.max(lexicalTerms.length, 1), 10));
+  const sampleText = normalize(profile.questionsAnswered.join(" "));
+  const sampleMatches = lexicalTerms.filter((term) => containsTerm(sampleText, term)).length;
+  const sampleQuestion = percentScore(sampleMatches, Math.min(Math.max(lexicalTerms.length, 1), 8));
 
-  for (const hint of routePlan.retrievalHints) {
-    if (containsTerm(text, hint)) score += 10;
-  }
-
-  for (const term of routePlan.mustIncludeTerms) {
-    if (containsTerm(text, term)) score += 6;
-  }
-
-  return score;
+  return weightedRouterScore(
+    {
+      // Profile embeddings are introduced in the next phase. Until then, inactive weights are renormalized out.
+      profileEmbedding: null,
+      lexicalKeyword,
+      sampleQuestion,
+      domainHint,
+      sourceQuality: sourceQualityScore(profile),
+    },
+    getRouterWeights(),
+  );
 }
 
 function metadataCandidateForRoute(
@@ -332,7 +365,7 @@ export function rankSuggestedKnowledgeCollections(opts: {
     .filter(({ score, collection }) => {
       if (!routePlan || routePlan.domain === "general") return true;
       if (routePlan.subtopics.length > 0 && collectionMetadataProfiles(collection).length > 0) {
-        return collectionHasMetadataSubtopicSupport(collection, routePlan) || score >= 100;
+        return collectionHasMetadataSubtopicSupport(collection, routePlan) || score >= 64;
       }
       return score >= 24 || collectionMatchesRoute(collection, routePlan.domain);
     })
