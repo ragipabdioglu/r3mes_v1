@@ -189,6 +189,21 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (Array.isArray(testCase.expectedAccessibleCollectionIds) && testCase.expectedAccessibleCollectionIds.length > 0) {
+    const accessibleIds = retrievalDebug?.sourceSelection?.accessibleCollectionIds ?? [];
+    const missingAccessible = testCase.expectedAccessibleCollectionIds.filter((id) => !accessibleIds.includes(id));
+    if (missingAccessible.length > 0) {
+      failures.push(`accessible_collection_missing:${missingAccessible.join(",")}`);
+    }
+  }
+
+  if (testCase.expectedSelectionMode) {
+    const actualSelectionMode = retrievalDebug?.sourceSelection?.selectionMode;
+    if (actualSelectionMode !== testCase.expectedSelectionMode) {
+      failures.push(`selection_mode:${actualSelectionMode ?? "missing"}`);
+    }
+  }
+
   if (Array.isArray(testCase.expectedSuggestedCollectionIds) && testCase.expectedSuggestedCollectionIds.length > 0) {
     const suggestedIds = [
       ...(retrievalDebug?.sourceSelection?.suggestedCollections?.map((collection) => collection.id) ?? []),
@@ -198,6 +213,22 @@ function scoreCase(testCase, response) {
     const missingSuggested = testCase.expectedSuggestedCollectionIds.filter((id) => !suggestedIds.includes(id));
     if (missingSuggested.length > 0) {
       failures.push(`suggested_collection_missing:${missingSuggested.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(testCase.expectedMetadataCandidateIds) && testCase.expectedMetadataCandidateIds.length > 0) {
+    const candidateIds = retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.id) ?? [];
+    const missingCandidates = testCase.expectedMetadataCandidateIds.filter((id) => !candidateIds.includes(id));
+    if (missingCandidates.length > 0) {
+      failures.push(`metadata_candidate_missing:${missingCandidates.join(",")}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.minTopMetadataCandidateScore))) {
+    const candidates = retrievalDebug?.sourceSelection?.metadataRouteCandidates ?? [];
+    const topScore = Math.max(0, ...candidates.map((collection) => Number(collection.score) || 0));
+    if (topScore < Number(testCase.minTopMetadataCandidateScore)) {
+      failures.push(`metadata_candidate_score:${topScore}<${Number(testCase.minTopMetadataCandidateScore)}`);
     }
   }
 
@@ -241,9 +272,14 @@ function scoreCase(testCase, response) {
     safetyPass: safetyGate?.pass ?? null,
     factCount,
     redFlagCount: Array.isArray(evidence?.redFlags) ? evidence.redFlags.length : 0,
+    selectionMode: retrievalDebug?.sourceSelection?.selectionMode ?? null,
     routeDecisionMode: routeDecision?.mode ?? null,
     routeDecisionConfidence: routeDecision?.confidence ?? null,
     routePrimaryDomain: routeDecision?.primaryDomain ?? null,
+    usedCollectionIds: retrievalDebug?.sourceSelection?.usedCollectionIds ?? [],
+    suggestedCollectionIds: routeDecision?.suggestedCollectionIds ?? [],
+    rejectedCollectionIds: routeDecision?.rejectedCollectionIds ?? [],
+    metadataRouteCandidateIds: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.id) ?? [],
     latencyMs: response?._latencyMs ?? null,
     content,
   };
@@ -352,7 +388,7 @@ async function main() {
     results.push(result);
     const mark = result.ok ? "PASS" : "FAIL";
     console.log(
-      `${mark} ${result.id} confidence=${result.confidence ?? "-"} sources=${result.sourceCount} facts=${result.factCount} safety=${result.safetyPass} latency=${result.latencyMs ?? "-"}ms`,
+      `${mark} ${result.id} route=${result.routeDecisionMode ?? "-"} selection=${result.selectionMode ?? "-"} confidence=${result.confidence ?? "-"} sources=${result.sourceCount} facts=${result.factCount} safety=${result.safetyPass} latency=${result.latencyMs ?? "-"}ms`,
     );
     if (!result.ok) {
       console.log(`  ${result.failures.join("; ")}`);
@@ -366,6 +402,16 @@ async function main() {
     passed,
     failed: results.length - passed,
     passRate: results.length === 0 ? 0 : Number((passed / results.length).toFixed(3)),
+    routeDecisionModes: results.reduce((acc, result) => {
+      const key = result.routeDecisionMode ?? "missing";
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {}),
+    selectionModes: results.reduce((acc, result) => {
+      const key = result.selectionMode ?? "missing";
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {}),
     durationMs: Date.now() - started,
   };
   await mkdir(dirname(opts.out), { recursive: true });
