@@ -78,7 +78,7 @@ export async function buildApp() {
     reply.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
     reply.header(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Requested-With, X-Signature, X-Message, X-Wallet-Address, x-r3mes-wallet",
+      "Content-Type, Authorization, X-Requested-With, X-Signature, X-Message, X-Wallet-Address, X-R3MES-Debug, x-r3mes-wallet",
     );
     if (req.method === "OPTIONS") {
       reply.code(204);
