@@ -67,23 +67,41 @@ async function storeEmbeddings(rows: { embeddingId: string; values: number[] }[]
 function summarizeCollectionMetadata(
   documents: Array<{ title: string; autoMetadata?: unknown; chunks: Array<{ content: string; autoMetadata?: unknown }> }>,
   collectionAutoMetadata?: unknown,
-): { inferredTopic: string | null; inferredTags: string[] } {
+): {
+  inferredDomain: string | null;
+  inferredTopic: string | null;
+  inferredTags: string[];
+  sourceQuality: "structured" | "inferred" | "thin" | null;
+  profileConfidence: "low" | "medium" | "high" | null;
+  profileVersion: number | null;
+  lastProfiledAt: string | null;
+} {
   const collectionMetadata = readKnowledgeAutoMetadata(collectionAutoMetadata);
   if (collectionMetadata) {
     const profile = collectionMetadata.profile;
     if (profile) {
       return {
+        inferredDomain: profile.domains[0] ?? collectionMetadata.domain,
         inferredTopic: profile.subtopics[0] ?? profile.domains[0] ?? collectionMetadata.domain,
         inferredTags: [
           ...(profile.domains ?? []),
           ...(profile.subtopics ?? []),
           ...(profile.keywords ?? []),
         ].slice(0, 8),
+        sourceQuality: profile.sourceQuality ?? collectionMetadata.sourceQuality,
+        profileConfidence: profile.confidence ?? null,
+        profileVersion: profile.profileVersion ?? profile.version ?? null,
+        lastProfiledAt: profile.lastProfiledAt ?? null,
       };
     }
     return {
+      inferredDomain: collectionMetadata.domain,
       inferredTopic: collectionMetadata.subtopics[0] ?? collectionMetadata.domain,
       inferredTags: [collectionMetadata.domain, ...collectionMetadata.subtopics, ...collectionMetadata.keywords].slice(0, 8),
+      sourceQuality: collectionMetadata.sourceQuality,
+      profileConfidence: null,
+      profileVersion: null,
+      lastProfiledAt: null,
     };
   }
 
@@ -122,7 +140,15 @@ function summarizeCollectionMetadata(
     .filter((tag, index, arr) => arr.indexOf(tag) === index)
     .slice(0, 8);
 
-  return { inferredTopic, inferredTags };
+  return {
+    inferredDomain: inferredTags[0] ?? null,
+    inferredTopic,
+    inferredTags,
+    sourceQuality: null,
+    profileConfidence: null,
+    profileVersion: null,
+    lastProfiledAt: null,
+  };
 }
 
 function readKnowledgeAutoMetadata(value: unknown): KnowledgeAutoMetadata | null {
@@ -210,8 +236,13 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           visibility: row.visibility,
           ownerWallet: row.owner.walletAddress,
           documentCount: row._count.documents,
+          inferredDomain: metadata.inferredDomain,
           inferredTopic: metadata.inferredTopic,
           inferredTags: metadata.inferredTags,
+          sourceQuality: metadata.sourceQuality,
+          profileConfidence: metadata.profileConfidence,
+          profileVersion: metadata.profileVersion,
+          lastProfiledAt: metadata.lastProfiledAt,
           publishedAt: row.publishedAt?.toISOString() ?? null,
           createdAt: row.createdAt.toISOString(),
           updatedAt: row.updatedAt.toISOString(),

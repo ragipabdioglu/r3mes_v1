@@ -70,6 +70,43 @@ describe("knowledge routes access control", () => {
             "0xd5a6f9e7dd18997ed39e1e584b1ec60d636bf295fbe43ccb09cd8a906d2c0204",
         },
         _count: { documents: 1 },
+        autoMetadata: {
+          domain: "general",
+          subtopics: [],
+          keywords: [],
+          entities: [],
+          documentType: "knowledge_note",
+          audience: "general_user",
+          riskLevel: "low",
+          summary: "",
+          questionsAnswered: [],
+          sourceQuality: "thin",
+          profile: {
+            version: 1,
+            profileVersion: 3,
+            domains: ["hr"],
+            subtopics: ["onboarding"],
+            keywords: ["personel", "hesap", "erişim"],
+            entities: ["onboarding"],
+            documentTypes: ["runbook"],
+            audiences: ["operator"],
+            sampleQuestions: ["Yeni personel onboarding sürecinde hangi hesaplar açılmalı?"],
+            summary: "Yeni personel onboarding ve hesap açılışı notları.",
+            riskLevel: "low",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileText: "Domains: hr\nSubtopics: onboarding",
+            profileTextHash: "hash",
+            profileEmbedding: [],
+            summaryEmbedding: [],
+            sampleQuestionsEmbedding: [],
+            keywordsEmbedding: [],
+            entityEmbedding: [],
+            lastProfiledAt: "2026-04-23T10:00:00.000Z",
+            updatedAt: "2026-04-23T10:00:00.000Z",
+          },
+        },
+        documents: [],
       },
       {
         id: "kc_public",
@@ -80,6 +117,7 @@ describe("knowledge routes access control", () => {
         updatedAt: new Date("2026-04-22T10:00:00.000Z"),
         owner: { walletAddress: "0x2222222222222222222222222222222222222222222222222222222222222222" },
         _count: { documents: 3 },
+        documents: [],
       },
     ] as never);
 
@@ -89,6 +127,14 @@ describe("knowledge routes access control", () => {
     expect(res.statusCode).toBe(200);
     const parsed = parseKnowledgeListResponse(JSON.parse(res.body));
     expect(parsed.data.map((item) => item.id)).toEqual(["kc_private", "kc_public"]);
+    expect(parsed.data[0]).toMatchObject({
+      inferredDomain: "hr",
+      inferredTopic: "onboarding",
+      sourceQuality: "structured",
+      profileConfidence: "high",
+      profileVersion: 3,
+      lastProfiledAt: "2026-04-23T10:00:00.000Z",
+    });
     await app.close();
   });
 

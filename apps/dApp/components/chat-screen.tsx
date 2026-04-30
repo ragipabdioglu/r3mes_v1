@@ -59,6 +59,19 @@ const KNOWLEDGE_DOMAIN_LABELS: Record<Exclude<KnowledgeDomainFilter, "auto" | "a
   finance: "Finans",
 };
 
+function knownKnowledgeDomain(value?: string | null): Exclude<KnowledgeDomainFilter, "auto" | "all"> | null {
+  if (
+    value === "medical" ||
+    value === "legal" ||
+    value === "technical" ||
+    value === "education" ||
+    value === "finance"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function isInternalKnowledgeCollection(collection: KnowledgeCollectionListItem): boolean {
   const value = `${collection.name} ${collection.id}`.toLocaleLowerCase("tr-TR");
   return /\b(smoke|demo|test|dev|debug)\b/.test(value) || value.includes("raw legal upload");
@@ -85,8 +98,17 @@ function inferKnowledgeDomain(text: string): Exclude<KnowledgeDomainFilter, "aut
 }
 
 function collectionDomain(collection: KnowledgeCollectionListItem): Exclude<KnowledgeDomainFilter, "auto" | "all"> | null {
+  const backendDomain = knownKnowledgeDomain(collection.inferredDomain);
+  if (backendDomain) return backendDomain;
   const metadata = `${collection.inferredTopic ?? ""} ${(collection.inferredTags ?? []).join(" ")}`.trim();
   return inferKnowledgeDomain(metadata) ?? inferKnowledgeDomain(`${collection.name} ${collection.id}`);
+}
+
+function profileQualityLabel(collection: KnowledgeCollectionListItem): string | null {
+  if (!collection.sourceQuality && !collection.profileConfidence) return null;
+  const quality = collection.sourceQuality ?? "profile";
+  const confidence = collection.profileConfidence ? `/${collection.profileConfidence}` : "";
+  return `${quality}${confidence}`;
 }
 
 function shortId(id: string): string {
@@ -962,6 +984,7 @@ export function ChatScreen() {
                   {recommendedCollections.map((collection) => {
                     const checked = selectedCollectionIds.includes(collection.id);
                     const domain = collectionDomain(collection);
+                    const quality = profileQualityLabel(collection);
                     return (
                       <li key={collection.id}>
                         <button
@@ -980,6 +1003,7 @@ export function ChatScreen() {
                           <span className="mt-1 block text-[11px] text-zinc-500">
                             {collection.documentCount} doküman · {formatCollectionDate(collection.updatedAt)}
                             {domain ? ` · ${KNOWLEDGE_DOMAIN_LABELS[domain]}` : ""}
+                            {quality ? ` · ${quality}` : ""}
                           </span>
                           {collection.inferredTopic || collection.inferredTags?.length ? (
                             <span className="mt-1 block text-[10px] text-zinc-500">
@@ -1023,6 +1047,8 @@ export function ChatScreen() {
                       <ul className="grid gap-2 sm:grid-cols-2">
                         {group.items.map((collection) => {
                           const checked = selectedCollectionIds.includes(collection.id);
+                          const domain = collectionDomain(collection);
+                          const quality = profileQualityLabel(collection);
                           return (
                             <li key={collection.id}>
                               <label
@@ -1044,6 +1070,8 @@ export function ChatScreen() {
                                   </span>
                                   <span className="mt-1 block text-[11px] text-zinc-500">
                                     {collection.documentCount} doküman · {formatCollectionDate(collection.updatedAt)}
+                                    {domain ? ` · ${KNOWLEDGE_DOMAIN_LABELS[domain]}` : ""}
+                                    {quality ? ` · ${quality}` : ""}
                                   </span>
                                   {collection.inferredTopic || collection.inferredTags?.length ? (
                                     <span className="mt-1 block text-[10px] text-zinc-500">

@@ -37,8 +37,13 @@ export interface KnowledgeCollectionListItem {
   visibility: KnowledgeVisibility;
   ownerWallet: string;
   documentCount: number;
+  inferredDomain?: string | null;
   inferredTopic?: string | null;
   inferredTags?: string[];
+  sourceQuality?: "structured" | "inferred" | "thin" | null;
+  profileConfidence?: "low" | "medium" | "high" | null;
+  profileVersion?: number | null;
+  lastProfiledAt?: string | null;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
