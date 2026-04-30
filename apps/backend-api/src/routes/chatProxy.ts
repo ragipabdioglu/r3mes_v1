@@ -6,6 +6,7 @@ import { getConfiguredChatRuntime, normalizeAdapterPath } from "../lib/adapterRu
 import { parseGroundedMedicalAnswer } from "../lib/answerParse.js";
 import { hasLowLanguageQuality, polishAnswerText } from "../lib/answerQuality.js";
 import { EMPTY_GROUNDED_MEDICAL_ANSWER, type GroundedMedicalAnswer } from "../lib/answerSchema.js";
+import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
 import { composeDomainEvidenceAnswer } from "../lib/domainEvidenceComposer.js";
@@ -596,35 +597,31 @@ function buildDeterministicGroundedAnswer(opts: {
   userQuery: string;
   evidence: EvidenceExtractorOutput | null;
 }): GroundedMedicalAnswer {
-  const facts = opts.evidence?.usableFacts.map(stripSourcePrefix).filter(Boolean) ?? [];
-  const directFacts = opts.evidence?.directAnswerFacts.map(stripSourcePrefix).filter(Boolean) ?? [];
-  const supportingFacts = opts.evidence?.supportingContext.map(stripSourcePrefix).filter(Boolean) ?? [];
-  const redFlags = opts.evidence?.redFlags.map(stripSourcePrefix).filter(Boolean) ?? [];
-  const uncertain = [
-    ...(opts.evidence?.uncertainOrUnusable ?? []),
-    ...(opts.evidence?.missingInfo ?? []),
-  ].map(stripSourcePrefix).filter(Boolean);
-  const firstFact = directFacts[0] ?? facts[0] ?? "Kaynaklarda bu soruya doğrudan sınırlı bilgi bulundu.";
-  const secondFact = supportingFacts[0] ?? directFacts[1] ?? facts[1] ?? firstFact;
+  const spec = buildAnswerSpec({
+    answerDomain: opts.answerDomain,
+    groundingConfidence: opts.groundingConfidence,
+    userQuery: opts.userQuery,
+    evidence: opts.evidence,
+  });
 
   return {
     ...EMPTY_GROUNDED_MEDICAL_ANSWER,
-    answer_domain: opts.answerDomain,
-    answer_intent: opts.evidence?.answerIntent ?? "unknown",
-    grounding_confidence: opts.groundingConfidence,
-    user_query: opts.userQuery,
-    answer: firstFact,
-    condition_context: firstFact,
-    safe_action: secondFact,
-    visit_triggers: redFlags.slice(0, 3),
-    one_sentence_summary: firstFact,
-    general_assessment: firstFact,
-    recommended_action: secondFact,
-    doctor_visit_when: redFlags.slice(0, 3),
-    red_flags: redFlags.slice(0, 3),
-    avoid_inference: uncertain.slice(0, 3),
-    short_summary: firstFact,
-    used_source_ids: opts.evidence?.sourceIds ?? [],
+    answer_domain: spec.answerDomain,
+    answer_intent: spec.answerIntent,
+    grounding_confidence: spec.groundingConfidence,
+    user_query: spec.userQuery,
+    answer: spec.assessment,
+    condition_context: spec.assessment,
+    safe_action: spec.action,
+    visit_triggers: spec.caution.slice(0, 3),
+    one_sentence_summary: spec.summary,
+    general_assessment: spec.assessment,
+    recommended_action: spec.action,
+    doctor_visit_when: spec.caution.slice(0, 3),
+    red_flags: spec.caution.slice(0, 3),
+    avoid_inference: spec.unknowns.slice(0, 3),
+    short_summary: spec.summary,
+    used_source_ids: spec.sourceIds,
   };
 }
 
