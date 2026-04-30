@@ -1,4 +1,4 @@
-import type { AnswerDomain, AnswerIntent, GroundingConfidence } from "./answerSchema.js";
+import type { AnswerDomain, AnswerIntent, GroundedMedicalAnswer, GroundingConfidence } from "./answerSchema.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 export interface AnswerSpec {
@@ -94,6 +94,48 @@ export function buildAnswerSpec(opts: {
     summary,
     unknowns: unknowns.slice(0, 4),
     sourceIds: opts.evidence?.sourceIds ?? [],
+    facts: facts.slice(0, 6),
+  };
+}
+
+export function buildAnswerSpecFromGroundedAnswer(answer: GroundedMedicalAnswer): AnswerSpec {
+  const assessment =
+    answer.condition_context ||
+    answer.general_assessment ||
+    answer.one_sentence_summary ||
+    answer.answer ||
+    "Kaynaklarda bu soruya doğrudan sınırlı bilgi bulundu.";
+  const action = answer.safe_action || answer.recommended_action || fallbackAction(answer.answer_domain);
+  const caution = cleanValues([
+    ...(answer.red_flags.length > 0 ? answer.red_flags : answer.visit_triggers),
+    ...answer.doctor_visit_when,
+  ]);
+  const unknowns = cleanValues(answer.avoid_inference);
+  const facts = cleanValues([
+    answer.answer,
+    answer.condition_context,
+    answer.safe_action,
+    answer.general_assessment,
+    answer.recommended_action,
+    answer.one_sentence_summary,
+    answer.short_summary,
+  ]);
+  const tone =
+    answer.grounding_confidence === "low" ? "cautious" : answer.answer_intent === "reassure" ? "calm" : "direct";
+
+  return {
+    answerDomain: answer.answer_domain,
+    answerIntent: answer.answer_intent,
+    groundingConfidence: answer.grounding_confidence,
+    userQuery: answer.user_query,
+    tone,
+    sections: sectionsForIntent(answer.answer_intent),
+    assessment,
+    action,
+    caution: (caution.length > 0 ? caution : [fallbackCaution(answer.answer_domain)]).slice(0, 3),
+    summary: answer.short_summary || answer.one_sentence_summary || assessment,
+    unknowns: unknowns.slice(0, 4),
+    sourceIds: answer.used_source_ids,
     facts: facts.slice(0, 6),
   };
 }

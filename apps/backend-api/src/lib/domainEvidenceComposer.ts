@@ -1,4 +1,6 @@
 import type { GroundedMedicalAnswer } from "./answerSchema.js";
+import type { AnswerSpec } from "./answerSpec.js";
+import { buildAnswerSpecFromGroundedAnswer } from "./answerSpec.js";
 import { polishAnswerText } from "./answerQuality.js";
 import { getDomainPolicy } from "./domainPolicy.js";
 
@@ -18,43 +20,27 @@ function sentence(value: string): string {
   return /[.!?]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
-function lowGroundingLead(answer: GroundedMedicalAnswer): string | null {
-  if (answer.grounding_confidence !== "low") return null;
+function lowGroundingLead(spec: AnswerSpec): string | null {
+  if (spec.groundingConfidence !== "low") return null;
   return "Bu kaynaklarla net ve kesin bir cevap vermek doğru olmaz; aşağıdaki yanıt yalnızca eldeki sınırlı dayanağa göre okunmalı.";
 }
 
-export function composeDomainEvidenceAnswer(answer: GroundedMedicalAnswer): string {
-  const policy = getDomainPolicy(answer.answer_domain);
+export function composeAnswerSpec(spec: AnswerSpec): string {
+  const policy = getDomainPolicy(spec.answerDomain);
   const sourceNote =
-    answer.grounding_confidence === "low"
+    spec.groundingConfidence === "low"
       ? "Eldeki kaynak dayanağı sınırlı."
       : "Kaynaklarda bu soruya doğrudan dayanak var.";
-  const assessment = clean(
-    answer.condition_context || answer.general_assessment || answer.one_sentence_summary,
-    sourceNote,
-  );
-  const action = clean(
-    answer.safe_action || answer.recommended_action,
-    answer.answer_domain === "technical"
-      ? "Değişikliği önce kontrollü ortamda deneyip yedek ve geri dönüş planını netleştirin."
-      : "Kaynak yetersizse karar vermeden önce ilgili uzman veya yetkili kurumdan destek alın.",
-  );
-  const caution = joinItems(
-    answer.red_flags.length > 0 ? answer.red_flags : answer.visit_triggers,
-    answer.answer_domain === "technical"
-      ? "Yedeksiz işlem, belirsiz rollback, uzun kilit süresi veya veri silen komutlar yüksek risklidir."
-      : "Kaynakta açık dayanak yoksa kesin sonuç veya garanti ifade edilmemelidir.",
-  );
-  const summary = clean(
-    answer.short_summary || answer.one_sentence_summary || assessment,
-    "Kaynaklara bağlı kalarak temkinli ilerlemek gerekir.",
-  );
+  const assessment = clean(spec.assessment, sourceNote);
+  const action = clean(spec.action, "Kaynak yetersizse karar vermeden önce ilgili uzman veya yetkili kurumdan destek alın.");
+  const caution = joinItems(spec.caution, "Kaynakta açık dayanak yoksa kesin sonuç veya garanti ifade edilmemelidir.");
+  const summary = clean(spec.summary || assessment, "Kaynaklara bağlı kalarak temkinli ilerlemek gerekir.");
 
-  const lead = lowGroundingLead(answer);
+  const lead = lowGroundingLead(spec);
   const lines: string[] = [];
   if (lead) lines.push(lead);
 
-  if (answer.answer_intent === "triage") {
+  if (spec.answerIntent === "triage") {
     lines.push(
       `${policy.answerLabels.caution}: ${sentence(caution)}`,
       `${policy.answerLabels.assessment}: ${sentence(assessment)}`,
@@ -64,7 +50,7 @@ export function composeDomainEvidenceAnswer(answer: GroundedMedicalAnswer): stri
     return lines.join("\n");
   }
 
-  if (answer.answer_intent === "steps") {
+  if (spec.answerIntent === "steps") {
     lines.push(
       `Kısa plan:`,
       `1. ${sentence(action)}`,
@@ -75,7 +61,7 @@ export function composeDomainEvidenceAnswer(answer: GroundedMedicalAnswer): stri
     return lines.join("\n");
   }
 
-  if (answer.answer_intent === "reassure") {
+  if (spec.answerIntent === "reassure") {
     lines.push(
       `Kısa cevap: ${sentence(assessment)}`,
       `Bu, tek başına kesin veya panik gerektiren bir sonuç gibi sunulmamalı; kaynakların desteklediği sınır burada kalıyor.`,
@@ -85,7 +71,7 @@ export function composeDomainEvidenceAnswer(answer: GroundedMedicalAnswer): stri
     return lines.join("\n");
   }
 
-  if (answer.answer_intent === "compare") {
+  if (spec.answerIntent === "compare") {
     lines.push(
       `${policy.answerLabels.assessment}: ${sentence(assessment)}`,
       `Karşılaştırırken kullanılabilecek dayanak: ${sentence(summary)}`,
@@ -95,7 +81,7 @@ export function composeDomainEvidenceAnswer(answer: GroundedMedicalAnswer): stri
     return lines.join("\n");
   }
 
-  if (answer.answer_intent === "explain") {
+  if (spec.answerIntent === "explain") {
     lines.push(
       `${sentence(assessment)}`,
       `Pratik anlamı: ${sentence(action)}`,
@@ -112,4 +98,8 @@ export function composeDomainEvidenceAnswer(answer: GroundedMedicalAnswer): stri
     `${policy.answerLabels.summary}: ${sentence(summary)}`,
   );
   return lines.join("\n");
+}
+
+export function composeDomainEvidenceAnswer(answer: GroundedMedicalAnswer): string {
+  return composeAnswerSpec(buildAnswerSpecFromGroundedAnswer(answer));
 }

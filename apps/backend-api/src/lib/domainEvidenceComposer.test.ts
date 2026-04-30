@@ -1,8 +1,31 @@
 import { describe, expect, it } from "vitest";
 
-import { composeDomainEvidenceAnswer } from "./domainEvidenceComposer.js";
+import { composeAnswerSpec, composeDomainEvidenceAnswer } from "./domainEvidenceComposer.js";
 
 describe("composeDomainEvidenceAnswer", () => {
+  it("renders directly from AnswerSpec without requiring legacy grounded answer fields", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "education",
+      answerIntent: "explain",
+      groundingConfidence: "medium",
+      userQuery: "Öğrenci devamsızlığı nasıl değerlendirilir?",
+      tone: "direct",
+      sections: ["assessment", "action", "caution", "summary"],
+      assessment: "Kaynak, devamsızlık değerlendirmesinde okulun güncel kayıtlarının esas alınacağını söylüyor.",
+      action: "Öğrenci ve veli, okul yönetimi veya rehberlik birimiyle kayıtları netleştirmelidir.",
+      caution: ["Kaynakta açık tarih veya kurum kararı yoksa kesin uygulama söylenmemelidir."],
+      summary: "Devamsızlık için güncel okul kaydı ve resmi uygulama kontrol edilmelidir.",
+      unknowns: [],
+      sourceIds: ["education-attendance"],
+      facts: ["Okulun güncel kayıtları esas alınır."],
+    });
+
+    expect(rendered).toContain("okulun güncel kayıtları");
+    expect(rendered).toContain("Pratik anlamı:");
+    expect(rendered).not.toContain("Smear");
+    expect(rendered).not.toContain("kasık");
+  });
+
   it("renders technical evidence without inventing destructive steps", () => {
     const rendered = composeDomainEvidenceAnswer({
       answer_domain: "technical",
