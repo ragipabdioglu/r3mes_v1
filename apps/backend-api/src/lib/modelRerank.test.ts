@@ -3,6 +3,33 @@ import * as rerankModule from "./rerank.js";
 import * as modelRerankModule from "./modelRerank.js";
 
 describe("rerankKnowledgeCardsWithFallback", () => {
+  it("builds bounded reranker documents from title, metadata, and chunk start", () => {
+    const document = modelRerankModule.buildRerankerDocumentText(
+      {
+        chunk: {
+          content: "bir iki üç dört beş altı",
+          document: { title: "Uzun kaynak" },
+        },
+        card: {
+          topic: "test konusu",
+          tags: ["alpha", "beta"],
+          patientSummary: "Özet alanı.",
+          clinicalTakeaway: "",
+          safeGuidance: "",
+          redFlags: "",
+          doNotInfer: "",
+        },
+      },
+      3,
+    );
+
+    expect(document).toContain("Title: Uzun kaynak");
+    expect(document).toContain("Topic: test konusu");
+    expect(document).toContain("Tags: alpha, beta");
+    expect(document).toContain("Chunk Start: bir iki üç");
+    expect(document).not.toContain("dört");
+  });
+
   it("falls back to deterministic ranking when model reranker is disabled", async () => {
     const candidates = [
       {
@@ -36,6 +63,53 @@ describe("rerankKnowledgeCardsWithFallback", () => {
         1,
       ),
     );
+    vi.unstubAllEnvs();
+  });
+
+  it("sends bounded documents to the model reranker", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "model");
+    vi.stubEnv("R3MES_ALIGNMENT_MAX_RERANK_WORDS", "4");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ scores: [0.9] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await modelRerankModule.rerankKnowledgeCardsWithFallback(
+      "migration rollback",
+      [
+        {
+          fusedScore: 1,
+          lexicalScore: 1,
+          embeddingScore: 0,
+          chunk: {
+            id: "chunk-1",
+            content: "yedek rollback staging log bu metnin fazlası gitmemeli",
+            document: { title: "Migration runbook" },
+          },
+          card: {
+            topic: "migration güvenliği",
+            tags: ["technical", "migration"],
+            patientSummary: "Migration öncesi yedek alınır.",
+            clinicalTakeaway: "",
+            safeGuidance: "",
+            redFlags: "",
+            doNotInfer: "",
+          },
+        },
+      ],
+      1,
+    );
+
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string | undefined) ?? "{}") as {
+      documents?: string[];
+    };
+    expect(body.documents?.[0]).toContain("Title: Migration runbook");
+    expect(body.documents?.[0]).toContain("Chunk Start: yedek rollback staging log");
+    expect(body.documents?.[0]).not.toContain("fazlası");
+    vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
 });

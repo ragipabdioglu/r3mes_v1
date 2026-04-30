@@ -2,6 +2,7 @@ import type { KnowledgeCard } from "./knowledgeCard.js";
 import { rerankKnowledgeCards, type RerankCandidate } from "./rerank.js";
 import type { HybridCandidate } from "./hybridRetrieval.js";
 import { createHash } from "node:crypto";
+import { getAlignmentConfig } from "./alignmentConfig.js";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MODEL_WEIGHT = 1.75;
@@ -61,15 +62,44 @@ function getAiEngineBase(): string {
   return (process.env.R3MES_AI_ENGINE_URL ?? process.env.AI_ENGINE_URL ?? AI_ENGINE_DEFAULT).replace(/\/$/, "");
 }
 
-function buildDocumentText(card: KnowledgeCard): string {
+function readChunkContent(chunk: unknown): string {
+  if (!chunk || typeof chunk !== "object") return "";
+  const content = (chunk as { content?: unknown }).content;
+  return typeof content === "string" ? content : "";
+}
+
+function readChunkTitle(chunk: unknown): string {
+  if (!chunk || typeof chunk !== "object") return "";
+  const record = chunk as { document?: unknown; title?: unknown };
+  if (typeof record.title === "string") return record.title;
+  if (record.document && typeof record.document === "object") {
+    const title = (record.document as { title?: unknown }).title;
+    return typeof title === "string" ? title : "";
+  }
+  return "";
+}
+
+function firstWords(value: string, maxWords: number): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, maxWords)
+    .join(" ");
+}
+
+export function buildRerankerDocumentText(candidate: { card: KnowledgeCard; chunk?: unknown }, maxWords = getAlignmentConfig().maxRerankWords): string {
+  const title = readChunkTitle(candidate.chunk);
+  const rawContent = firstWords(readChunkContent(candidate.chunk), maxWords);
   return [
-    card.topic ? `Topic: ${card.topic}` : "",
-    card.tags.length > 0 ? `Tags: ${card.tags.join(", ")}` : "",
-    card.patientSummary ? `Patient Summary: ${card.patientSummary}` : "",
-    card.clinicalTakeaway ? `Clinical Takeaway: ${card.clinicalTakeaway}` : "",
-    card.safeGuidance ? `Safe Guidance: ${card.safeGuidance}` : "",
-    card.redFlags ? `Red Flags: ${card.redFlags}` : "",
-    card.doNotInfer ? `Do Not Infer: ${card.doNotInfer}` : "",
+    title ? `Title: ${title}` : "",
+    candidate.card.topic ? `Topic: ${candidate.card.topic}` : "",
+    candidate.card.tags.length > 0 ? `Tags: ${candidate.card.tags.join(", ")}` : "",
+    candidate.card.patientSummary ? `Patient Summary: ${candidate.card.patientSummary}` : "",
+    candidate.card.clinicalTakeaway ? `Clinical Takeaway: ${candidate.card.clinicalTakeaway}` : "",
+    candidate.card.safeGuidance ? `Safe Guidance: ${candidate.card.safeGuidance}` : "",
+    candidate.card.redFlags ? `Red Flags: ${candidate.card.redFlags}` : "",
+    candidate.card.doNotInfer ? `Do Not Infer: ${candidate.card.doNotInfer}` : "",
+    rawContent ? `Chunk Start: ${rawContent}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -168,7 +198,7 @@ export async function rerankKnowledgeCardsWithFallback<TChunk>(
 
   const candidateLimit = Math.min(getCandidateLimit(), deterministic.length);
   const modelPool = deterministic.slice(0, candidateLimit);
-  const documents = modelPool.map((candidate) => buildDocumentText(candidate.card));
+  const documents = modelPool.map((candidate) => buildRerankerDocumentText(candidate));
 
   try {
     const rawScores = await scoreDocumentsWithModel(query, documents);
