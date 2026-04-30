@@ -9,11 +9,15 @@ describe("buildQdrantPayloadMetadata", () => {
         domain: "general",
         keywords: ["eski"],
         profile: {
+          profileVersion: 3,
           domains: ["legal"],
           subtopics: ["bosanma", "velayet"],
           keywords: ["nafaka", "protokol"],
           entities: ["aile mahkemesi"],
           summary: "Boşanma ve velayet arşivi.",
+          profileText: "Domains: legal\nSubtopics: bosanma, velayet",
+          profileTextHash: "abc123",
+          lastProfiledAt: "2026-04-30T10:00:00.000Z",
           sourceQuality: "structured",
           confidence: "high",
         },
@@ -39,6 +43,10 @@ describe("buildQdrantPayloadMetadata", () => {
     expect(metadata.entities).toEqual(["aile mahkemesi"]);
     expect(metadata.sourceQuality).toBe("structured");
     expect(metadata.metadataConfidence).toBe("high");
+    expect(metadata.collectionProfileVersion).toBe(3);
+    expect(metadata.collectionProfileTextHash).toBe("abc123");
+    expect(metadata.collectionLastProfiledAt).toBe("2026-04-30T10:00:00.000Z");
+    expect(metadata.collectionProfileText).toContain("Domains: legal");
     expect(metadata.riskLevel).toBe("medium");
     expect(metadata.profileSummary).toBe("Boşanma ve velayet arşivi.");
   });
@@ -57,6 +65,8 @@ describe("buildQdrantPayloadMetadata", () => {
       tags: ["rollback"],
       sourceQuality: "thin",
       metadataConfidence: "low",
+      collectionProfileVersion: 0,
+      collectionProfileTextHash: "",
       riskLevel: "low",
     });
   });

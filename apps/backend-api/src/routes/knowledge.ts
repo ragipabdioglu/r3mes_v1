@@ -22,7 +22,12 @@ import { formatVectorLiteral, getKnowledgeEmbeddingDimensions, embedKnowledgeTex
 import { normalizeKnowledgeChunkContent } from "../lib/knowledgeNormalize.js";
 import { chunkKnowledgeText, isSupportedKnowledgeFilename, parseKnowledgeBuffer } from "../lib/knowledgeText.js";
 import { embedTextForQdrant } from "../lib/qdrantEmbedding.js";
-import { buildQdrantPayloadMetadata, setQdrantCollectionVisibility, upsertQdrantKnowledgePoints } from "../lib/qdrantStore.js";
+import {
+  buildQdrantPayloadMetadata,
+  setQdrantCollectionProfileMetadata,
+  setQdrantCollectionVisibility,
+  upsertQdrantKnowledgePoints,
+} from "../lib/qdrantStore.js";
 import { ipfsAddBuffer } from "../lib/ipfsAdd.js";
 import { prisma } from "../lib/prisma.js";
 import { routeQuery } from "../lib/queryRouter.js";
@@ -476,6 +481,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           };
         })),
       );
+      await setQdrantCollectionProfileMetadata(collection.id, document.collectionAutoMetadata);
     } catch (error) {
       req.log.warn({ err: error }, "Qdrant dual-write failed; Prisma RAG remains available");
     }

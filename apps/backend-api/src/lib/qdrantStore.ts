@@ -27,6 +27,10 @@ export interface QdrantKnowledgePayload {
   riskLevel: "low" | "medium" | "high";
   sourceQuality: "structured" | "inferred" | "thin";
   metadataConfidence: "low" | "medium" | "high";
+  collectionProfileVersion: number;
+  collectionProfileTextHash: string;
+  collectionLastProfiledAt: string;
+  collectionProfileText: string;
   profileSummary: string;
   content: string;
   createdAt: string;
@@ -89,6 +93,25 @@ function validConfidence(value: unknown): "low" | "medium" | "high" | null {
   return value === "low" || value === "medium" || value === "high" ? value : null;
 }
 
+function profileVersion(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function collectionProfilePayload(collectionProfile: Record<string, unknown> | null): Pick<
+  QdrantKnowledgePayload,
+  | "collectionProfileVersion"
+  | "collectionProfileTextHash"
+  | "collectionLastProfiledAt"
+  | "collectionProfileText"
+> {
+  return {
+    collectionProfileVersion: profileVersion(collectionProfile?.profileVersion),
+    collectionProfileTextHash: firstString(collectionProfile?.profileTextHash) ?? "",
+    collectionLastProfiledAt: firstString(collectionProfile?.lastProfiledAt) ?? "",
+    collectionProfileText: firstString(collectionProfile?.profileText) ?? "",
+  };
+}
+
 export function buildQdrantPayloadMetadata(opts: {
   collectionMetadata?: unknown;
   documentMetadata?: unknown;
@@ -110,6 +133,10 @@ export function buildQdrantPayloadMetadata(opts: {
   | "riskLevel"
   | "sourceQuality"
   | "metadataConfidence"
+  | "collectionProfileVersion"
+  | "collectionProfileTextHash"
+  | "collectionLastProfiledAt"
+  | "collectionProfileText"
   | "profileSummary"
 > {
   const collection = metadataRecord(opts.collectionMetadata);
@@ -184,6 +211,7 @@ export function buildQdrantPayloadMetadata(opts: {
       validConfidence(documentProfile?.confidence) ??
       validConfidence(collectionProfile?.confidence) ??
       "low",
+    ...collectionProfilePayload(collectionProfile),
     profileSummary: firstString(chunkProfile?.summary, documentProfile?.summary, collectionProfile?.summary, chunk?.summary, document?.summary, collection?.summary) ?? "",
   };
 }
@@ -232,22 +260,24 @@ let payloadIndexesEnsured = false;
 async function ensureQdrantPayloadIndexes(): Promise<void> {
   if (payloadIndexesEnsured) return;
   const collection = encodeURIComponent(getQdrantCollectionName());
-  const fields = [
-    "collectionId",
-    "visibility",
-    "ownerWallet",
-    "domain",
-    "domains",
-    "subtopics",
-    "profileSubtopics",
-    "keywords",
-    "sourceQuality",
-    "metadataConfidence",
+  const fields: Array<{ field_name: string; field_schema: "keyword" | "integer" }> = [
+    { field_name: "collectionId", field_schema: "keyword" },
+    { field_name: "visibility", field_schema: "keyword" },
+    { field_name: "ownerWallet", field_schema: "keyword" },
+    { field_name: "domain", field_schema: "keyword" },
+    { field_name: "domains", field_schema: "keyword" },
+    { field_name: "subtopics", field_schema: "keyword" },
+    { field_name: "profileSubtopics", field_schema: "keyword" },
+    { field_name: "keywords", field_schema: "keyword" },
+    { field_name: "sourceQuality", field_schema: "keyword" },
+    { field_name: "metadataConfidence", field_schema: "keyword" },
+    { field_name: "collectionProfileVersion", field_schema: "integer" },
+    { field_name: "collectionProfileTextHash", field_schema: "keyword" },
   ];
-  for (const field_name of fields) {
+  for (const { field_name, field_schema } of fields) {
     const response = await qdrantFetch(`/collections/${collection}/index?wait=true`, {
       method: "PUT",
-      body: JSON.stringify({ field_name, field_schema: "keyword" }),
+      body: JSON.stringify({ field_name, field_schema }),
     });
     if (!response.ok && response.status !== 409) {
       throw new Error(`Qdrant payload index failed for ${field_name}: ${response.status} ${await response.text()}`);
@@ -274,6 +304,28 @@ export async function upsertQdrantKnowledgePoints(
   });
   if (!response.ok) {
     throw new Error(`Qdrant upsert failed: ${response.status} ${await response.text()}`);
+  }
+}
+
+export async function setQdrantCollectionProfileMetadata(
+  collectionId: string,
+  collectionMetadata?: unknown,
+): Promise<void> {
+  if (!(await isQdrantAvailable())) return;
+  await ensureQdrantKnowledgeCollection();
+  const profilePayload = collectionProfilePayload(metadataProfile(collectionMetadata));
+  const collection = encodeURIComponent(getQdrantCollectionName());
+  const response = await qdrantFetch(`/collections/${collection}/points/payload?wait=true`, {
+    method: "POST",
+    body: JSON.stringify({
+      payload: profilePayload,
+      filter: {
+        must: [{ key: "collectionId", match: { value: collectionId } }],
+      },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Qdrant collection profile metadata update failed: ${response.status} ${await response.text()}`);
   }
 }
 
