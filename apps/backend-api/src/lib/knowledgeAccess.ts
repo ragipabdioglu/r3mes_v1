@@ -35,6 +35,7 @@ export interface KnowledgeMetadataRouteCandidate {
   subtopics: string[];
   matchedTerms: string[];
   reason: string;
+  sourceQuality: "structured" | "inferred" | "thin" | null;
 }
 
 export interface KnowledgeRouteDecision {
@@ -217,6 +218,7 @@ function metadataCandidateForRoute(
     domain: best.profile.domain,
     subtopics: best.profile.subtopics.slice(0, 6),
     matchedTerms: best.matchedTerms,
+    sourceQuality: best.profile.sourceQuality ?? null,
     reason:
       best.matchedTerms.length > 0
         ? `Metadata eşleşmesi: ${best.matchedTerms.slice(0, 4).join(", ")}`
@@ -404,6 +406,7 @@ export function buildKnowledgeRouteDecision(opts: {
   unusedSelectedCollectionIds: string[];
   suggestedCollections: Array<{ id: string; name: string; reason: string }>;
   metadataRouteCandidates: KnowledgeMetadataRouteCandidate[];
+  thinProfileCollectionIds?: string[];
   hasSources: boolean;
 }): KnowledgeRouteDecision {
   const primaryDomain = opts.routePlan?.domain ?? null;
@@ -417,6 +420,10 @@ export function buildKnowledgeRouteDecision(opts: {
     opts.requestedCollectionIds.length > 0
       ? opts.unusedSelectedCollectionIds
       : [];
+  const thinProfileCollectionIds = new Set(opts.thinProfileCollectionIds ?? []);
+  const usedOnlyThinProfiles =
+    opts.usedCollectionIds.length > 0 &&
+    opts.usedCollectionIds.every((id) => thinProfileCollectionIds.has(id));
   const reasons: string[] = [];
 
   if (!opts.routePlan || opts.routePlan.domain === "general" || opts.routePlan.confidence === "low") {
@@ -433,7 +440,7 @@ export function buildKnowledgeRouteDecision(opts: {
     };
   }
 
-  if (opts.hasSources && opts.unusedSelectedCollectionIds.length === 0) {
+  if (opts.hasSources && opts.unusedSelectedCollectionIds.length === 0 && !usedOnlyThinProfiles) {
     reasons.push("Seçilen kaynaklar route ile uyumlu kanıt döndürdü.");
     return {
       mode: "strict",
@@ -448,7 +455,11 @@ export function buildKnowledgeRouteDecision(opts: {
   }
 
   if (opts.hasSources) {
-    reasons.push("Bazı seçili kaynaklar kullanılmadı; kullanılan kaynaklarla cevap verildi.");
+    reasons.push(
+      usedOnlyThinProfiles
+        ? "Kullanılan kaynak yalnız thin profile dayanağı taşıyor; strict yerine broad/temkinli retrieval uygun."
+        : "Bazı seçili kaynaklar kullanılmadı; kullanılan kaynaklarla cevap verildi.",
+    );
     return {
       mode: "broad",
       primaryDomain,

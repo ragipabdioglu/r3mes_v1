@@ -252,6 +252,7 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(metadataCandidates[0]).toMatchObject({
       id: "profile-divorce",
       domain: "legal",
+      sourceQuality: "structured",
     });
     expect(metadataCandidates[0]?.matchedTerms).toEqual(expect.arrayContaining(["bosanma", "velayet", "nafaka"]));
   });
@@ -364,6 +365,7 @@ describe("buildKnowledgeRouteDecision", () => {
           subtopics: ["bosanma", "velayet"],
           matchedTerms: ["bosanma", "velayet"],
           reason: "Metadata eşleşmesi: bosanma, velayet",
+          sourceQuality: "structured",
         },
       ],
       hasSources: false,
@@ -373,6 +375,38 @@ describe("buildKnowledgeRouteDecision", () => {
     expect(decision.suggestedCollectionIds).toEqual(["divorce-law"]);
     expect(decision.rejectedCollectionIds).toEqual(["generic-legal"]);
     expect(decision.reasons[0]).toContain("daha uyumlu kaynak");
+  });
+
+  it("does not return strict when the used source only has a thin profile", async () => {
+    const { buildKnowledgeRouteDecision } = await import("./knowledgeAccess.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const decision = buildKnowledgeRouteDecision({
+      routePlan: routeQuery("Yeni yüklenen sözleşme notlarında cezai şart için neye bakmalıyım?"),
+      requestedCollectionIds: ["thin-contract-notes"],
+      accessibleCollectionIds: ["thin-contract-notes"],
+      usedCollectionIds: ["thin-contract-notes"],
+      unusedSelectedCollectionIds: [],
+      suggestedCollections: [],
+      metadataRouteCandidates: [
+        {
+          id: "thin-contract-notes",
+          name: "Thin contract notes",
+          score: 42,
+          domain: "legal",
+          subtopics: ["sozlesme"],
+          matchedTerms: ["sözleşme"],
+          reason: "Metadata eşleşmesi: sözleşme",
+          sourceQuality: "thin",
+        },
+      ],
+      thinProfileCollectionIds: ["thin-contract-notes"],
+      hasSources: true,
+    });
+
+    expect(decision.mode).toBe("broad");
+    expect(decision.confidence).toBe("medium");
+    expect(decision.reasons[0]).toContain("thin profile");
   });
 
   it("returns no_source when there is no usable source or suggestion", async () => {

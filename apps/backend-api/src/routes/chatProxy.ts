@@ -74,6 +74,7 @@ interface ChatRetrievalDebug {
         subtopics: string[];
         matchedTerms: string[];
         reason: string;
+        sourceQuality: "structured" | "inferred" | "thin" | null;
       }>;
       includePublic: boolean;
       routeDomain: DomainRoutePlan["domain"] | null;
@@ -189,6 +190,9 @@ function buildSourceSelectionSummary(opts: {
     excludedIds: new Set(opts.requestedCollectionIds),
     limit: 5,
   });
+  const thinProfileCollectionIds = metadataRouteCandidates
+    .filter((candidate) => candidate.sourceQuality === "thin")
+    .map((candidate) => candidate.id);
   const suggestedCollections = [...rankedSuggestedCollections]
     .sort((a, b) => {
       const aRetrieval = retrievalSuggestedIds.includes(a.id) ? 0 : 1;
@@ -229,6 +233,7 @@ function buildSourceSelectionSummary(opts: {
     unusedSelectedCollectionIds,
     suggestedCollections,
     metadataRouteCandidates,
+    thinProfileCollectionIds,
     hasSources: usedCollectionIds.length > 0,
   });
 
