@@ -125,6 +125,41 @@ function scoreCase(testCase, response) {
     failures.push(`safety:${safetyGate?.pass ?? "missing"}`);
   }
 
+  if (testCase.expectedSafetySeverity) {
+    const actualSeverity = safetyGate?.severity;
+    const expectedSeverities = Array.isArray(testCase.expectedSafetySeverity)
+      ? testCase.expectedSafetySeverity
+      : [testCase.expectedSafetySeverity];
+    if (!expectedSeverities.includes(actualSeverity)) {
+      failures.push(`safety_severity:${actualSeverity ?? "missing"}`);
+    }
+  }
+
+  if (testCase.expectedFallbackMode) {
+    const actualFallbackMode = safetyGate?.fallbackMode;
+    if (actualFallbackMode !== testCase.expectedFallbackMode) {
+      failures.push(`fallback_mode:${actualFallbackMode ?? "missing"}`);
+    }
+  }
+
+  const safetyRailIds = Array.isArray(safetyGate?.railChecks)
+    ? safetyGate.railChecks.map((check) => check?.id).filter(Boolean)
+    : [];
+
+  if (Array.isArray(testCase.expectedSafetyRailIds) && testCase.expectedSafetyRailIds.length > 0) {
+    const missingRails = testCase.expectedSafetyRailIds.filter((id) => !safetyRailIds.includes(id));
+    if (missingRails.length > 0) {
+      failures.push(`safety_rail_missing:${missingRails.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(testCase.forbiddenSafetyRailIds) && testCase.forbiddenSafetyRailIds.length > 0) {
+    const forbiddenRails = testCase.forbiddenSafetyRailIds.filter((id) => safetyRailIds.includes(id));
+    if (forbiddenRails.length > 0) {
+      failures.push(`safety_rail_forbidden:${forbiddenRails.join(",")}`);
+    }
+  }
+
   if (testCase.mustHaveSources && !retrievalDebug) {
     failures.push("missing_retrieval_debug");
   }
@@ -158,7 +193,8 @@ function scoreCase(testCase, response) {
 
   if (testCase.expectedIntent) {
     const actualIntent = response?.grounded_answer?.answer_intent ?? retrievalDebug?.evidence?.answerIntent;
-    if (actualIntent !== testCase.expectedIntent) {
+    const expectedIntents = Array.isArray(testCase.expectedIntent) ? testCase.expectedIntent : [testCase.expectedIntent];
+    if (!expectedIntents.includes(actualIntent)) {
       failures.push(`intent:${actualIntent ?? "missing"}`);
     }
   }
@@ -285,11 +321,15 @@ function scoreCase(testCase, response) {
 
   return {
     id: testCase.id,
+    bucket: testCase.bucket ?? "default",
     ok: failures.length === 0,
     failures,
     confidence: readGroundingConfidence(response),
     sourceCount: sources.length,
     safetyPass: safetyGate?.pass ?? null,
+    safetySeverity: safetyGate?.severity ?? null,
+    safetyRailIds,
+    fallbackMode: safetyGate?.fallbackMode ?? null,
     factCount,
     redFlagCount: Array.isArray(evidence?.redFlags) ? evidence.redFlags.length : 0,
     selectionMode: retrievalDebug?.sourceSelection?.selectionMode ?? null,
@@ -359,11 +399,15 @@ async function runCase(opts, testCase) {
       if (response.status >= 500 && attempt < attempts) continue;
       return {
         id: testCase.id,
+        bucket: testCase.bucket ?? "default",
         ok: false,
         failures: [lastError],
         confidence: null,
         sourceCount: 0,
         safetyPass: null,
+        safetySeverity: null,
+        safetyRailIds: [],
+        fallbackMode: null,
         factCount: 0,
         redFlagCount: 0,
         latencyMs: Date.now() - started,
@@ -378,11 +422,15 @@ async function runCase(opts, testCase) {
 
   return {
     id: testCase.id,
+    bucket: testCase.bucket ?? "default",
     ok: false,
     failures: [lastError || "transport:unknown"],
     confidence: null,
     sourceCount: 0,
     safetyPass: null,
+    safetySeverity: null,
+    safetyRailIds: [],
+    fallbackMode: null,
     factCount: 0,
     redFlagCount: 0,
     latencyMs: Date.now() - started,
@@ -410,7 +458,7 @@ async function main() {
     results.push(result);
     const mark = result.ok ? "PASS" : "FAIL";
     console.log(
-      `${mark} ${result.id} route=${result.routeDecisionMode ?? "-"} selection=${result.selectionMode ?? "-"} confidence=${result.confidence ?? "-"} sources=${result.sourceCount} facts=${result.factCount} safety=${result.safetyPass} latency=${result.latencyMs ?? "-"}ms`,
+      `${mark} ${result.id} bucket=${result.bucket ?? "default"} route=${result.routeDecisionMode ?? "-"} selection=${result.selectionMode ?? "-"} confidence=${result.confidence ?? "-"} sources=${result.sourceCount} facts=${result.factCount} safety=${result.safetyPass} severity=${result.safetySeverity ?? "-"} latency=${result.latencyMs ?? "-"}ms`,
     );
     if (!result.ok) {
       console.log(`  ${result.failures.join("; ")}`);
@@ -432,6 +480,15 @@ async function main() {
     selectionModes: results.reduce((acc, result) => {
       const key = result.selectionMode ?? "missing";
       acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {}),
+    buckets: results.reduce((acc, result) => {
+      const key = result.bucket ?? "default";
+      const current = acc[key] ?? { total: 0, passed: 0, failed: 0 };
+      current.total += 1;
+      if (result.ok) current.passed += 1;
+      else current.failed += 1;
+      acc[key] = current;
       return acc;
     }, {}),
     durationMs: Date.now() - started,
