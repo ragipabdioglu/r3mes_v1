@@ -178,6 +178,68 @@ function containsTerm(text: string, term: string): boolean {
   return normalize(text).includes(normalizedTerm);
 }
 
+const QUERY_STOPWORDS = new Set([
+  "acaba",
+  "ama",
+  "bana",
+  "benim",
+  "bunu",
+  "icin",
+  "için",
+  "ile",
+  "kisa",
+  "kısa",
+  "mi",
+  "mı",
+  "mu",
+  "ne",
+  "neden",
+  "nasil",
+  "nasıl",
+  "olur",
+  "var",
+  "ve",
+  "veya",
+]);
+
+const GENERIC_QUERY_TERMS = new Set([
+  "agri",
+  "ağrı",
+  "agrim",
+  "ağrım",
+  "agriyor",
+  "ağrıyor",
+  "belirti",
+  "bilgi",
+  "durum",
+  "genel",
+  "hakkinda",
+  "hakkında",
+  "kaynak",
+  "kontrol",
+  "problem",
+  "risk",
+  "sikayet",
+  "şikayet",
+  "sorun",
+  "takip",
+]);
+
+function queryTokens(query: string): string[] {
+  return unique(
+    normalize(query)
+      .replace(/[_-]+/g, " ")
+      .split(/[^\p{L}\p{N}]+/u)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3)
+      .filter((token) => !QUERY_STOPWORDS.has(token)),
+  ).slice(0, 24);
+}
+
+function queryConceptTerms(query: string): string[] {
+  return queryTokens(query).filter((token) => !GENERIC_QUERY_TERMS.has(token));
+}
+
 function metadataProfileMatchesDomain(profile: KnowledgeMetadataProfile, domain: string): boolean {
   const normalizedDomain = normalize(domain);
   return profile.domains.map(normalize).includes(normalizedDomain) || normalize(metadataText(profile)).includes(normalizedDomain);
@@ -211,6 +273,53 @@ function profileEmbeddingScore(profile: KnowledgeMetadataProfile, routePlan: Dom
     0,
   ) / Math.max(weightSum, 0.0001);
   return score * 100;
+}
+
+function profileQueryEmbeddingScore(profile: KnowledgeMetadataProfile, query: string): number | null {
+  const queryVector = embedKnowledgeText(query);
+  const signals = [
+    { vector: profile.profileEmbedding, weight: 0.4 },
+    { vector: profile.summaryEmbedding, weight: 0.22 },
+    { vector: profile.sampleQuestionsEmbedding, weight: 0.2 },
+    { vector: profile.keywordsEmbedding, weight: 0.12 },
+    { vector: profile.entityEmbedding, weight: 0.06 },
+  ].filter((signal): signal is { vector: number[]; weight: number } => Array.isArray(signal.vector));
+  if (signals.length === 0) return null;
+  const weightSum = signals.reduce((sum, signal) => sum + signal.weight, 0);
+  const score = signals.reduce(
+    (sum, signal) => sum + Math.max(0, cosineSimilarity(queryVector, signal.vector)) * signal.weight,
+    0,
+  ) / Math.max(weightSum, 0.0001);
+  return score * 100;
+}
+
+function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: string): number {
+  const concepts = queryConceptTerms(query);
+  const allTerms = queryTokens(query);
+  const text = normalize(metadataText(profile));
+  const lexicalMatches = concepts.filter((term) => containsTerm(text, term)).length;
+  const genericMatches = allTerms
+    .filter((term) => GENERIC_QUERY_TERMS.has(term))
+    .filter((term) => containsTerm(text, term)).length;
+  const lexicalKeyword = percentScore(
+    lexicalMatches + Math.min(genericMatches, concepts.length > 0 ? 1 : 0) * 0.25,
+    Math.min(Math.max(concepts.length, 1), 10),
+  );
+  const sampleText = normalize(profile.questionsAnswered.join(" "));
+  const sampleMatches = concepts.filter((term) => containsTerm(sampleText, term)).length;
+  const sampleQuestion = percentScore(sampleMatches, Math.min(Math.max(concepts.length, 1), 8));
+  const domainHint = profile.domains.some((domain) => containsTerm(query, domain)) ? 40 : 0;
+
+  return weightedRouterScore(
+    {
+      profileEmbedding: profileQueryEmbeddingScore(profile, query),
+      lexicalKeyword,
+      sampleQuestion,
+      domainHint,
+      sourceQuality: sourceQualityScore(profile),
+    },
+    getRouterWeights(),
+  );
 }
 
 function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number {
@@ -285,6 +394,42 @@ function metadataCandidateForRoute(
   };
 }
 
+function metadataCandidateForQuery(
+  collection: KnowledgeCollectionAccessItem,
+  query?: string,
+): KnowledgeMetadataRouteCandidate | null {
+  if (!query?.trim()) return null;
+  const profiles = collectionMetadataProfiles(collection);
+  if (profiles.length === 0) return null;
+  const concepts = queryConceptTerms(query);
+  const scored = profiles
+    .map((profile) => {
+      const text = normalize(metadataText(profile));
+      const matchedTerms = concepts.filter((term) => containsTerm(text, term));
+      return {
+        profile,
+        score: scoreMetadataProfileForQuery(profile, query),
+        matchedTerms: [...new Set(matchedTerms)].slice(0, 8),
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score <= 0) return null;
+  return {
+    id: collection.id,
+    name: collection.name,
+    score: best.score,
+    domain: best.profile.domain,
+    subtopics: best.profile.subtopics.slice(0, 6),
+    matchedTerms: best.matchedTerms,
+    sourceQuality: best.profile.sourceQuality ?? null,
+    reason:
+      best.matchedTerms.length > 0
+        ? `Query-profile eşleşmesi: ${best.matchedTerms.slice(0, 4).join(", ")}`
+        : `Semantik profile skoru ${Math.round(best.score)}; route belirsizken aday önerildi.`,
+  };
+}
+
 function collectionHasMetadataDomainSupport(
   collection: KnowledgeCollectionAccessItem,
   domain: string,
@@ -329,7 +474,19 @@ export function scoreCollectionForRoute(
   let score = collection.visibility === "PRIVATE" ? 8 : 4;
 
   if (!routePlan || routePlan.domain === "general") {
-    return score + (collection.documents?.length ?? 0);
+    const queryScore = query?.trim()
+      ? Math.max(
+          0,
+          ...collectionMetadataProfiles(collection).map((profile) => scoreMetadataProfileForQuery(profile, query)),
+        )
+      : 0;
+    const fallbackLexicalScore = query?.trim()
+      ? percentScore(
+          queryConceptTerms(query).filter((term) => containsTerm(text, term)).length,
+          Math.min(Math.max(queryConceptTerms(query).length, 1), 10),
+        ) * 0.5
+      : 0;
+    return score + Math.max(queryScore, fallbackLexicalScore) + Math.min(collection.documents?.length ?? 0, 5);
   }
 
   const metadataScore = Math.max(
@@ -392,6 +549,18 @@ export function explainCollectionRouteSuggestion(
   query?: string,
 ): string {
   if (!routePlan || routePlan.domain === "general") {
+    const queryCandidate = metadataCandidateForQuery(collection, query);
+    if (queryCandidate) {
+      const quality =
+        queryCandidate.sourceQuality === "structured"
+          ? "structured profile"
+          : queryCandidate.sourceQuality === "inferred"
+            ? "inferred profile"
+            : queryCandidate.sourceQuality === "thin"
+              ? "thin profile, temkinli öneri"
+              : "metadata profile";
+      return `${queryCandidate.reason} (${quality}, skor ${Math.round(queryCandidate.score)}).`;
+    }
     return collection.visibility === "PRIVATE"
       ? "Private kaynak olduğu için önce denenebilir."
       : "Erişilebilir public alternatif knowledge kaynağı.";
@@ -444,7 +613,11 @@ export function rankSuggestedKnowledgeCollections(opts: {
       score: scoreCollectionForRoute(collection, routePlan, opts.query),
     }))
     .filter(({ score, collection }) => {
-      if (!routePlan || routePlan.domain === "general") return true;
+      if (!routePlan || routePlan.domain === "general") {
+        if (!opts.query?.trim()) return true;
+        const hasProfiles = collectionMetadataProfiles(collection).length > 0;
+        return score >= (hasProfiles ? 24 : 14);
+      }
       if (routePlan.subtopics.length > 0 && collectionMetadataProfiles(collection).length > 0) {
         return collectionHasMetadataSubtopicSupport(collection, routePlan) || score >= 64;
       }
@@ -471,7 +644,11 @@ export function rankMetadataRouteCandidates(opts: {
   const excludedIds = opts.excludedIds ?? new Set<string>();
   return opts.collections
     .filter((collection) => !excludedIds.has(collection.id))
-    .map((collection) => metadataCandidateForRoute(collection, opts.routePlan, opts.query))
+    .map((collection) =>
+      opts.routePlan && opts.routePlan.domain !== "general"
+        ? metadataCandidateForRoute(collection, opts.routePlan, opts.query)
+        : metadataCandidateForQuery(collection, opts.query),
+    )
     .filter((candidate): candidate is KnowledgeMetadataRouteCandidate => Boolean(candidate))
     .filter((candidate) => candidate.score >= 20)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
@@ -509,7 +686,11 @@ export function buildKnowledgeRouteDecision(opts: {
   if (!opts.routePlan || opts.routePlan.domain === "general" || opts.routePlan.confidence === "low") {
     reasons.push("Route confidence düşük veya genel; geniş/temkinli retrieval uygun.");
     return {
-      mode: opts.hasSources ? "broad" : suggestedCollectionIds.length > 0 ? "suggest" : "no_source",
+      mode: opts.hasSources
+        ? "broad"
+        : suggestedCollectionIds.length > 0 || rejectedCollectionIds.length > 0
+          ? "suggest"
+          : "no_source",
       primaryDomain,
       confidence: "low",
       selectedCollectionIds: opts.accessibleCollectionIds,
@@ -558,6 +739,20 @@ export function buildKnowledgeRouteDecision(opts: {
       mode: "suggest",
       primaryDomain,
       confidence: "medium",
+      selectedCollectionIds: opts.accessibleCollectionIds,
+      usedCollectionIds: opts.usedCollectionIds,
+      suggestedCollectionIds,
+      rejectedCollectionIds,
+      reasons,
+    };
+  }
+
+  if (rejectedCollectionIds.length > 0) {
+    reasons.push("Seçili kaynak soru ile uyumlu kanıt vermedi; kaynak seçimini değiştirmek gerekebilir.");
+    return {
+      mode: "suggest",
+      primaryDomain,
+      confidence: "low",
       selectedCollectionIds: opts.accessibleCollectionIds,
       usedCollectionIds: opts.usedCollectionIds,
       suggestedCollectionIds,

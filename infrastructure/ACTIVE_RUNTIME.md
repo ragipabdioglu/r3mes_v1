@@ -73,6 +73,25 @@ Fallback and safety answers stay deterministic. Grounded answers can be switched
 
 No-source, source-suggestion, privacy-safe, and alignment-mismatch fallbacks do not depend on Qwen.
 
+## Cross-Encoder Reranker Gate
+
+The backend keeps deterministic reranking by default. Enable the ai-engine cross-encoder only after smoke passes:
+
+```powershell
+pnpm --filter @r3mes/backend-api run smoke:reranker-provider
+$env:R3MES_RERANKER_MODE='model'
+```
+
+Runtime controls:
+
+| Env | Default | Purpose |
+| --- | --- | --- |
+| `R3MES_RERANKER_MODE` | `deterministic` | Set to `model` to call ai-engine `/v1/rerank`. |
+| `R3MES_RERANKER_CANDIDATE_LIMIT` | `5` | Caps cross-encoder work after cheap pruning. |
+| `R3MES_RERANKER_TIMEOUT_MS` | `8000` | Fallback to deterministic reranker if ai-engine is slow. |
+| `R3MES_RERANKER_MODEL_WEIGHT` | `1.75` | Blends model score into deterministic score. |
+| `R3MES_ALIGNMENT_MAX_RERANK_WORDS` | `300` | Sends title/metadata + chunk start only; no pre-reranker snippet search. |
+
 ## Active Embedding / Reindex Gate
 
 Qdrant reindex must not run on silent deterministic fallback when `R3MES_EMBEDDING_PROVIDER=ai-engine` or `bge-m3`.

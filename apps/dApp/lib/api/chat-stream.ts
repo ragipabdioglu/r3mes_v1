@@ -1,5 +1,5 @@
 import type { R3mesWalletAuthHeaders } from "@/lib/api/wallet-auth-types";
-import { getBackendUrl, getOptionalChatModel } from "@/lib/env";
+import { getBackendUrl, getChatDebugEnabled, getOptionalChatModel } from "@/lib/env";
 import type { ChatRetrievalDebug, ChatSourceCitation } from "@/lib/types/knowledge";
 import { userFacingHttpMessage } from "@/lib/ui/http-messages";
 
@@ -80,6 +80,9 @@ export async function* streamChatCompletions(params: {
     "X-Message": params.auth["X-Message"],
     "X-Wallet-Address": params.auth["X-Wallet-Address"],
   };
+  if (getChatDebugEnabled()) {
+    headers["X-R3MES-Debug"] = "1";
+  }
 
   const res = await fetch(url.toString(), {
     method: "POST",

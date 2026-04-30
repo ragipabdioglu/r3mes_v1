@@ -363,6 +363,75 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(reason).toContain("skor");
   });
 
+  it("uses profile metadata for suggestions even when the query router has no known domain", async () => {
+    const { rankMetadataRouteCandidates, rankSuggestedKnowledgeCollections } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "Yeni personel onboarding sürecinde hangi hesaplar açılmalı?";
+    const routePlan = routeQuery(query);
+    const collections = [
+      {
+        id: "medical-generic",
+        name: "Sağlık notları",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            version: 1,
+            domains: ["medical"],
+            subtopics: ["kasik_agrisi"],
+            keywords: ["ağrı", "kontrol"],
+            entities: [],
+            documentTypes: ["knowledge_note"],
+            audiences: ["patient"],
+            sampleQuestions: [],
+            summary: "Genel sağlık kontrol notları.",
+            riskLevel: "medium",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileEmbedding: embedKnowledgeText("genel sağlık kontrol ağrı hasta"),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+      {
+        id: "hr-onboarding",
+        name: "HR onboarding arşivi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            version: 1,
+            domains: ["hr"],
+            subtopics: ["onboarding", "hesap_acilisi"],
+            keywords: ["personel", "onboarding", "hesap", "erişim", "ekipman"],
+            entities: ["onboarding"],
+            documentTypes: ["runbook"],
+            audiences: ["operator"],
+            sampleQuestions: ["Yeni personel onboarding sürecinde hangi hesaplar açılmalı?"],
+            summary: "Yeni personel için hesap açılışı, erişim yetkileri ve ekipman hazırlığı.",
+            riskLevel: "low",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileEmbedding: embedKnowledgeText("yeni personel onboarding hesap açılışı erişim ekipman"),
+            sampleQuestionsEmbedding: embedKnowledgeText(query),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+    ];
+
+    expect(routePlan.domain).toBe("general");
+
+    const ranked = rankSuggestedKnowledgeCollections({ routePlan, query, collections, limit: 2 });
+    const metadataCandidates = rankMetadataRouteCandidates({ routePlan, query, collections, limit: 2 });
+
+    expect(ranked.map((collection) => collection.id)[0]).toBe("hr-onboarding");
+    expect(metadataCandidates.map((collection) => collection.id)[0]).toBe("hr-onboarding");
+    expect(metadataCandidates[0]?.reason).toContain("Query-profile");
+  });
+
   it("marks thin profile suggestions as cautious instead of strict evidence", async () => {
     const { explainCollectionRouteSuggestion, rankMetadataRouteCandidates } = await import("./knowledgeAccess.js");
     const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
@@ -577,5 +646,25 @@ describe("buildKnowledgeRouteDecision", () => {
       usedCollectionIds: [],
       suggestedCollectionIds: [],
     });
+  });
+
+  it("keeps suggest mode when an explicitly selected source is rejected even without alternatives", async () => {
+    const { buildKnowledgeRouteDecision } = await import("./knowledgeAccess.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const decision = buildKnowledgeRouteDecision({
+      routePlan: routeQuery("Başım ağrıyor, kısa ve sakin ne yapmalıyım?"),
+      requestedCollectionIds: ["pelvic-pain"],
+      accessibleCollectionIds: ["pelvic-pain"],
+      usedCollectionIds: [],
+      unusedSelectedCollectionIds: ["pelvic-pain"],
+      suggestedCollections: [],
+      metadataRouteCandidates: [],
+      hasSources: false,
+    });
+
+    expect(decision.mode).toBe("suggest");
+    expect(decision.confidence).toBe("low");
+    expect(decision.rejectedCollectionIds).toEqual(["pelvic-pain"]);
   });
 });

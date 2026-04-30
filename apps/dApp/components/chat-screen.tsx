@@ -208,13 +208,21 @@ function SourceList({
     );
   }
 
+  const visibleSources = sources.slice(0, 3);
+  const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length);
+
   return (
     <div className="mt-3 space-y-2 rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-3">
-      <p className="text-[10px] uppercase tracking-wider text-zinc-500">
-        {chat.sourceSectionTitle}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-wider text-zinc-500">
+          {chat.sourceSectionTitle}
+        </p>
+        <p className="text-[10px] text-zinc-500">
+          {sources.length} kaynak kullanıldı
+        </p>
+      </div>
       <ul className="space-y-2">
-        {sources.map((source, index) => {
+        {visibleSources.map((source, index) => {
           const collection = collections.find((item) => item.id === source.collectionId);
           return (
             <li
@@ -230,12 +238,22 @@ function SourceList({
                 {source.chunkIndex != null ? ` · chunk ${source.chunkIndex}` : ""}
               </p>
               {source.excerpt ? (
-                <p className="text-zinc-400">{source.excerpt}</p>
+                <details className="rounded-lg border border-zinc-900 bg-black/20 px-2 py-1">
+                  <summary className="cursor-pointer text-zinc-500">
+                    Alıntıyı göster
+                  </summary>
+                  <p className="mt-1 text-zinc-400">{source.excerpt}</p>
+                </details>
               ) : null}
             </li>
           );
         })}
       </ul>
+      {hiddenSourceCount > 0 ? (
+        <p className="text-[11px] text-zinc-500">
+          {hiddenSourceCount} ek kaynak gizlendi; detay için debug modunu açabilirsiniz.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -380,8 +398,8 @@ function SourceSelectionActionBadge({
   const label = isHealthy
     ? "Kaynak uygun"
     : selection.hasSources
-      ? "Kaynak kısmen kullanıldı"
-      : "Kaynak yetersiz";
+      ? "Kaynak temkinli"
+      : "Kaynak bulunamadı";
   const actionSuggestions = [
     ...(selection.metadataRouteCandidates ?? []).map((candidate) => ({
       id: candidate.id,
@@ -410,14 +428,14 @@ function SourceSelectionActionBadge({
     >
       <span className="font-medium">{label}</span>
       <span className="ml-2 text-zinc-500">
-        {selection.usedCollectionIds.length} / {selection.accessibleCollectionIds.length} collection kullanıldı
+        {selection.usedCollectionIds.length} / {selection.accessibleCollectionIds.length} collection
       </span>
       {selection.warning ? (
         <p className="mt-1">{selection.warning}</p>
       ) : null}
       {actionSuggestions.length > 0 ? (
         <div className="mt-2">
-          <p className="font-medium">Önerilen kaynaklar</p>
+          <p className="font-medium">Daha uygun kaynak önerisi</p>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {actionSuggestions.map((collection) => (
               <button
@@ -436,7 +454,7 @@ function SourceSelectionActionBadge({
             ))}
           </div>
           <p className="mt-1 text-zinc-500">
-            Öneriye tıklayınca chat bu collection ile sınırlandırılır; sonra aynı soruyu tekrar gönderin.
+            Öneriye tıklayınca chat bu kaynakla sınırlandırılır.
           </p>
         </div>
       ) : null}
