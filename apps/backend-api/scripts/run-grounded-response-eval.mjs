@@ -232,6 +232,26 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (Array.isArray(testCase.expectedMetadataCandidateSourceQualities) && testCase.expectedMetadataCandidateSourceQualities.length > 0) {
+    const sourceQualities = retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.sourceQuality) ?? [];
+    const missingQualities = testCase.expectedMetadataCandidateSourceQualities.filter((quality) => !sourceQualities.includes(quality));
+    if (missingQualities.length > 0) {
+      failures.push(`metadata_candidate_quality_missing:${missingQualities.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(testCase.expectedSuggestedReasonTerms) && testCase.expectedSuggestedReasonTerms.length > 0) {
+    const reasonText = [
+      ...(retrievalDebug?.sourceSelection?.suggestedCollections?.map((collection) => collection.reason) ?? []),
+      ...(retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.reason) ?? []),
+      ...(retrievalDebug?.sourceSelection?.routeDecision?.reasons ?? []),
+    ].join(" ");
+    const missingReasonTerms = testCase.expectedSuggestedReasonTerms.filter((term) => !normalize(reasonText).includes(normalize(term)));
+    if (missingReasonTerms.length > 0) {
+      failures.push(`suggested_reason_missing:${missingReasonTerms.join(",")}`);
+    }
+  }
+
   const routeDecision = retrievalDebug?.sourceSelection?.routeDecision;
   if (testCase.expectedRouteDecisionMode && routeDecision?.mode !== testCase.expectedRouteDecisionMode) {
     failures.push(`route_decision_mode:${routeDecision?.mode ?? "missing"}`);
@@ -278,8 +298,10 @@ function scoreCase(testCase, response) {
     routePrimaryDomain: routeDecision?.primaryDomain ?? null,
     usedCollectionIds: retrievalDebug?.sourceSelection?.usedCollectionIds ?? [],
     suggestedCollectionIds: routeDecision?.suggestedCollectionIds ?? [],
+    suggestedCollectionReasons: retrievalDebug?.sourceSelection?.suggestedCollections?.map((collection) => collection.reason) ?? [],
     rejectedCollectionIds: routeDecision?.rejectedCollectionIds ?? [],
     metadataRouteCandidateIds: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.id) ?? [],
+    metadataRouteCandidateQualities: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.sourceQuality) ?? [],
     latencyMs: response?._latencyMs ?? null,
     content,
   };
