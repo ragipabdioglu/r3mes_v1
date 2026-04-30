@@ -27,6 +27,7 @@ describe("deterministic safety gate", () => {
     expect(result.pass).toBe(true);
     expect(result.severity).toBe("pass");
     expect(result.blockedReasons).toEqual([]);
+    expect(result.railChecks).toEqual([]);
     expect(result.metrics.sourceCount).toBe(1);
     expect(result.metrics.answerLength).toBeGreaterThan(40);
   });
@@ -195,8 +196,121 @@ describe("deterministic safety gate", () => {
     });
 
     expect(result.pass).toBe(false);
+    expect(result.severity).toBe("block");
     expect(result.fallbackMode).toBe("privacy_safe");
     expect(result.blockedReasons).toContain("PRIVATE_SOURCE_SCOPE_MISMATCH");
+    expect(result.railChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "PRIVATE_SOURCE_SCOPE_MISMATCH", category: "privacy", status: "block" }),
+      ]),
+    );
+  });
+
+  it("keeps source suggestion responses as warnings instead of unsafe failures", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "1. Kaynağa göre durum: Bu soru için yeterli güvenilir kaynak bulunamadı.\n2. Ne yapılabilir: Doğru collection seçilirse kaynaklı cevap verilebilir.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "technical",
+        grounding_confidence: "low",
+        user_query: "Production migration öncesi ne yapmalıyım?",
+      },
+      sources: [],
+      retrievalWasUsed: false,
+      sourceSelection: {
+        routeDecision: {
+          mode: "suggest",
+          confidence: "medium",
+          suggestedCollectionIds: ["technical-demo"],
+          rejectedCollectionIds: ["legal-demo"],
+        },
+      },
+    });
+
+    expect(result.pass).toBe(true);
+    expect(result.severity).toBe("warn");
+    expect(result.warnings).toContain("SUGGEST_MODE_NO_GROUNDED_SOURCES");
+    expect(result.fallbackMode).toBe("source_suggestion");
+  });
+
+  it("blocks no-source route contradictions when sources are still attached", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "1. Kaynağa göre durum: Kaynak kullanıldı gibi görünüyor.\n2. Ne yapılabilir: Yine de cevap verildi.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        user_query: "kaynak var mı",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      sourceSelection: {
+        routeDecision: { mode: "no_source", confidence: "low" },
+      },
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockedReasons).toContain("NO_SOURCE_MODE_WITH_SOURCES");
+  });
+
+  it("warns when too many context chunks survive pruning for Qwen 3B", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "1. Kaynağa göre durum: Kaynaklı cevap var.\n2. Ne yapılabilir: Kısa ve kontrollü ilerlenmelidir.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        user_query: "özetler misin",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      retrievalDiagnostics: { finalCandidateCount: 8 },
+    });
+
+    expect(result.pass).toBe(true);
+    expect(result.severity).toBe("warn");
+    expect(result.warnings).toContain("TOO_MANY_CONTEXT_CHUNKS_FOR_3B");
+    expect(result.metrics.finalCandidateCount).toBe(8);
+  });
+
+  it("uses evidence red flags as safety rails even when the query wording is mild", () => {
+    const result = evaluateSafetyGate({
+      answerText: "Kaynak, durumun izlenebileceğini söylüyor.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
+        user_query: "bu durumda ne yapmalıyım",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      evidence: {
+        answerIntent: "triage",
+        intentResolution: {
+          intent: "triage",
+          primarySignal: "triage",
+          confidence: "high",
+          scores: { triage: 100 },
+          weakIntent: "triage",
+          reasons: ["test red flag"],
+        },
+        directAnswerFacts: ["doc_1: Kaynak, durumun izlenebileceğini söylüyor."],
+        supportingContext: [],
+        riskFacts: ["doc_1: Şiddetli ağrı varsa gecikmeden değerlendirme gerekir."],
+        notSupported: [],
+        usableFacts: ["doc_1: Kaynak, durumun izlenebileceğini söylüyor."],
+        uncertainOrUnusable: [],
+        redFlags: ["doc_1: Şiddetli ağrı varsa gecikmeden değerlendirme gerekir."],
+        sourceIds: ["doc_1"],
+        missingInfo: [],
+      },
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockedReasons).toContain("RED_FLAG_WITHOUT_URGENT_GUIDANCE");
+    expect(result.railChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "RED_FLAG_WITHOUT_URGENT_GUIDANCE", category: "evidence" }),
+      ]),
+    );
   });
 
   it("uses legal safety policy for guaranteed legal outcomes", () => {
