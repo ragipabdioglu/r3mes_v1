@@ -10,6 +10,9 @@ interface KnowledgeMetadataProfile {
   subtopics: string[];
   keywords: string[];
   entities: string[];
+  topicPhrases: string[];
+  answerableConcepts: string[];
+  negativeHints: string[];
   summary: string;
   profileText?: string;
   profileEmbedding?: number[];
@@ -74,6 +77,9 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
         subtopics: stringArray(profile.subtopics),
         keywords: stringArray(profile.keywords),
         entities: stringArray(profile.entities),
+        topicPhrases: stringArray(profile.topicPhrases),
+        answerableConcepts: stringArray(profile.answerableConcepts),
+        negativeHints: stringArray(profile.negativeHints),
         summary: typeof profile.summary === "string" ? profile.summary : "",
         profileText,
         profileEmbedding: numberArray(profile.profileEmbedding) ?? (profileText ? embedKnowledgeText(profileText) : undefined),
@@ -96,6 +102,9 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
     subtopics: stringArray(record.subtopics),
     keywords: stringArray(record.keywords),
     entities: stringArray(record.entities),
+    topicPhrases: [],
+    answerableConcepts: [],
+    negativeHints: [],
     summary: typeof record.summary === "string" ? record.summary : "",
     questionsAnswered: stringArray(record.questionsAnswered),
   };
@@ -109,6 +118,8 @@ function metadataText(value: unknown): string {
     ...profile.subtopics,
     ...profile.keywords,
     ...profile.entities,
+    ...profile.topicPhrases,
+    ...profile.answerableConcepts,
     profile.summary,
     profile.profileText ?? "",
     ...profile.questionsAnswered,
@@ -297,17 +308,28 @@ function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: 
   const concepts = queryConceptTerms(query);
   const allTerms = queryTokens(query);
   const text = normalize(metadataText(profile));
+  const answerableText = normalize([
+    ...profile.topicPhrases,
+    ...profile.answerableConcepts,
+    ...profile.entities,
+    ...profile.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+  ].join(" "));
   const lexicalMatches = concepts.filter((term) => containsTerm(text, term)).length;
+  const answerableMatches = concepts.filter((term) => containsTerm(answerableText, term)).length;
   const genericMatches = allTerms
     .filter((term) => GENERIC_QUERY_TERMS.has(term))
     .filter((term) => containsTerm(text, term)).length;
   const lexicalKeyword = percentScore(
-    lexicalMatches + Math.min(genericMatches, concepts.length > 0 ? 1 : 0) * 0.25,
+    lexicalMatches + answerableMatches * 0.8 + Math.min(genericMatches, concepts.length > 0 ? 1 : 0) * 0.15,
     Math.min(Math.max(concepts.length, 1), 10),
   );
   const sampleText = normalize(profile.questionsAnswered.join(" "));
   const sampleMatches = concepts.filter((term) => containsTerm(sampleText, term)).length;
-  const sampleQuestion = percentScore(sampleMatches, Math.min(Math.max(concepts.length, 1), 8));
+  const topicPhraseMatches = concepts.filter((term) => containsTerm(answerableText, term)).length;
+  const sampleQuestion = percentScore(
+    sampleMatches + topicPhraseMatches * 0.75,
+    Math.min(Math.max(concepts.length, 1), 8),
+  );
   const domainHint = profile.domains.some((domain) => containsTerm(query, domain)) ? 40 : 0;
 
   return weightedRouterScore(
@@ -325,6 +347,12 @@ function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: 
 function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number {
   const text = normalize(metadataText(profile));
   const profileSubtopics = profile.subtopics.map(normalize);
+  const answerableText = normalize([
+    ...profile.topicPhrases,
+    ...profile.answerableConcepts,
+    ...profile.entities,
+    ...profile.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+  ].join(" "));
   const exactDomain = profile.domains.map(normalize).includes(normalize(routePlan.domain));
   const subtopicMatches = routePlan.subtopics.filter((subtopic) => {
     const normalizedSubtopic = normalize(subtopic);
@@ -337,10 +365,18 @@ function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: Doma
   );
   const lexicalTerms = unique([...routePlan.mustIncludeTerms, ...routePlan.retrievalHints]);
   const lexicalMatches = lexicalTerms.filter((term) => containsTerm(text, term)).length;
-  const lexicalKeyword = percentScore(lexicalMatches, Math.min(Math.max(lexicalTerms.length, 1), 10));
+  const answerableMatches = lexicalTerms.filter((term) => containsTerm(answerableText, term)).length;
+  const lexicalKeyword = percentScore(
+    lexicalMatches + answerableMatches * 0.8,
+    Math.min(Math.max(lexicalTerms.length, 1), 10),
+  );
   const sampleText = normalize(profile.questionsAnswered.join(" "));
   const sampleMatches = lexicalTerms.filter((term) => containsTerm(sampleText, term)).length;
-  const sampleQuestion = percentScore(sampleMatches, Math.min(Math.max(lexicalTerms.length, 1), 8));
+  const topicPhraseMatches = lexicalTerms.filter((term) => containsTerm(answerableText, term)).length;
+  const sampleQuestion = percentScore(
+    sampleMatches + topicPhraseMatches * 0.75,
+    Math.min(Math.max(lexicalTerms.length, 1), 8),
+  );
 
   return weightedRouterScore(
     {
@@ -367,6 +403,9 @@ function metadataCandidateForRoute(
       const text = normalize(metadataText(profile));
       const matchedTerms = [
         ...routePlan.subtopics.filter((subtopic) => profile.subtopics.map(normalize).includes(normalize(subtopic))),
+        ...routePlan.subtopics
+          .map((subtopic) => subtopic.replace(/_/g, " "))
+          .filter((subtopic) => containsTerm(profile.topicPhrases.join(" "), subtopic)),
         ...routePlan.mustIncludeTerms.filter((term) => containsTerm(text, term)),
         ...routePlan.retrievalHints.filter((hint) => containsTerm(text, hint)),
       ];

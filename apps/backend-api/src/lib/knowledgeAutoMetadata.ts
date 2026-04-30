@@ -22,12 +22,15 @@ export interface KnowledgeAutoMetadata {
 }
 
 export interface KnowledgeCollectionProfile {
-  version: 1;
+  version: 2;
   profileVersion: number;
   domains: string[];
   subtopics: string[];
   keywords: string[];
   entities: string[];
+  topicPhrases: string[];
+  answerableConcepts: string[];
+  negativeHints: string[];
   documentTypes: string[];
   audiences: string[];
   sampleQuestions: string[];
@@ -132,6 +135,9 @@ function buildProfileText(
     profileLine("Subtopics", profile.subtopics),
     profileLine("Keywords", profile.keywords),
     profileLine("Entities", profile.entities),
+    profileLine("Topic phrases", profile.topicPhrases),
+    profileLine("Answerable concepts", profile.answerableConcepts),
+    profileLine("Negative hints", profile.negativeHints),
     profileLine("Document types", profile.documentTypes),
     profileLine("Audiences", profile.audiences),
     profileLine("Sample questions", profile.sampleQuestions),
@@ -154,6 +160,99 @@ function nextProfileVersion(previousProfile: KnowledgeCollectionProfile | null |
   return previousVersion + 1;
 }
 
+function phraseFromSubtopic(subtopic: string): string {
+  return subtopic.replace(/_/g, " ");
+}
+
+function questionToTopicPhrase(question: string): string {
+  return question
+    .replace(/\bhakkında ne bilinmeli\??$/iu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const GENERIC_PROFILE_TERMS = new Set([
+  "acikla",
+  "açıkla",
+  "agri",
+  "ağrı",
+  "belge",
+  "bilgi",
+  "degerlendirme",
+  "değerlendirme",
+  "durum",
+  "genel",
+  "hakkinda",
+  "hakkında",
+  "kaynak",
+  "kontrol",
+  "muayene",
+  "nedir",
+  "risk",
+  "sure",
+  "süre",
+  "takip",
+]);
+
+function normalizeTerm(text: string): string {
+  return text
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s_-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isGenericProfileTerm(term: string): boolean {
+  const normalized = normalizeTerm(term);
+  return normalized.length < 3 || GENERIC_PROFILE_TERMS.has(normalized);
+}
+
+function buildTopicPhrases(items: KnowledgeAutoMetadata[]): string[] {
+  return weightedUnique(
+    items.flatMap((item) => [
+      ...item.subtopics.map(phraseFromSubtopic),
+      ...item.keywords.filter((keyword) => !isGenericProfileTerm(keyword)),
+      ...item.entities.filter((entity) => !isGenericProfileTerm(entity)),
+      ...item.questionsAnswered.map(questionToTopicPhrase).filter((phrase) => !isGenericProfileTerm(phrase)),
+    ]),
+    28,
+  );
+}
+
+function buildAnswerableConcepts(opts: {
+  topicPhrases: string[];
+  subtopics: string[];
+  keywords: string[];
+  entities: string[];
+}): string[] {
+  return weightedUnique(
+    [
+      ...opts.topicPhrases,
+      ...opts.subtopics.map(phraseFromSubtopic),
+      ...opts.entities,
+      ...opts.keywords.filter((keyword) => !isGenericProfileTerm(keyword)),
+    ],
+    36,
+  );
+}
+
+function buildNegativeHints(opts: {
+  keywords: string[];
+  topicPhrases: string[];
+  answerableConcepts: string[];
+}): string[] {
+  const answerableText = normalizeTerm([...opts.topicPhrases, ...opts.answerableConcepts].join(" "));
+  return unique(
+    opts.keywords
+      .filter(isGenericProfileTerm)
+      .filter((term) => !answerableText.includes(normalizeTerm(term)))
+      .map((term) => `${term} tek başına yeterli eşleşme değildir`),
+    12,
+  );
+}
+
 export function buildKnowledgeCollectionProfile(
   items: KnowledgeAutoMetadata[],
   opts: { now?: Date; previousProfile?: KnowledgeCollectionProfile | null } = {},
@@ -174,11 +273,17 @@ export function buildKnowledgeCollectionProfile(
   const documentTypes = weightedUnique(cleanItems.map((item) => item.documentType), 8);
   const audiences = weightedUnique(cleanItems.map((item) => item.audience), 8);
   const sampleQuestions = unique(cleanItems.flatMap((item) => item.questionsAnswered), 12);
+  const topicPhrases = buildTopicPhrases(cleanItems);
+  const answerableConcepts = buildAnswerableConcepts({ topicPhrases, subtopics, keywords, entities });
+  const negativeHints = buildNegativeHints({ keywords, topicPhrases, answerableConcepts });
   const baseProfile = {
     domains,
     subtopics,
     keywords,
     entities,
+    topicPhrases,
+    answerableConcepts,
+    negativeHints,
     documentTypes,
     audiences,
     sampleQuestions,
@@ -191,7 +296,7 @@ export function buildKnowledgeCollectionProfile(
   const profileTextHash = hashProfileText(profileText);
   const timestamp = (opts.now ?? new Date()).toISOString();
   return {
-    version: 1,
+    version: 2,
     profileVersion: nextProfileVersion(opts.previousProfile, profileTextHash),
     ...baseProfile,
     profileText,

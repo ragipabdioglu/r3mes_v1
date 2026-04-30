@@ -81,6 +81,8 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(merged?.keywords).toEqual(expect.arrayContaining(["migration", "yedek", "rollback"]));
     expect(merged?.profile?.domains).toContain("technical");
     expect(merged?.profile?.subtopics).toContain("migration");
+    expect(merged?.profile?.topicPhrases).toEqual(expect.arrayContaining(["migration"]));
+    expect(merged?.profile?.answerableConcepts).toEqual(expect.arrayContaining(["migration", "yedek", "rollback"]));
     expect(merged?.profile?.sampleQuestions.length).toBeGreaterThan(0);
     expect(merged?.profile?.profileVersion).toBe(1);
     expect(merged?.profile?.profileText).toContain("Domains: technical");
@@ -106,12 +108,16 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
       now: new Date("2026-04-29T00:00:00.000Z"),
     });
 
-    expect(profile?.version).toBe(1);
+    expect(profile?.version).toBe(2);
     expect(profile?.profileVersion).toBe(1);
     expect(profile?.domains[0]).toBe("legal");
     expect(profile?.keywords).toEqual(expect.arrayContaining(["boşanma", "velayet", "nafaka"]));
+    expect(profile?.topicPhrases).toEqual(expect.arrayContaining(["boşanma", "velayet", "nafaka"]));
+    expect(profile?.answerableConcepts).toEqual(expect.arrayContaining(["boşanma", "velayet", "nafaka"]));
     expect(profile?.confidence).toBe("high");
     expect(profile?.profileText).toContain("Subtopics:");
+    expect(profile?.profileText).toContain("Topic phrases:");
+    expect(profile?.profileText).toContain("Answerable concepts:");
     expect(profile?.profileTextHash).toHaveLength(64);
     expect(profile?.profileEmbedding).toHaveLength(256);
     expect(profile?.summaryEmbedding).toHaveLength(256);
