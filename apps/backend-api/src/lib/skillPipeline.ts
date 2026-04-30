@@ -51,6 +51,7 @@ export interface QueryPlannerOutput {
 
 export interface EvidenceExtractorOutput {
   answerIntent: AnswerIntent;
+  intentResolution: AnswerIntentResolution;
   directAnswerFacts: string[];
   supportingContext: string[];
   riskFacts: string[];
@@ -77,6 +78,22 @@ export interface EvidenceExtractorCardInput {
 export interface EvidenceExtractorInput {
   userQuery: string;
   cards: EvidenceExtractorCardInput[];
+}
+
+export type AnswerIntentSignal =
+  | AnswerIntent
+  | "checklist"
+  | "summarize"
+  | "clarify"
+  | "no_source";
+
+export interface AnswerIntentResolution {
+  intent: AnswerIntent;
+  primarySignal: AnswerIntentSignal;
+  confidence: "low" | "medium" | "high";
+  scores: Partial<Record<AnswerIntentSignal, number>>;
+  weakIntent: AnswerIntent;
+  reasons: string[];
 }
 
 export interface ResponseComposerOutput {
@@ -142,6 +159,110 @@ function inferAnswerIntent(query: string): AnswerIntent {
   if (hasAny(query, ["nedir", "ne anlama", "yorum", "açıkla", "acikla", "neden"])) return "explain";
   if (hasAny(query, ["risk"])) return "triage";
   return "unknown";
+}
+
+function addIntentScore(
+  scores: Partial<Record<AnswerIntentSignal, number>>,
+  intent: AnswerIntentSignal,
+  amount: number,
+): void {
+  scores[intent] = (scores[intent] ?? 0) + amount;
+}
+
+function mapIntentSignalToAnswerIntent(signal: AnswerIntentSignal): AnswerIntent {
+  if (signal === "checklist") return "steps";
+  if (signal === "summarize") return "explain";
+  if (signal === "clarify" || signal === "no_source") return "unknown";
+  return signal;
+}
+
+export function resolveAnswerIntent(opts: {
+  userQuery: string;
+  weakIntent?: AnswerIntent;
+  directFactCount?: number;
+  supportingFactCount?: number;
+  riskFactCount?: number;
+  missingInfoCount?: number;
+  sourceCount?: number;
+}): AnswerIntentResolution {
+  const query = opts.userQuery;
+  const scores: Partial<Record<AnswerIntentSignal, number>> = {};
+  const reasons: string[] = [];
+  const weakIntent = opts.weakIntent ?? inferAnswerIntent(query);
+  const directFactCount = opts.directFactCount ?? 0;
+  const supportingFactCount = opts.supportingFactCount ?? 0;
+  const riskFactCount = opts.riskFactCount ?? 0;
+  const missingInfoCount = opts.missingInfoCount ?? 0;
+  const sourceCount = opts.sourceCount ?? 0;
+
+  if (weakIntent !== "unknown") {
+    addIntentScore(scores, weakIntent, 30);
+    reasons.push(`weak query intent: ${weakIntent}`);
+  }
+  if (hasAny(query, ["kontrol listesi", "checklist", "liste", "maddeli", "madde madde"])) {
+    addIntentScore(scores, "checklist", 85);
+    reasons.push("query asks for checklist/list output");
+  }
+  if (hasAny(query, ["ne yap", "nasıl", "nasil", "hangi adım", "hangi adim", "hazırla", "hazirla", "saklamalı", "saklamali", "toplamam", "kontrol"])) {
+    addIntentScore(scores, "steps", 35);
+    reasons.push("query asks for action/steps");
+  }
+  if (hasAny(query, ["acil", "ne zaman", "riskli", "tehlikeli", "şiddetli", "siddetli", "ateş", "ates"])) {
+    addIntentScore(scores, "triage", 35);
+    reasons.push("query contains risk/triage language");
+  }
+  if (riskFactCount > 0) {
+    addIntentScore(scores, "triage", Math.min(25, 10 + riskFactCount * 5));
+    reasons.push("retrieved evidence contains risk facts");
+  }
+  if (hasAny(query, ["nedir", "neden", "ne anlama", "açıkla", "acikla", "yorumla"])) {
+    addIntentScore(scores, "explain", 35);
+    reasons.push("query asks for explanation");
+  }
+  if (hasAny(query, ["özetle", "ozetle", "kısa özet", "kisa ozet", "özet", "ozet"])) {
+    addIntentScore(scores, "summarize", 40);
+    reasons.push("query asks for summary");
+  }
+  if (hasAny(query, ["fark", "karşılaştır", "karsilastir", "hangisi", "versus", "vs"])) {
+    addIntentScore(scores, "compare", 45);
+    reasons.push("query asks for comparison");
+  }
+  if (hasAny(query, ["panik", "kork", "endişe", "endise", "normal mi", "sakin"])) {
+    addIntentScore(scores, "reassure", 35);
+    reasons.push("query asks for reassurance/calm tone");
+  }
+  if (missingInfoCount > 0 && directFactCount === 0 && supportingFactCount === 0) {
+    addIntentScore(scores, "no_source", 90);
+    reasons.push("no directly usable evidence was found");
+  }
+  if (sourceCount === 0) {
+    addIntentScore(scores, "clarify", 25);
+    reasons.push("no source ids are available");
+  }
+
+  const ranked = (Object.entries(scores) as Array<[AnswerIntentSignal, number]>)
+    .sort((a, b) => b[1] - a[1]);
+  const [primarySignal = weakIntent, primaryScore = 0] = ranked[0] ?? [weakIntent, 0];
+  const secondScore = ranked[1]?.[1] ?? 0;
+  const mappedIntent = mapIntentSignalToAnswerIntent(primarySignal);
+  const intent = mappedIntent === "unknown" && weakIntent !== "unknown" && primarySignal !== "no_source"
+    ? weakIntent
+    : mappedIntent;
+  const confidence =
+    primaryScore >= 55 && primaryScore - secondScore >= 15
+      ? "high"
+      : primaryScore >= 35
+        ? "medium"
+        : "low";
+
+  return {
+    intent,
+    primarySignal,
+    confidence,
+    scores,
+    weakIntent,
+    reasons: reasons.slice(0, 6),
+  };
 }
 
 function sentenceFragments(text: string, limit = 2): string[] {
@@ -511,7 +632,7 @@ export function buildDeterministicEvidenceExtraction(
   const redFlags: string[] = [];
   const sourceIds: string[] = [];
   const queryTokens = new Set(tokenizeForOverlap(input.userQuery));
-  const answerIntent = inferAnswerIntent(input.userQuery);
+  const weakIntent = inferAnswerIntent(input.userQuery);
 
   const addUsableIfRelevant = (sourceLabel: string, fragment: string, opts: { allowGenericGuidance?: boolean; kind?: "direct" | "supporting" } = {}) => {
     const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
@@ -520,7 +641,7 @@ export function buildDeterministicEvidenceExtraction(
     const strongOverlap = hasStrongQueryOverlap(queryTokens, sanitized);
     const offQuerySymptom = hasOffQuerySymptom(input.userQuery, sanitized);
     if (offQuerySymptom && !opts.allowGenericGuidance) return;
-    const acceptDirect = opts.kind !== "supporting" && (strongOverlap || (answerIntent === "explain" && overlap > 0));
+    const acceptDirect = opts.kind !== "supporting" && (strongOverlap || (weakIntent === "explain" && overlap > 0));
     const acceptSupporting =
       opts.kind === "supporting" &&
       (strongOverlap || (opts.allowGenericGuidance && overlap > 0));
@@ -565,9 +686,19 @@ export function buildDeterministicEvidenceExtraction(
     usableFacts.length === 0
       ? ["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]
       : [];
+  const intentResolution = resolveAnswerIntent({
+    userQuery: input.userQuery,
+    weakIntent,
+    directFactCount: directAnswerFacts.length,
+    supportingFactCount: supportingContext.length,
+    riskFactCount: redFlags.length,
+    missingInfoCount: missingInfo.length,
+    sourceCount: sourceIds.length,
+  });
 
   return {
-    answerIntent,
+    answerIntent: intentResolution.intent,
+    intentResolution,
     directAnswerFacts: unique(directAnswerFacts).slice(0, 3),
     supportingContext: unique(supportingContext).slice(0, 2),
     riskFacts: unique(redFlags).slice(0, 3),

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDeterministicEvidenceExtraction,
   buildDeterministicQueryPlan,
+  resolveAnswerIntent,
   runEvidenceExtractorSkill,
   runQueryPlannerSkill,
 } from "./skillPipeline.js";
@@ -36,40 +37,63 @@ describe("skill pipeline query planner", () => {
 });
 
 describe("skill pipeline evidence extractor", () => {
+  it("resolves answer intent from query and evidence signals", () => {
+    const checklist = resolveAnswerIntent({
+      userQuery: "Production migration öncesi kısa bir kontrol listesi verir misin?",
+      weakIntent: "steps",
+      directFactCount: 2,
+      supportingFactCount: 1,
+      sourceCount: 1,
+    });
+
+    expect(checklist.intent).toBe("steps");
+    expect(checklist.primarySignal).toBe("checklist");
+    expect(checklist.confidence).toBe("high");
+    expect(checklist.reasons).toEqual(expect.arrayContaining(["query asks for checklist/list output"]));
+
+    const noSource = resolveAnswerIntent({
+      userQuery: "Bu belgeye göre kesin sonuç nedir?",
+      weakIntent: "explain",
+      directFactCount: 0,
+      supportingFactCount: 0,
+      missingInfoCount: 1,
+      sourceCount: 0,
+    });
+
+    expect(noSource.primarySignal).toBe("no_source");
+    expect(noSource.intent).toBe("unknown");
+    expect(noSource.reasons).toEqual(expect.arrayContaining(["no directly usable evidence was found"]));
+  });
+
   it("infers action intent from preparation questions before generic risk wording", () => {
     expect(
-      buildDeterministicEvidenceExtraction({
+      resolveAnswerIntent({
         userQuery: "Production migration öncesi ne yapmalıyım? Riskleri abartmadan açıkla.",
-        cards: [],
-      }).answerIntent,
+      }).intent,
     ).toBe("steps");
 
     expect(
-      buildDeterministicEvidenceExtraction({
+      resolveAnswerIntent({
         userQuery: "Boşanma davası için hangi belgeleri hazırlamalıyım?",
-        cards: [],
-      }).answerIntent,
+      }).intent,
     ).toBe("steps");
 
     expect(
-      buildDeterministicEvidenceExtraction({
+      resolveAnswerIntent({
         userQuery: "Trafik cezasına itiraz etmek istiyorum. Süre ve belge açısından neye dikkat etmeliyim?",
-        cards: [],
-      }).answerIntent,
+      }).intent,
     ).toBe("steps");
 
     expect(
-      buildDeterministicEvidenceExtraction({
+      resolveAnswerIntent({
         userQuery: "Boşanma sürecinde mal paylaşımı için hangi kayıtları toplamam gerekir?",
-        cards: [],
-      }).answerIntent,
+      }).intent,
     ).toBe("steps");
 
     expect(
-      buildDeterministicEvidenceExtraction({
+      resolveAnswerIntent({
         userQuery: "Özel eğitim için RAM raporu ve BEP planı hakkında okulda ne sormalıyım?",
-        cards: [],
-      }).answerIntent,
+      }).intent,
     ).toBe("steps");
   });
 
@@ -102,6 +126,8 @@ describe("skill pipeline evidence extractor", () => {
     expect(extraction.uncertainOrUnusable).toEqual(
       expect.arrayContaining([expect.stringContaining("CA-125")]),
     );
+    expect(extraction.intentResolution.intent).toBe("triage");
+    expect(extraction.intentResolution.reasons).toEqual(expect.arrayContaining(["retrieved evidence contains risk facts"]));
     expect(extraction.sourceIds).toContain("doc-1");
   });
 
@@ -268,6 +294,8 @@ Dikkat: Süre kaçarsa hak kaybı olabilir.`,
     });
 
     expect(extraction.usableFacts).toEqual([]);
+    expect(extraction.answerIntent).toBe("unknown");
+    expect(extraction.intentResolution.primarySignal).toBe("no_source");
     expect(extraction.missingInfo).toEqual(
       expect.arrayContaining(["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]),
     );
