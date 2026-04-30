@@ -10,6 +10,21 @@ interface EmbeddingsResponse {
   data?: Array<{ index?: number; embedding?: number[] }>;
 }
 
+type QdrantEmbeddingProvider = "deterministic" | "ai-engine" | "bge-m3";
+
+export interface QdrantEmbeddingDiagnostics {
+  requestedProvider: string;
+  actualProvider: QdrantEmbeddingProvider;
+  fallbackUsed: boolean;
+  dimension: number;
+  error?: string;
+}
+
+export interface QdrantEmbeddingResult {
+  vectors: number[][];
+  diagnostics: QdrantEmbeddingDiagnostics;
+}
+
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
@@ -75,19 +90,65 @@ async function embedWithAiEngine(texts: string[]): Promise<number[][]> {
   }
 }
 
-export async function embedTextsForQdrant(texts: string[]): Promise<number[][]> {
+export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promise<QdrantEmbeddingResult> {
   const provider = (process.env.R3MES_EMBEDDING_PROVIDER ?? "deterministic").trim().toLowerCase();
   if (provider === "ai-engine" || provider === "bge-m3") {
     try {
       const vectors = await embedWithAiEngine(texts);
-      if (vectors.every((vector) => vector.length === getQdrantVectorSize())) return vectors;
+      const dimension = getQdrantVectorSize();
+      if (vectors.every((vector) => vector.length === dimension)) {
+        return {
+          vectors,
+          diagnostics: {
+            requestedProvider: provider,
+            actualProvider: provider,
+            fallbackUsed: false,
+            dimension,
+          },
+        };
+      }
       console.warn("[qdrant-embedding] vector size mismatch, deterministic fallback");
+      const fallbackVectors = texts.map((text) => embedTextDeterministicForQdrant(text));
+      return {
+        vectors: fallbackVectors,
+        diagnostics: {
+          requestedProvider: provider,
+          actualProvider: "deterministic",
+          fallbackUsed: true,
+          dimension: fallbackVectors[0]?.length ?? dimension,
+          error: "vector size mismatch",
+        },
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[qdrant-embedding] ai-engine fallback: ${message}`);
+      const fallbackVectors = texts.map((text) => embedTextDeterministicForQdrant(text));
+      return {
+        vectors: fallbackVectors,
+        diagnostics: {
+          requestedProvider: provider,
+          actualProvider: "deterministic",
+          fallbackUsed: true,
+          dimension: fallbackVectors[0]?.length ?? getQdrantVectorSize(),
+          error: message,
+        },
+      };
     }
   }
-  return texts.map((text) => embedTextDeterministicForQdrant(text));
+  const vectors = texts.map((text) => embedTextDeterministicForQdrant(text));
+  return {
+    vectors,
+    diagnostics: {
+      requestedProvider: provider,
+      actualProvider: "deterministic",
+      fallbackUsed: false,
+      dimension: vectors[0]?.length ?? getQdrantVectorSize(),
+    },
+  };
+}
+
+export async function embedTextsForQdrant(texts: string[]): Promise<number[][]> {
+  return (await embedTextsForQdrantWithDiagnostics(texts)).vectors;
 }
 
 export async function embedTextForQdrant(text: string): Promise<number[]> {

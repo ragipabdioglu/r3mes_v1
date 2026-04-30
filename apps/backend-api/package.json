@@ -26,6 +26,7 @@
     "eval:adaptive-rag": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/adaptive-rag/golden.jsonl --out artifacts/evals/adaptive-rag/latest.json",
     "eval:collection-suggestion": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/collection-suggestion/golden.jsonl --out artifacts/evals/collection-suggestion/latest.json",
     "eval:rag-quality-gates": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/rag-quality-gates/golden.jsonl --out artifacts/evals/rag-quality-gates/latest.json",
+    "smoke:embedding-provider": "node --env-file=.env scripts/smoke-embedding-provider.mjs",
     "lora:scale": "node scripts/set-llama-lora-scale.mjs",
     "seed:legal-basic-demo": "node --env-file=.env scripts/seed-legal-basic-demo.mjs",
     "seed:legal-divorce-demo": "node --env-file=.env scripts/seed-legal-divorce-demo.mjs",
