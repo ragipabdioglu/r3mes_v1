@@ -571,7 +571,24 @@ function applyRenderedAnswer(
     retrievalDiagnostics: retrievalDebug?.retrievalDiagnostics ?? null,
     sourceSelection: retrievalDebug?.sourceSelection ?? null,
   });
-  const finalContent = safetyGate.safeFallback ?? finalRendered;
+  const shouldHideCitations =
+    safetyGate.blockedReasons.includes("NO_USABLE_FACTS") ||
+    safetyGate.blockedReasons.includes("QUERY_SOURCE_MISMATCH") ||
+    safetyGate.fallbackMode === "source_suggestion" ||
+    safetyGate.fallbackMode === "privacy_safe";
+  const exposedSources = shouldHideCitations ? [] : sources;
+  const exposedAnswer = shouldHideCitations ? { ...enrichedAnswer, used_source_ids: [] } : enrichedAnswer;
+  const finalContent = shouldHideCitations
+    ? (safetyGate.safeFallback ?? finalRendered)
+        .replace(
+          "Bu kaynaklarla net ve kesin bir cevap vermek doğru olmaz; aşağıdaki yanıt yalnızca eldeki sınırlı dayanağa göre okunmalı.",
+          "Seçili kaynaklarda bu soruya doğrudan yeterli bilgi bulamadım; aşağıdaki yanıt genel ve temkinli yönlendirme olarak okunmalı.",
+        )
+        .replace(
+          "Eldeki kaynaklar bu soruya sınırlı dayanak sağlıyor.",
+          "Seçili kaynaklarda bu soruya doğrudan yeterli bilgi bulunamadı.",
+        )
+    : safetyGate.safeFallback ?? finalRendered;
   const choices = Array.isArray(next.choices) ? [...next.choices] : [];
   if (choices.length > 0) {
     const first = { ...(choices[0] as Record<string, unknown>) };
@@ -581,8 +598,8 @@ function applyRenderedAnswer(
     choices[0] = first;
   }
   next.choices = choices;
-  next.sources = sources;
-  next.grounded_answer = enrichedAnswer;
+  next.sources = exposedSources;
+  next.grounded_answer = exposedAnswer;
   next.safety_gate = safetyGate;
   next.answer_quality = answerQuality;
   if (retrievalDebug) next.retrieval_debug = retrievalDebug;
