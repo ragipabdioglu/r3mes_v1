@@ -532,6 +532,12 @@ function applyRenderedAnswer(
     answer_domain: retrievalDebug?.domain ?? answer.answer_domain,
     user_query: userQuery || answer.user_query,
   }, retrievalDebug?.evidence ?? null);
+  const answerSpec = buildAnswerSpec({
+    answerDomain: enrichedAnswer.answer_domain,
+    groundingConfidence: enrichedAnswer.grounding_confidence,
+    userQuery: userQuery || enrichedAnswer.user_query,
+    evidence: retrievalDebug?.evidence ?? null,
+  });
   const useSafeTemplate =
     opts.useFallbackTemplate === true ||
     shouldUseSafeRenderedTemplate(enrichedAnswer, retrievalWasUsed);
@@ -546,13 +552,17 @@ function applyRenderedAnswer(
   const answerQuality = {
     lowLanguageQualityDetected: hasLowLanguageQuality(languageSourceText),
     polishChangedOutput: finalRendered !== rendered,
-      fallbackTemplateUsed: useSafeTemplate,
+    fallbackTemplateUsed: useSafeTemplate,
   };
   const safetyGate = evaluateSafetyGate({
     answerText: finalRendered,
     answer: enrichedAnswer,
+    answerSpec,
     sources,
     retrievalWasUsed,
+    evidence: retrievalDebug?.evidence ?? null,
+    retrievalDiagnostics: retrievalDebug?.retrievalDiagnostics ?? null,
+    sourceSelection: retrievalDebug?.sourceSelection ?? null,
   });
   const finalContent = safetyGate.safeFallback ?? finalRendered;
   const choices = Array.isArray(next.choices) ? [...next.choices] : [];

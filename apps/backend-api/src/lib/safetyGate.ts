@@ -1,13 +1,52 @@
 import type { ChatSourceCitation } from "@r3mes/shared-types";
 
 import type { GroundedMedicalAnswer } from "./answerSchema.js";
+import type { AnswerSpec } from "./answerSpec.js";
 import { hasLowLanguageQuality } from "./answerQuality.js";
+import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+
+type SafetySeverity = "pass" | "warn" | "rewrite" | "block";
+
+interface SafetyRouteDecision {
+  mode?: "strict" | "broad" | "suggest" | "no_source";
+  confidence?: "low" | "medium" | "high";
+  selectedCollectionIds?: string[];
+  usedCollectionIds?: string[];
+  suggestedCollectionIds?: string[];
+  rejectedCollectionIds?: string[];
+}
+
+interface SafetySourceSelection {
+  accessibleCollectionIds?: string[];
+  usedCollectionIds?: string[];
+  routeDecision?: SafetyRouteDecision;
+}
+
+export interface SafetyInput {
+  answerText: string;
+  answer: GroundedMedicalAnswer;
+  answerSpec?: AnswerSpec;
+  sources: ChatSourceCitation[];
+  retrievalWasUsed: boolean;
+  evidence?: EvidenceExtractorOutput | null;
+  retrievalDiagnostics?: Record<string, unknown> | null;
+  sourceSelection?: SafetySourceSelection | null;
+}
 
 export interface SafetyGateResult {
   pass: boolean;
+  severity: SafetySeverity;
   blockedReasons: string[];
+  warnings: string[];
   requiredRewrite: boolean;
+  fallbackMode?: "low_grounding" | "domain_safe" | "source_suggestion" | "privacy_safe";
   safeFallback?: string;
+  metrics: {
+    sourceCount: number;
+    usableFactCount: number;
+    redFlagCount: number;
+    answerLength: number;
+  };
 }
 
 const RISKY_CERTAINTY_PATTERNS = [
@@ -134,16 +173,19 @@ function buildFallback(answer: GroundedMedicalAnswer, sources: ChatSourceCitatio
   ].join("\n");
 }
 
-export function evaluateSafetyGate(opts: {
-  answerText: string;
-  answer: GroundedMedicalAnswer;
-  sources: ChatSourceCitation[];
-  retrievalWasUsed: boolean;
-}): SafetyGateResult {
+export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   const blockedReasons: string[] = [];
+  const warnings: string[] = [];
   const answerText = opts.answerText.trim();
   const query = opts.answer.user_query;
   const combined = [answerText, opts.answer.answer, opts.answer.condition_context, opts.answer.safe_action].join(" ");
+  const evidence = opts.evidence ?? null;
+  const routeDecision = opts.sourceSelection?.routeDecision;
+  const hasEvidenceSignals = Boolean(evidence || opts.answerSpec);
+  const usableFactCount = evidence?.usableFacts.length ?? opts.answerSpec?.facts.length ?? 0;
+  const redFlagCount = evidence?.redFlags.length ?? opts.answerSpec?.caution.length ?? 0;
+  const sourceCollectionIds = new Set(opts.sources.map((source) => source.collectionId).filter(Boolean));
+  const accessibleCollectionIds = new Set(opts.sourceSelection?.accessibleCollectionIds ?? []);
 
   if (!answerText) {
     blockedReasons.push("EMPTY_ANSWER");
@@ -151,6 +193,14 @@ export function evaluateSafetyGate(opts: {
 
   if (opts.retrievalWasUsed && opts.sources.length === 0) {
     blockedReasons.push("MISSING_SOURCES");
+  }
+
+  if (routeDecision?.mode === "suggest" && opts.sources.length === 0) {
+    warnings.push("SUGGEST_MODE_NO_GROUNDED_SOURCES");
+  }
+
+  if (opts.retrievalWasUsed && hasEvidenceSignals && usableFactCount === 0) {
+    blockedReasons.push("NO_USABLE_FACTS");
   }
 
   if (RISKY_CERTAINTY_PATTERNS.some((pattern) => pattern.test(combined))) {
@@ -174,6 +224,13 @@ export function evaluateSafetyGate(opts: {
   }
 
   if (
+    accessibleCollectionIds.size > 0 &&
+    [...sourceCollectionIds].some((collectionId) => !accessibleCollectionIds.has(collectionId))
+  ) {
+    blockedReasons.push("PRIVATE_SOURCE_SCOPE_MISMATCH");
+  }
+
+  if (
     includesAny(query, RED_FLAG_TERMS) &&
     !includesAny(answerText, URGENT_GUIDANCE_TERMS)
   ) {
@@ -185,10 +242,31 @@ export function evaluateSafetyGate(opts: {
   }
 
   const pass = blockedReasons.length === 0;
+  const fallbackMode = blockedReasons.includes("PRIVATE_SOURCE_SCOPE_MISMATCH")
+    ? "privacy_safe"
+    : blockedReasons.includes("RISKY_CERTAINTY_OR_TREATMENT")
+      ? "domain_safe"
+      : routeDecision?.mode === "suggest"
+        ? "source_suggestion"
+        : opts.answer.grounding_confidence === "low" || blockedReasons.includes("NO_USABLE_FACTS")
+          ? "low_grounding"
+          : pass
+            ? undefined
+            : "domain_safe";
+  const severity: SafetySeverity = pass ? (warnings.length > 0 ? "warn" : "pass") : "rewrite";
   return {
     pass,
+    severity,
     blockedReasons,
+    warnings,
     requiredRewrite: !pass,
+    fallbackMode,
     safeFallback: pass ? undefined : buildFallback(opts.answer, opts.sources),
+    metrics: {
+      sourceCount: opts.sources.length,
+      usableFactCount,
+      redFlagCount,
+      answerLength: answerText.length,
+    },
   };
 }
