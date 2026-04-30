@@ -31,6 +31,7 @@
     "seed:legal-divorce-demo": "node --env-file=.env scripts/seed-legal-divorce-demo.mjs",
     "seed:education-basic-demo": "node --env-file=.env scripts/seed-education-basic-demo.mjs",
     "seed:multi-domain-demo": "node --env-file=.env scripts/seed-multi-domain-demo.mjs",
+    "seed:thin-profile-demo": "node --env-file=.env scripts/seed-thin-profile-demo.mjs",
     "knowledge:metadata:backfill": "node --env-file=.env scripts/backfill-knowledge-metadata.mjs",
     "qdrant:reindex": "node --env-file=.env scripts/reindex-qdrant.mjs",
     "test:security-regression": "pnpm run build && vitest run src/skipFlags.test.ts src/walletAuth.test.ts src/walletAuthJti.test.ts src/integration.contract.test.ts src/qaWebhookIdempotency.test.ts src/internalQa.test.ts",

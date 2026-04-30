@@ -301,6 +301,14 @@ function scoreCase(testCase, response) {
     failures.push(`route_primary_domain:${routeDecision?.primaryDomain ?? "missing"}`);
   }
 
+  if (Array.isArray(testCase.expectedRouteReasonTerms) && testCase.expectedRouteReasonTerms.length > 0) {
+    const reasonText = (routeDecision?.reasons ?? []).join(" ");
+    const missingReasonTerms = testCase.expectedRouteReasonTerms.filter((term) => !normalize(reasonText).includes(normalize(term)));
+    if (missingReasonTerms.length > 0) {
+      failures.push(`route_reason_missing:${missingReasonTerms.join(",")}`);
+    }
+  }
+
   if (Array.isArray(testCase.expectedRejectedCollectionIds) && testCase.expectedRejectedCollectionIds.length > 0) {
     const rejectedIds = routeDecision?.rejectedCollectionIds ?? [];
     const missingRejected = testCase.expectedRejectedCollectionIds.filter((id) => !rejectedIds.includes(id));
@@ -340,6 +348,7 @@ function scoreCase(testCase, response) {
     suggestedCollectionIds: routeDecision?.suggestedCollectionIds ?? [],
     suggestedCollectionReasons: retrievalDebug?.sourceSelection?.suggestedCollections?.map((collection) => collection.reason) ?? [],
     rejectedCollectionIds: routeDecision?.rejectedCollectionIds ?? [],
+    routeDecisionReasons: routeDecision?.reasons ?? [],
     metadataRouteCandidateIds: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.id) ?? [],
     metadataRouteCandidateQualities: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.sourceQuality) ?? [],
     latencyMs: response?._latencyMs ?? null,

@@ -138,6 +138,12 @@ function normalize(text: string): string {
   return text.toLocaleLowerCase("tr-TR");
 }
 
+export function readKnowledgeCollectionSourceQuality(
+  collection: KnowledgeCollectionAccessItem,
+): "structured" | "inferred" | "thin" | null {
+  return readMetadataProfile(collection.autoMetadata)?.sourceQuality ?? null;
+}
+
 function numberArray(input: unknown): number[] | undefined {
   if (!Array.isArray(input)) return undefined;
   const values = input.map(Number).filter((item) => Number.isFinite(item));

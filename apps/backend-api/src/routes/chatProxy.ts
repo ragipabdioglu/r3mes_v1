@@ -18,6 +18,7 @@ import {
   explainCollectionRouteSuggestion,
   rankMetadataRouteCandidates,
   rankSuggestedKnowledgeCollections,
+  readKnowledgeCollectionSourceQuality,
   resolveAccessibleKnowledgeCollections,
   resolveSuggestibleKnowledgeCollections,
   type KnowledgeCollectionAccessItem,
@@ -195,9 +196,15 @@ function buildSourceSelectionSummary(opts: {
     excludedIds: new Set(opts.requestedCollectionIds),
     limit: 5,
   });
-  const thinProfileCollectionIds = metadataRouteCandidates
-    .filter((candidate) => candidate.sourceQuality === "thin")
-    .map((candidate) => candidate.id);
+  const thinProfileCollectionIds = uniqueStrings([
+    ...metadataRouteCandidates
+      .filter((candidate) => candidate.sourceQuality === "thin")
+      .map((candidate) => candidate.id),
+    ...usedCollectionIds.filter((id) => {
+      const collection = opts.suggestibleCollections.find((item) => item.id === id);
+      return collection ? readKnowledgeCollectionSourceQuality(collection) === "thin" : false;
+    }),
+  ]);
   const suggestedCollections = [...rankedSuggestedCollections]
     .sort((a, b) => {
       const aRetrieval = retrievalSuggestedIds.includes(a.id) ? 0 : 1;
