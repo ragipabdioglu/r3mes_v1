@@ -94,6 +94,39 @@ Operasyonel smoke senaryoları (`stage`/`category`/`cause` ayrıştırması, loc
 
 **Canlı ürün öncesi:** [docs/RUNBOOK.md](docs/RUNBOOK.md), [docs/LIVE_SMOKE.md](docs/LIVE_SMOKE.md) — `scripts/smoke_ai_engine.py` (`--prove-inference` ile çıkarım + cache kanıtı; çıkış kodları 0–5).
 
+## BGE-M3 embedding smoke
+
+Qdrant RAG v2 için backend `R3MES_EMBEDDING_PROVIDER=ai-engine` kullanıyorsa ai-engine `/v1/embeddings` endpoint'i açık olmalıdır. Embedding smoke, gerçek BGE-M3 çalışmadığında deterministic fallback'i yakalar.
+
+Windows yerel kullanım:
+
+```powershell
+pnpm ai-engine:embedding
+```
+
+Ayrı terminalde:
+
+```powershell
+$env:R3MES_REQUIRE_REAL_EMBEDDINGS='1'
+pnpm --filter @r3mes/backend-api run smoke:embedding-provider
+Remove-Item Env:R3MES_REQUIRE_REAL_EMBEDDINGS
+```
+
+Beklenen sonuç:
+
+```json
+{
+  "diagnostics": {
+    "actualProvider": "ai-engine",
+    "fallbackUsed": false,
+    "dimension": 1024
+  },
+  "passed": true
+}
+```
+
+Eğer `fallbackUsed: true` görünürse Qdrant reindex yapılmamalıdır; önce ai-engine sağlık, BGE-M3 local path ve `R3MES_EMBEDDING_LOCAL_FILES_ONLY` ayarları kontrol edilmelidir.
+
 ## CLI
 
 `model_loader.py` — bayt düzeyinde IPFS / HTTP indirme ölçümü.

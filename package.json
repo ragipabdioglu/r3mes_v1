@@ -13,6 +13,7 @@
     "local:start": "pwsh -File infrastructure/scripts/r3mes-local-system.ps1 start",
     "local:stop": "pwsh -File infrastructure/scripts/r3mes-local-system.ps1 stop",
     "local:status": "pwsh -File infrastructure/scripts/r3mes-local-system.ps1 status",
+    "ai-engine:embedding": "pwsh -File infrastructure/scripts/run-ai-engine-dev.ps1 -EmbeddingOnly",
     "db:migrate": "pnpm --filter @r3mes/backend-api exec prisma migrate deploy",
     "bootstrap": "node infrastructure/scripts/bootstrap-local.mjs",
     "smoke": "pnpm run smoke:ts && pnpm run smoke:contracts",
