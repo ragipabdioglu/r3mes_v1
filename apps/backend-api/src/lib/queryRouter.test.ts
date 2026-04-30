@@ -92,6 +92,18 @@ describe("routeQuery", () => {
     expect(plan.subtopics).toEqual([]);
   });
 
+  it("does not route generic or unrelated pain into pelvic pain", () => {
+    expect(routeQuery("Başım ağrıyor, kısa ve sakin ne yapmalıyım?")).toMatchObject({
+      domain: "general",
+      confidence: "low",
+      subtopics: [],
+    });
+    expect(routeQuery("Karnım ağrıyor, neye dikkat etmeliyim?")).toMatchObject({
+      domain: "medical",
+      subtopics: ["karin_agrisi"],
+    });
+  });
+
   it("extracts weak query signals without making them the final route authority", () => {
     const signals = extractQuerySignals("Boşanma davasında velayet için hangi belgeleri hazırlamalıyım?");
 

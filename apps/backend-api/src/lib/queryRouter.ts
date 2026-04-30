@@ -133,9 +133,17 @@ const ROUTE_RULES: RouteRule[] = [
   {
     domain: "medical",
     subtopic: "kasik_agrisi",
-    terms: ["kasık", "kasik", "pelvik", "ağrı", "agri", "sancı", "sanci"],
+    terms: ["kasık", "kasik", "pelvik", "alt karın", "alt karin"],
     hints: ["kasık ağrısı triyaj", "pelvik ağrı alarm bulguları"],
     include: ["kasık", "ağrı", "ateş", "kanama", "muayene"],
+    riskTerms: ["ateş", "ates", "kusma", "bayılma", "bayilma", "şiddetli", "siddetli"],
+  },
+  {
+    domain: "medical",
+    subtopic: "karin_agrisi",
+    terms: ["karın", "karin", "karnım", "karnim", "mide", "göbek", "gobek"],
+    hints: ["karın ağrısı genel triyaj", "karın ağrısı alarm bulguları"],
+    include: ["karın", "ağrı", "ateş", "kusma", "kanama", "muayene"],
     riskTerms: ["ateş", "ates", "kusma", "bayılma", "bayilma", "şiddetli", "siddetli"],
   },
   {
