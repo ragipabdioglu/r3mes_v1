@@ -34,6 +34,7 @@ describe("chat proxy RAG orchestration", () => {
     vi.stubEnv("R3MES_ENABLE_RAG_FAST_PATH", "0");
     vi.stubEnv("R3MES_ENABLE_FAST_GROUNDED_COMPOSER", "0");
     vi.stubEnv("R3MES_ENABLE_MINI_VALIDATOR", "force");
+    vi.stubEnv("R3MES_EXPOSE_CHAT_DEBUG", "1");
     vi.stubEnv(
       "R3MES_DEV_WALLET",
       "0xd5a6f9e7dd18997ed39e1e584b1ec60d636bf295fbe43ccb09cd8a906d2c0204",
@@ -212,6 +213,40 @@ describe("chat proxy RAG orchestration", () => {
     expect(res.body).not.toContain("sources");
     expect(prisma.knowledgeChunk.findMany).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("keeps public chat responses free of internal debug fields unless requested", async () => {
+    vi.stubEnv("R3MES_EXPOSE_CHAT_DEBUG", "0");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "chatcmpl-public",
+          choices: [{ message: { content: "Merhaba, nasıl yardımcı olabilirim?" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "content-type": "application/json" },
+      payload: JSON.stringify({
+        messages: [{ role: "user", content: "Merhaba" }],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as Record<string, unknown>;
+    expect(body.sources).toEqual([]);
+    expect(body.grounded_answer).toBeUndefined();
+    expect(body.safety_gate).toBeUndefined();
+    expect(body.answer_quality).toBeUndefined();
+    expect(body.retrieval_debug).toBeUndefined();
     await app.close();
   });
 

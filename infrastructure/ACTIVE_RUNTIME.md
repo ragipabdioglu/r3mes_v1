@@ -37,6 +37,30 @@ pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit
 pnpm --filter @r3mes/backend-api run eval:adaptive-rag
 ```
 
+## Public / Debug Chat Response Boundary
+
+`POST /v1/chat/completions` public responses expose only the OpenAI-style chat payload plus clean `sources`.
+Internal fields are hidden by default:
+
+- `grounded_answer`
+- `safety_gate`
+- `answer_quality`
+- `retrieval_debug`
+
+Debug/eval callers can opt in with:
+
+```text
+X-R3MES-Debug: 1
+```
+
+or local env:
+
+```powershell
+$env:R3MES_EXPOSE_CHAT_DEBUG='1'
+```
+
+The grounded eval runner sends the debug header automatically.
+
 ## Active Embedding / Reindex Gate
 
 Qdrant reindex must not run on silent deterministic fallback when `R3MES_EMBEDDING_PROVIDER=ai-engine` or `bge-m3`.

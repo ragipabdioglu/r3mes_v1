@@ -410,6 +410,7 @@ async function runCase(opts, testCase) {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-r3mes-debug": "1",
           "x-wallet-address": opts.wallet,
           "x-message": JSON.stringify({
             iat: Math.floor(Date.now() / 1000),

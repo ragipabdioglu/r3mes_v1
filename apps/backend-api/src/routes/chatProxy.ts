@@ -334,6 +334,13 @@ function shouldUseRagFastPath(opts: {
   return true;
 }
 
+function shouldExposeChatDebug(req: FastifyRequest): boolean {
+  if (process.env.R3MES_EXPOSE_CHAT_DEBUG === "1") return true;
+  const header = req.headers["x-r3mes-debug"];
+  const value = Array.isArray(header) ? header[0] : header;
+  return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
 function extractRetrievalQuery(body: Record<string, unknown>): string {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const lastUser = [...messages]
@@ -531,7 +538,7 @@ function applyRenderedAnswer(
   userQuery = "",
   retrievalWasUsed = false,
   retrievalDebug: ChatRetrievalDebug | null = null,
-  opts: { useFallbackTemplate?: boolean } = {},
+  opts: { useFallbackTemplate?: boolean; exposeDebug?: boolean } = {},
 ): Record<string, unknown> {
   const next = structuredClone(payload) as Record<string, unknown>;
   const enrichedAnswer = enrichAnswerWithEvidence({
@@ -599,10 +606,12 @@ function applyRenderedAnswer(
   }
   next.choices = choices;
   next.sources = exposedSources;
-  next.grounded_answer = exposedAnswer;
-  next.safety_gate = safetyGate;
-  next.answer_quality = answerQuality;
-  if (retrievalDebug) next.retrieval_debug = retrievalDebug;
+  if (opts.exposeDebug === true) {
+    next.grounded_answer = exposedAnswer;
+    next.safety_gate = safetyGate;
+    next.answer_quality = answerQuality;
+    if (retrievalDebug) next.retrieval_debug = retrievalDebug;
+  }
   return next;
 }
 
@@ -1053,6 +1062,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
 
       const body = req.body as Record<string, unknown> | undefined;
       const stream = body?.stream === true;
+      const exposeDebug = shouldExposeChatDebug(req);
 
       if (!shouldSkipChatFee()) {
         if (!isFeeConfigured()) {
@@ -1275,7 +1285,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             retrievalQuery,
             false,
             retrievalDebug,
-            { useFallbackTemplate: true },
+            { useFallbackTemplate: true, exposeDebug },
           ),
         );
       }
@@ -1302,7 +1312,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             retrievalQuery,
             retrievalWasUsed,
             retrievalDebug,
-            { useFallbackTemplate: true },
+            { useFallbackTemplate: true, exposeDebug },
           ),
         );
       }
@@ -1327,7 +1337,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             retrievalQuery,
             retrievalWasUsed,
             retrievalDebug,
-            { useFallbackTemplate: true },
+            { useFallbackTemplate: true, exposeDebug },
           ),
         );
       }
@@ -1451,6 +1461,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                       retrievalQuery,
                       retrievalWasUsed,
                       retrievalDebug,
+                      { exposeDebug },
                     ),
                   );
                 }
@@ -1466,6 +1477,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 retrievalQuery,
                 retrievalWasUsed,
                 retrievalDebug,
+                { exposeDebug },
               ),
             );
           }
@@ -1487,6 +1499,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                   retrievalQuery,
                   retrievalWasUsed,
                   retrievalDebug,
+                  { exposeDebug },
                 ),
               );
             }
@@ -1503,11 +1516,12 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 retrievalQuery,
                 retrievalWasUsed,
                 retrievalDebug,
+                { exposeDebug },
               ),
             );
           }
           parsed.sources = retrieval.sources;
-          if (retrievalDebug) parsed.retrieval_debug = retrievalDebug;
+          if (exposeDebug && retrievalDebug) parsed.retrieval_debug = retrievalDebug;
           return reply.type(ct).send(parsed);
         } catch {
           // fall through to raw buffer
