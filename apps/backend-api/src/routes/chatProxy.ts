@@ -24,6 +24,7 @@ import {
 import { retrieveKnowledgeContext } from "../lib/knowledgeRetrieval.js";
 import { retrieveKnowledgeContextQdrant } from "../lib/qdrantRetrieval.js";
 import { renderGroundedMedicalAnswer } from "../lib/renderMedicalAnswer.js";
+import { buildRouteDecisionLogEvent } from "../lib/routeDecisionLog.js";
 import { evaluateSafetyGate } from "../lib/safetyGate.js";
 import type { DomainRoutePlan } from "../lib/queryRouter.js";
 import type { EvidenceExtractorOutput, QueryPlannerOutput } from "../lib/skillPipeline.js";
@@ -1185,6 +1186,22 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           routePlan,
           retrievalSuggestedCollectionIds,
         });
+        const routeDecisionQuality = {
+          sourceCount: retrieval.sources.length,
+          directFactCount: retrieval.evidence?.directAnswerFacts.length ?? retrieval.evidence?.usableFacts.length ?? 0,
+          riskFactCount: retrieval.evidence?.riskFacts.length ?? retrieval.evidence?.redFlags.length ?? 0,
+          hasUsableGrounding: retrieval.sources.length > 0 && retrieval.groundingConfidence !== "low",
+        };
+        req.log.info(
+          buildRouteDecisionLogEvent({
+            query: retrievalQuery,
+            routePlan,
+            sourceSelection,
+            retrievalDiagnostics: retrieval.retrievalDiagnostics ?? undefined,
+            quality: routeDecisionQuality,
+          }),
+          "Knowledge route decision",
+        );
 
         const retrievalDebug: ChatRetrievalDebug | null = retrievalQuery
           ? {
@@ -1197,12 +1214,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               retrievalMode: retrieval.retrievalMode,
               retrievalDiagnostics: retrieval.retrievalDiagnostics ?? undefined,
               sourceSelection,
-              quality: {
-                sourceCount: retrieval.sources.length,
-                directFactCount: retrieval.evidence?.directAnswerFacts.length ?? retrieval.evidence?.usableFacts.length ?? 0,
-                riskFactCount: retrieval.evidence?.riskFacts.length ?? retrieval.evidence?.redFlags.length ?? 0,
-                hasUsableGrounding: retrieval.sources.length > 0 && retrieval.groundingConfidence !== "low",
-            },
+              quality: routeDecisionQuality,
           }
         : null;
 
