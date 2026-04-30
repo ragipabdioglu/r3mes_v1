@@ -38,6 +38,88 @@ function decodeSourcesHeader(value: string | null): ChatSourceCitation[] {
   }
 }
 
+function readPositiveIntegerEnv(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function getTypewriterEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_R3MES_TYPEWRITER_STREAM !== "0";
+}
+
+function getTypewriterChunkChars(): number {
+  return readPositiveIntegerEnv("NEXT_PUBLIC_R3MES_TYPEWRITER_CHUNK_CHARS", 14, 4, 80);
+}
+
+function getTypewriterDelayMs(): number {
+  return readPositiveIntegerEnv("NEXT_PUBLIC_R3MES_TYPEWRITER_DELAY_MS", 22, 0, 250);
+}
+
+function waitForTypewriterDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (delayMs <= 0) return Promise.resolve();
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = globalThis.setTimeout(() => {
+      settled = true;
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, delayMs);
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function splitTypewriterChunks(text: string, maxChars: number): string[] {
+  const tokens = text.match(/\S+\s*/g) ?? [text];
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const token of tokens) {
+    if (current && current.length + token.length > maxChars) {
+      chunks.push(current);
+      current = token;
+      continue;
+    }
+    current += token;
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+async function* yieldTypewriterText(text: string, signal?: AbortSignal): AsyncGenerator<string, void, unknown> {
+  if (!getTypewriterEnabled()) {
+    yield text;
+    return;
+  }
+
+  const chunks = splitTypewriterChunks(text, getTypewriterChunkChars());
+  const delayMs = getTypewriterDelayMs();
+
+  for (let index = 0; index < chunks.length; index += 1) {
+    if (signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
+    yield chunks[index];
+    if (index < chunks.length - 1) {
+      await waitForTypewriterDelay(delayMs, signal);
+    }
+  }
+}
+
 /**
  * POST /v1/chat/completions — backend proxy; `adapter_id` (DB id) veya `adapter_cid` ile
  * çözüm sunucuda yapılır (INTEGRATION_CONTRACT §3.5).
@@ -104,7 +186,9 @@ export async function* streamChatCompletions(params: {
     const debug = readRetrievalDebug(parsed);
     if (debug) params.onRetrievalDebug?.(debug);
     const content = readAssistantContent(parsed);
-    if (content) yield content;
+    if (content) {
+      yield* yieldTypewriterText(content, params.signal);
+    }
     return;
   }
 
