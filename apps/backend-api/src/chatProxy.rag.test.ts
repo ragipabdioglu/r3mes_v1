@@ -275,6 +275,8 @@ describe("chat proxy RAG orchestration", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.knowledgeCollection.findMany).mockReset();
+    vi.mocked(prisma.knowledgeChunk.findMany).mockReset();
     vi.mocked(prisma.knowledgeCollection.findMany).mockResolvedValue([
       {
         id: "kc_1",
@@ -291,12 +293,49 @@ describe("chat proxy RAG orchestration", () => {
         chunkIndex: 0,
         content:
           "# Knowledge Card\nTopic: smear ve kasık ağrısı\nClinical Takeaway: Temiz smear iyi bir bulgudur, ancak kasık ağrısını tek başına açıklamaz.\nSafe Guidance: Ağrı sürüyor veya artıyorsa kadın hastalıkları değerlendirmesi uygundur.\nRed Flags: Şiddetli ağrı, ateş veya anormal kanama varsa daha hızlı değerlendirme gerekir.",
+        autoMetadata: {
+          domain: "medical",
+          subtopics: ["smear", "kasik_agrisi"],
+          keywords: [
+            "smear",
+            "kasık",
+            "kasik",
+            "ağrı",
+            "agri",
+            "kasik agrisi",
+            "pelvik",
+            "takip",
+            "kontrol",
+            "temiz",
+            "biyopsi",
+            "patoloji",
+            "servikal tarama",
+            "kadın hastalıkları",
+          ],
+          entities: ["smear", "kasık ağrısı"],
+          sourceQuality: "structured",
+        },
         embedding: {
           values: embedKnowledgeText("Temiz smear iyi bir bulgudur ancak kasık ağrısını tek başına açıklamaz."),
         },
         document: {
           title: "Smear ve kasık ağrısı",
           collectionId: "kc_1",
+          autoMetadata: {
+            domain: "medical",
+            subtopics: ["smear", "kasik_agrisi"],
+            keywords: [
+              "smear",
+              "kasık ağrısı",
+              "kasik agrisi",
+              "kadın hastalıkları",
+              "takip",
+              "temiz",
+              "biyopsi",
+              "patoloji",
+              "servikal tarama",
+            ],
+          },
           createdAt: new Date("2026-04-22T10:00:00.000Z"),
           collection: {
             owner: {
@@ -388,6 +427,8 @@ describe("chat proxy RAG orchestration", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.knowledgeCollection.findMany).mockReset();
+    vi.mocked(prisma.knowledgeChunk.findMany).mockReset();
     vi.mocked(prisma.knowledgeCollection.findMany).mockResolvedValue([
       {
         id: "kc_1",
@@ -404,12 +445,24 @@ describe("chat proxy RAG orchestration", () => {
         chunkIndex: 0,
         content:
           "# Knowledge Card\nTopic: smear ve kasık ağrısı\nClinical Takeaway: Temiz smear iyi bir bulgudur, ancak kasık ağrısını tek başına açıklamaz.\nSafe Guidance: Ağrı sürüyor veya artıyorsa kadın hastalıkları değerlendirmesi uygundur.",
+        autoMetadata: {
+          domain: "medical",
+          subtopics: ["smear", "kasik_agrisi"],
+          keywords: ["smear", "kasık", "ağrı", "takip", "kontrol"],
+          entities: ["smear", "kasık ağrısı"],
+          sourceQuality: "structured",
+        },
         embedding: {
           values: embedKnowledgeText("Temiz smear iyi bir bulgudur ancak kasık ağrısını tek başına açıklamaz."),
         },
         document: {
           title: "Smear ve kasık ağrısı",
           collectionId: "kc_1",
+          autoMetadata: {
+            domain: "medical",
+            subtopics: ["smear", "kasik_agrisi"],
+            keywords: ["smear", "kasık ağrısı", "kadın hastalıkları", "takip"],
+          },
           createdAt: new Date("2026-04-22T10:00:00.000Z"),
           collection: {
             owner: {
