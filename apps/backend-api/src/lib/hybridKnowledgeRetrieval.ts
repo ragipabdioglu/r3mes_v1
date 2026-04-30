@@ -508,6 +508,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       sourceId: chunk.documentId,
       title: chunk.document.title,
       topic: card.topic,
+      rawContent: chunk.content,
       patientSummary: card.patientSummary,
       clinicalTakeaway: card.clinicalTakeaway,
       safeGuidance: card.safeGuidance,

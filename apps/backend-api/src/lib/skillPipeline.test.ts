@@ -194,4 +194,82 @@ describe("skill pipeline evidence extractor", () => {
     expect(protocol.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("velayet, nafaka")]));
     expect(protocol.missingInfo).toEqual([]);
   });
+
+  it("extracts evidence from technical runbook style raw sections", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Production migration öncesi hangi kontrolleri yapmalıyım?",
+      cards: [
+        {
+          sourceId: "runbook-1",
+          title: "db-migration-runbook",
+          rawContent: `# DB Migration Runbook
+
+Checklist:
+- Production migration öncesi yedek alınmalı, staging çıktısı doğrulanmalı ve rollback planı hazır olmalıdır.
+
+Risks:
+- Yedeksiz işlem veya veri silen komutlar yüksek risklidir.
+
+Limitations:
+- Ortama özel bağlantı ayarı kaynakta yoksa uydurulmamalıdır.`,
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("yedek alınmalı")]));
+    expect(extraction.redFlags).toEqual(expect.arrayContaining([expect.stringContaining("Yedeksiz işlem")]));
+    expect(extraction.uncertainOrUnusable).toEqual(expect.arrayContaining([expect.stringContaining("bağlantı ayarı")]));
+    expect(extraction.missingInfo).toEqual([]);
+  });
+
+  it("extracts evidence from education markdown headings without card-specific labels", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "RAM raporu sonrası BEP planını okulda nasıl konuşmalıyım?",
+      cards: [
+        {
+          sourceId: "education-raw-1",
+          title: "raw-bep-note",
+          rawContent: `## Kullanılabilir Bilgiler
+RAM raporu sonrası BEP planı okul rehberlik birimi, veli ve öğretmenle birlikte değerlendirilmelidir.
+
+## Ne Yapmalı
+Veli BEP hedeflerini, okul gözlem notlarını ve güncelleme tarihlerini yazılı takip etmelidir.
+
+## Uyarılar
+Raporun yanlış uygulanması veya çocuğun eğitimden kopması hızlı okul/RAM değerlendirmesi gerektirir.
+
+## Kullanılamayan
+Kaynak kesin tanı veya tedavi önerisi vermiyor.`,
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("BEP planı")]));
+    expect(extraction.supportingContext).toEqual(expect.arrayContaining([expect.stringContaining("BEP hedeflerini")]));
+    expect(extraction.redFlags).toEqual(expect.arrayContaining([expect.stringContaining("Raporun yanlış uygulanması")]));
+    expect(extraction.notSupported).toEqual(expect.arrayContaining([expect.stringContaining("kesin tanı")]));
+    expect(extraction.missingInfo).toEqual([]);
+  });
+
+  it("does not promote unrelated raw sections just because they are present", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Bebeğim çok terliyor neden olabilir?",
+      cards: [
+        {
+          sourceId: "legal-raw-1",
+          title: "traffic-fine-note",
+          rawContent: `Gerçekler: Trafik cezasına itirazda tebliğ tarihi ve başvuru süresi kontrol edilmelidir.
+
+Öneri: Ceza tutanağı ve ödeme belgesi saklanmalıdır.
+
+Dikkat: Süre kaçarsa hak kaybı olabilir.`,
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts).toEqual([]);
+    expect(extraction.missingInfo).toEqual(
+      expect.arrayContaining(["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]),
+    );
+  });
 });

@@ -66,6 +66,7 @@ export interface EvidenceExtractorCardInput {
   sourceId: string;
   title: string;
   topic?: string;
+  rawContent?: string;
   patientSummary?: string;
   clinicalTakeaway?: string;
   safeGuidance?: string;
@@ -145,6 +146,7 @@ function inferAnswerIntent(query: string): AnswerIntent {
 
 function sentenceFragments(text: string, limit = 2): string[] {
   return text
+    .replace(/^\s*[-*]\s+/gm, "")
     .split(/(?<=[.!?])\s+|\n+/)
     .map((part) => part.trim())
     .filter(Boolean)
@@ -246,6 +248,129 @@ function compactEvidenceLine(line: string, maxChars = 220): string {
   const normalized = line.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, maxChars - 1).trim()}…`;
+}
+
+type EvidenceSectionKind = "direct" | "supporting" | "risk" | "limit";
+
+interface EvidenceSection {
+  kind: EvidenceSectionKind;
+  text: string;
+}
+
+const SECTION_LABELS: Record<EvidenceSectionKind, string[]> = {
+  direct: [
+    "Source Summary",
+    "Key Takeaway",
+    "Clinical Takeaway",
+    "Patient Summary",
+    "Temel Bilgi",
+    "Özet",
+    "Ozet",
+    "Bulgular",
+    "Finding",
+    "Findings",
+    "Claim",
+    "Context",
+    "Kullanılabilir Bilgiler",
+    "Kullanilabilir Bilgiler",
+    "Gerçekler",
+    "Gercekler",
+  ],
+  supporting: [
+    "Safe Guidance",
+    "Guidance",
+    "Recommendation",
+    "Recommended Action",
+    "Ne Yapmalı",
+    "Ne Yapmali",
+    "Öneri",
+    "Oneri",
+    "Steps",
+    "Checklist",
+    "Procedure",
+    "Runbook",
+  ],
+  risk: [
+    "Red Flags",
+    "Risk",
+    "Risks",
+    "Warning",
+    "Warnings",
+    "Uyarı Bulguları",
+    "Uyari Bulgulari",
+    "Uyarılar",
+    "Uyarilar",
+    "Alarm",
+    "Dikkat",
+    "Dikkat Edilecekler",
+  ],
+  limit: [
+    "Do Not Infer",
+    "Limitations",
+    "Limits",
+    "Not Supported",
+    "Belirsiz",
+    "Kullanılamayan",
+    "Kullanilamayan",
+    "Çıkarım Yapma",
+    "Cikarim Yapma",
+    "Uydurma",
+  ],
+};
+
+const ALL_SECTION_LABELS = Object.values(SECTION_LABELS).flat();
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function sectionKindForLabel(label: string): EvidenceSectionKind | null {
+  const normalized = label.toLocaleLowerCase("tr-TR");
+  for (const [kind, labels] of Object.entries(SECTION_LABELS) as Array<[EvidenceSectionKind, string[]]>) {
+    if (labels.some((item) => item.toLocaleLowerCase("tr-TR") === normalized)) return kind;
+  }
+  return null;
+}
+
+function extractSectionBlock(content: string, label: string): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const labelPattern = escapeRegExp(label);
+  const startMatch = normalized.match(new RegExp(`(^|\\n)\\s*(?:#{1,6}\\s*)?${labelPattern}\\s*:?[ \\t]*`, "i"));
+  if (!startMatch || typeof startMatch.index !== "number") return "";
+  const start = startMatch.index + startMatch[0].length;
+  const afterStart = normalized.slice(start);
+  let endIndex = afterStart.length;
+  for (const otherLabel of ALL_SECTION_LABELS) {
+    const otherPattern = escapeRegExp(otherLabel);
+    const match = afterStart.match(new RegExp(`\\n\\s*(?:#{1,6}\\s*)?${otherPattern}\\s*:?[ \\t]*`, "i"));
+    if (match && typeof match.index === "number") {
+      endIndex = Math.min(endIndex, match.index);
+    }
+  }
+  return afterStart.slice(0, endIndex).trim();
+}
+
+function extractRawEvidenceSections(content: string | undefined): EvidenceSection[] {
+  if (!content?.trim()) return [];
+  const sections: EvidenceSection[] = [];
+  for (const label of ALL_SECTION_LABELS) {
+    const kind = sectionKindForLabel(label);
+    if (!kind) continue;
+    const text = extractSectionBlock(content, label);
+    if (text) sections.push({ kind, text });
+  }
+  return sections;
+}
+
+function cardSections(card: EvidenceExtractorCardInput): EvidenceSection[] {
+  const explicitSections: EvidenceSection[] = [
+    { kind: "direct", text: card.patientSummary ?? "" },
+    { kind: "direct", text: card.clinicalTakeaway ?? "" },
+    { kind: "supporting", text: card.safeGuidance ?? "" },
+    { kind: "risk", text: card.redFlags ?? "" },
+    { kind: "limit", text: card.doNotInfer ?? "" },
+  ];
+  return [...explicitSections, ...extractRawEvidenceSections(card.rawContent)].filter((section) => section.text.trim());
 }
 
 export function buildDeterministicQueryPlan(input: QueryPlannerInput): QueryPlannerOutput {
@@ -414,31 +539,25 @@ export function buildDeterministicEvidenceExtraction(
     const sourceLabel = card.title || card.sourceId;
     sourceIds.push(card.sourceId);
 
-    for (const fragment of sentenceFragments(card.patientSummary ?? "", 2)) {
-      addUsableIfRelevant(sourceLabel, fragment, { allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment) });
-    }
-
-    for (const fragment of sentenceFragments(card.clinicalTakeaway ?? "", 2)) {
-      addUsableIfRelevant(sourceLabel, fragment, { allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment) });
-    }
-
-    for (const fragment of sentenceFragments(card.safeGuidance ?? "", 2)) {
-      addUsableIfRelevant(sourceLabel, fragment, {
-        allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment),
-        kind: "supporting",
-      });
-    }
-
-    for (const fragment of sentenceFragments(card.redFlags ?? "", 2)) {
-      const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
-      const overlap = queryOverlapScore(queryTokens, sanitized);
-      if (sanitized && (overlap > 0 || !hasOffQuerySymptom(input.userQuery, sanitized))) {
-        redFlags.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
+    for (const section of cardSections(card)) {
+      for (const fragment of sentenceFragments(section.text, 2)) {
+        if (section.kind === "direct") {
+          addUsableIfRelevant(sourceLabel, fragment, { allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment) });
+        } else if (section.kind === "supporting") {
+          addUsableIfRelevant(sourceLabel, fragment, {
+            allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment),
+            kind: "supporting",
+          });
+        } else if (section.kind === "risk") {
+          const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
+          const overlap = queryOverlapScore(queryTokens, sanitized);
+          if (sanitized && (overlap > 0 || !hasOffQuerySymptom(input.userQuery, sanitized))) {
+            redFlags.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
+          }
+        } else {
+          uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, fragment)));
+        }
       }
-    }
-
-    for (const fragment of sentenceFragments(card.doNotInfer ?? "", 2)) {
-      uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, fragment)));
     }
   }
 
