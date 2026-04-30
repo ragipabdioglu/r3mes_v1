@@ -17,6 +17,7 @@ describe("deterministic safety gate", () => {
         "1. Genel değerlendirme: Karın ağrısı tek başına kesin tanı göstermez.\n2. Ne yapmalı: Ağrı sürerse muayene planlanmalıdır.\n3. Ne zaman doktora başvurmalı: Şiddetli ağrı, ateş veya kusma varsa gecikmeden başvurun.\n4. Kısa özet: Alarm bulgusu varsa değerlendirme gerekir.",
       answer: {
         ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
         user_query: "karnım ağrıyor",
       },
       sources: [source],
@@ -35,6 +36,7 @@ describe("deterministic safety gate", () => {
       answerText: "Bu kesin kanserdir, hemen tedaviye başla.",
       answer: {
         ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
         user_query: "kasık ağrım var",
       },
       sources: [source],
@@ -53,6 +55,7 @@ describe("deterministic safety gate", () => {
       answerText: "Biraz dinlenin ve su için.",
       answer: {
         ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
         user_query: "şiddetli karın ağrısı ve ateşim var",
       },
       sources: [source],
@@ -68,6 +71,7 @@ describe("deterministic safety gate", () => {
       answerText: "Bebeğin fiziksel运动（这可能是翻译错误） nedeniyle terliyor olabilir.",
       answer: {
         ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
         user_query: "bebeğim çok terliyor neden olabilir",
       },
       sources: [source],
@@ -179,6 +183,7 @@ describe("deterministic safety gate", () => {
         "1. Genel değerlendirme: Kaynağa göre temkinli ilerlemek gerekir.\n2. Ne yapmalı: Değerlendirme planlanmalıdır.",
       answer: {
         ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
         user_query: "kasık ağrım var",
       },
       sources: [{ ...source, collectionId: "private-other" }],
@@ -192,5 +197,39 @@ describe("deterministic safety gate", () => {
     expect(result.pass).toBe(false);
     expect(result.fallbackMode).toBe("privacy_safe");
     expect(result.blockedReasons).toContain("PRIVATE_SOURCE_SCOPE_MISMATCH");
+  });
+
+  it("uses legal safety policy for guaranteed legal outcomes", () => {
+    const result = evaluateSafetyGate({
+      answerText: "Davayı kesin kazanırsınız, avukata gerek yok.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "legal",
+        user_query: "Bu davayı kazanır mıyım?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockedReasons).toContain("RISKY_CERTAINTY_OR_TREATMENT");
+    expect(result.safeFallback).toContain("Kesin hukuki görüş");
+  });
+
+  it("uses technical safety policy for unsafe production operations", () => {
+    const result = evaluateSafetyGate({
+      answerText: "Productionda doğrudan drop çalıştır, rollbacke gerek yok.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "technical",
+        user_query: "Production migration nasıl yapayım?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockedReasons).toContain("RISKY_CERTAINTY_OR_TREATMENT");
+    expect(result.safeFallback).toContain("riskli komut");
   });
 });
