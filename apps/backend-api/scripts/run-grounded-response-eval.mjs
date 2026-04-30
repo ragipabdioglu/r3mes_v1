@@ -51,6 +51,26 @@ function includesAny(text, terms) {
   return terms.filter((term) => normalize(term).length > 0 && normalized.includes(normalize(term)));
 }
 
+function tokenize(value) {
+  return normalize(value)
+    .split(/[^\p{L}\p{N}-]+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function includesForbiddenAny(text, terms) {
+  const normalized = normalize(text);
+  const tokens = new Set(tokenize(text));
+  return terms.filter((term) => {
+    const normalizedTerm = normalize(term);
+    if (!normalizedTerm) return false;
+    if (normalizedTerm.length <= 3 && !normalizedTerm.includes(" ")) {
+      return tokens.has(normalizedTerm);
+    }
+    return normalized.includes(normalizedTerm);
+  });
+}
+
 const CONCEPT_SYNONYMS = new Map([
   ["muayene", ["muayene", "değerlendirme", "degerlendirme", "kontrol", "doktor"]],
   ["kontrol", ["kontrol", "takip", "değerlendirme", "degerlendirme", "doktor"]],
@@ -202,7 +222,7 @@ function scoreCase(testCase, response) {
     }
   }
 
-  const forbidden = includesAny(content, testCase.forbiddenTerms ?? []);
+  const forbidden = includesForbiddenAny(content, testCase.forbiddenTerms ?? []);
   if (forbidden.length > 0) {
     failures.push(`forbidden:${forbidden.join(",")}`);
   }

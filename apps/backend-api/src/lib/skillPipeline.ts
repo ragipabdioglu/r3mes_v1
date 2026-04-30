@@ -103,8 +103,40 @@ function hasAny(text: string, terms: string[]): boolean {
 
 function inferAnswerIntent(query: string): AnswerIntent {
   if (hasAny(query, ["panik", "kork", "endişe", "endise", "normal mi", "kötü mü", "kotu mu"])) return "reassure";
+  if (
+    hasAny(query, [
+      "ne yap",
+      "nasıl",
+      "nasil",
+      "takip",
+      "adım",
+      "adim",
+      "öner",
+      "oner",
+      "hazırla",
+      "hazirla",
+      "hazırlamalı",
+      "hazirlamali",
+      "hangi belge",
+      "hangi belg",
+      "hangi kayıt",
+      "hangi kayit",
+      "hangi kontrol",
+      "neye dikkat",
+      "ilk ne",
+      "ilk hangi",
+      "ne sormalı",
+      "ne sormali",
+      "konuşulmalı",
+      "konusulmali",
+      "saklamalı",
+      "saklamali",
+      "toplamam",
+      "kontrolleri",
+      "kontrol listesi",
+    ])
+  ) return "steps";
   if (hasAny(query, ["acil", "beklemeli", "ne zaman", "şiddetli", "siddetli", "ateş", "ates", "riskli mi"])) return "triage";
-  if (hasAny(query, ["ne yap", "nasıl", "nasil", "takip", "adım", "adim", "öner", "oner", "hazırla", "hazirla", "hazırlamalı", "hazirlamali"])) return "steps";
   if (hasAny(query, ["fark", "karşılaştır", "karsilastir", "hangisi"])) return "compare";
   if (hasAny(query, ["nedir", "ne anlama", "yorum", "açıkla", "acikla", "neden"])) return "explain";
   if (hasAny(query, ["risk"])) return "triage";
@@ -142,7 +174,21 @@ function tokenizeForOverlap(text: string): string[] {
         "konuşmalıyım": "konuş",
         konusmaliyim: "konus",
       };
-      return canonical[part] ?? part;
+      const direct = canonical[part] ?? part;
+      if (direct.startsWith("depozito")) return "depozito";
+      if (direct.startsWith("protokol")) return "protokol";
+      if (direct.startsWith("belge")) return "belge";
+      if (direct.startsWith("dekont")) return "belge";
+      if (direct.startsWith("sözleşme") || direct.startsWith("sozlesme")) return "sözleşme";
+      if (direct.startsWith("boşanma") || direct.startsWith("bosanma")) return "boşanma";
+      if (direct.startsWith("anlaşma") || direct.startsWith("anlasma")) return "anlaşma";
+      if (direct.startsWith("başlık") || direct.startsWith("baslik")) return "başlık";
+      if (direct.startsWith("netleştir") || direct.startsWith("netlestir")) return "netleştir";
+      if (direct.startsWith("velayet")) return "velayet";
+      if (direct.startsWith("nafaka")) return "nafaka";
+      if (direct.startsWith("kayıt") || direct.startsWith("kayit")) return "kayıt";
+      if (direct.startsWith("başvuru") || direct.startsWith("basvuru")) return "başvuru";
+      return direct;
     })
     .filter((part) => part.length >= 3);
 }
@@ -367,6 +413,10 @@ export function buildDeterministicEvidenceExtraction(
   for (const card of input.cards) {
     const sourceLabel = card.title || card.sourceId;
     sourceIds.push(card.sourceId);
+
+    for (const fragment of sentenceFragments(card.patientSummary ?? "", 2)) {
+      addUsableIfRelevant(sourceLabel, fragment, { allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment) });
+    }
 
     for (const fragment of sentenceFragments(card.clinicalTakeaway ?? "", 2)) {
       addUsableIfRelevant(sourceLabel, fragment, { allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment) });

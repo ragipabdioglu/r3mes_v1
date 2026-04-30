@@ -50,6 +50,27 @@ describe("skill pipeline evidence extractor", () => {
         cards: [],
       }).answerIntent,
     ).toBe("steps");
+
+    expect(
+      buildDeterministicEvidenceExtraction({
+        userQuery: "Trafik cezasına itiraz etmek istiyorum. Süre ve belge açısından neye dikkat etmeliyim?",
+        cards: [],
+      }).answerIntent,
+    ).toBe("steps");
+
+    expect(
+      buildDeterministicEvidenceExtraction({
+        userQuery: "Boşanma sürecinde mal paylaşımı için hangi kayıtları toplamam gerekir?",
+        cards: [],
+      }).answerIntent,
+    ).toBe("steps");
+
+    expect(
+      buildDeterministicEvidenceExtraction({
+        userQuery: "Özel eğitim için RAM raporu ve BEP planı hakkında okulda ne sormalıyım?",
+        cards: [],
+      }).answerIntent,
+    ).toBe("steps");
   });
 
   it("turns retrieved cards into compact usable evidence and limits unsafe inference", () => {
@@ -134,5 +155,43 @@ describe("skill pipeline evidence extractor", () => {
 
     expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("rehberlik")]));
     expect(extraction.missingInfo).toEqual([]);
+  });
+
+  it("uses source summaries and canonical Turkish tokens for legal knowledge cards", () => {
+    const deposit = buildDeterministicEvidenceExtraction({
+      userQuery: "Ev sahibi depozitomu iade etmiyor. Elimde sözleşme ve dekont var, ilk ne yapmalıyım?",
+      cards: [
+        {
+          sourceId: "multi-legal-rent-deposit",
+          title: "multi-legal-rent-deposit",
+          patientSummary:
+            "Kiracı depozitonun iadesi için sözleşme, ödeme dekontu, teslim tutanağı ve yazışmaları saklamalıdır.",
+          clinicalTakeaway:
+            "Depozito uyuşmazlığında sözleşme hükümleri, hasar tespiti, ödeme kaydı ve teslim tarihi birlikte değerlendirilir.",
+          safeGuidance:
+            "Kişi belgeleri düzenlemeli, yazılı başvuru yapmalı ve hak kaybı riski varsa avukat veya yetkili kurumdan destek almalıdır.",
+        },
+      ],
+    });
+
+    expect(deposit.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("depozitonun iadesi")]));
+    expect(deposit.missingInfo).toEqual([]);
+
+    const protocol = buildDeterministicEvidenceExtraction({
+      userQuery: "Anlaşmalı boşanma protokolünde hangi başlıkları netleştirmeliyim? Kısa açıkla.",
+      cards: [
+        {
+          sourceId: "legal-divorce-agreed-protocol",
+          title: "legal-divorce-agreed-protocol",
+          patientSummary:
+            "Anlaşmalı boşanma protokolünde velayet, nafaka, mal paylaşımı, kişisel ilişki, masraf ve taraf iradeleri açık yazılmalıdır.",
+          clinicalTakeaway:
+            "Protokolün eksik veya belirsiz olması süreçte uyuşmazlık doğurabilir; imza öncesi belgeler ve anlaşma maddeleri birlikte kontrol edilmelidir.",
+        },
+      ],
+    });
+
+    expect(protocol.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("velayet, nafaka")]));
+    expect(protocol.missingInfo).toEqual([]);
   });
 });

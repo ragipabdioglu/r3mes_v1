@@ -587,13 +587,15 @@ function buildDeterministicGroundedAnswer(opts: {
   evidence: EvidenceExtractorOutput | null;
 }): GroundedMedicalAnswer {
   const facts = opts.evidence?.usableFacts.map(stripSourcePrefix).filter(Boolean) ?? [];
+  const directFacts = opts.evidence?.directAnswerFacts.map(stripSourcePrefix).filter(Boolean) ?? [];
+  const supportingFacts = opts.evidence?.supportingContext.map(stripSourcePrefix).filter(Boolean) ?? [];
   const redFlags = opts.evidence?.redFlags.map(stripSourcePrefix).filter(Boolean) ?? [];
   const uncertain = [
     ...(opts.evidence?.uncertainOrUnusable ?? []),
     ...(opts.evidence?.missingInfo ?? []),
   ].map(stripSourcePrefix).filter(Boolean);
-  const firstFact = facts[0] ?? "Kaynaklarda bu soruya doğrudan sınırlı bilgi bulundu.";
-  const secondFact = facts[1] ?? firstFact;
+  const firstFact = directFacts[0] ?? facts[0] ?? "Kaynaklarda bu soruya doğrudan sınırlı bilgi bulundu.";
+  const secondFact = supportingFacts[0] ?? directFacts[1] ?? facts[1] ?? firstFact;
 
   return {
     ...EMPTY_GROUNDED_MEDICAL_ANSWER,
