@@ -85,6 +85,7 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(merged?.profile?.profileVersion).toBe(1);
     expect(merged?.profile?.profileText).toContain("Domains: technical");
     expect(merged?.profile?.profileTextHash).toHaveLength(64);
+    expect(merged?.profile?.profileEmbedding).toHaveLength(256);
   });
 
   it("builds a weighted collection profile for adaptive routing", () => {
@@ -108,6 +109,7 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(profile?.confidence).toBe("high");
     expect(profile?.profileText).toContain("Subtopics:");
     expect(profile?.profileTextHash).toHaveLength(64);
+    expect(profile?.profileEmbedding).toHaveLength(256);
     expect(profile?.lastProfiledAt).toBe("2026-04-29T00:00:00.000Z");
     expect(profile?.updatedAt).toBe("2026-04-29T00:00:00.000Z");
   });

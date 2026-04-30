@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { parseKnowledgeCard } from "./knowledgeCard.js";
+import { embedKnowledgeText } from "./knowledgeEmbedding.js";
 import type { KnowledgeChunkDraft } from "./knowledgeText.js";
 import { routeQuery } from "./queryRouter.js";
 
@@ -36,6 +37,7 @@ export interface KnowledgeCollectionProfile {
   confidence: "low" | "medium" | "high";
   profileText: string;
   profileTextHash: string;
+  profileEmbedding: number[];
   lastProfiledAt: string;
   updatedAt: string;
 }
@@ -105,7 +107,7 @@ function profileLine(label: string, values: string[] | string): string {
   return value ? `${label}: ${value}` : "";
 }
 
-function buildProfileText(profile: Omit<KnowledgeCollectionProfile, "version" | "profileVersion" | "profileText" | "profileTextHash" | "lastProfiledAt" | "updatedAt">): string {
+function buildProfileText(profile: Omit<KnowledgeCollectionProfile, "version" | "profileVersion" | "profileText" | "profileTextHash" | "profileEmbedding" | "lastProfiledAt" | "updatedAt">): string {
   return [
     profileLine("Domains", profile.domains),
     profileLine("Subtopics", profile.subtopics),
@@ -175,6 +177,7 @@ export function buildKnowledgeCollectionProfile(
     ...baseProfile,
     profileText,
     profileTextHash,
+    profileEmbedding: embedKnowledgeText(profileText),
     lastProfiledAt: timestamp,
     updatedAt: timestamp,
   };

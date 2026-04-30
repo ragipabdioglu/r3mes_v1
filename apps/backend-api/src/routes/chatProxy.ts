@@ -157,6 +157,7 @@ function uniqueStrings(values: string[]): string[] {
 }
 
 function buildSourceSelectionSummary(opts: {
+  query: string;
   requestedCollectionIds: string[];
   accessibleCollectionIds: string[];
   suggestibleCollections: KnowledgeCollectionAccessItem[];
@@ -181,6 +182,7 @@ function buildSourceSelectionSummary(opts: {
   const rankedSuggestedCollections = rankSuggestedKnowledgeCollections({
     collections: opts.suggestibleCollections,
     routePlan: opts.routePlan,
+    query: opts.query,
     excludedIds: excluded,
     limit: 8,
   });
@@ -188,6 +190,7 @@ function buildSourceSelectionSummary(opts: {
   const metadataRouteCandidates = rankMetadataRouteCandidates({
     collections: opts.suggestibleCollections,
     routePlan: opts.routePlan,
+    query: opts.query,
     excludedIds: new Set(opts.requestedCollectionIds),
     limit: 5,
   });
@@ -264,6 +267,7 @@ async function resolveRetrievalBackedSuggestionIds(opts: {
   const candidates = rankSuggestedKnowledgeCollections({
     collections: opts.suggestibleCollections,
     routePlan: opts.routePlan,
+    query: opts.query,
     excludedIds: opts.excludedIds,
     limit: 8,
   });
@@ -1178,6 +1182,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             })
           : [];
         const sourceSelection = buildSourceSelectionSummary({
+          query: plannedRetrievalQuery,
           requestedCollectionIds,
           accessibleCollectionIds,
           suggestibleCollections,

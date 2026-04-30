@@ -1,4 +1,5 @@
 import { prisma } from "./prisma.js";
+import { cosineSimilarity, embedKnowledgeText, getKnowledgeEmbeddingDimensions } from "./knowledgeEmbedding.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import { getRouterWeights, weightedRouterScore } from "./routerConfig.js";
@@ -11,6 +12,7 @@ interface KnowledgeMetadataProfile {
   entities: string[];
   summary: string;
   profileText?: string;
+  profileEmbedding?: number[];
   profileVersion?: number;
   lastProfiledAt?: string;
   questionsAnswered: string[];
@@ -61,6 +63,7 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
   if (profile) {
     const domains = stringArray(profile.domains);
     if (domains.length > 0) {
+      const profileText = typeof profile.profileText === "string" ? profile.profileText : undefined;
       return {
         domain: domains[0],
         domains,
@@ -68,7 +71,8 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
         keywords: stringArray(profile.keywords),
         entities: stringArray(profile.entities),
         summary: typeof profile.summary === "string" ? profile.summary : "",
-        profileText: typeof profile.profileText === "string" ? profile.profileText : undefined,
+        profileText,
+        profileEmbedding: numberArray(profile.profileEmbedding) ?? (profileText ? embedKnowledgeText(profileText) : undefined),
         profileVersion: typeof profile.profileVersion === "number" ? profile.profileVersion : undefined,
         lastProfiledAt: typeof profile.lastProfiledAt === "string" ? profile.lastProfiledAt : undefined,
         questionsAnswered: stringArray(profile.sampleQuestions),
@@ -126,6 +130,22 @@ function normalize(text: string): string {
   return text.toLocaleLowerCase("tr-TR");
 }
 
+function numberArray(input: unknown): number[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const values = input.map(Number).filter((item) => Number.isFinite(item));
+  return values.length === getKnowledgeEmbeddingDimensions() ? values : undefined;
+}
+
+function routeSignalText(routePlan: DomainRoutePlan | null, query?: string): string {
+  return [
+    query ?? "",
+    routePlan?.domain ?? "",
+    ...(routePlan?.subtopics ?? []),
+    ...(routePlan?.mustIncludeTerms ?? []),
+    ...(routePlan?.retrievalHints ?? []),
+  ].join(" ");
+}
+
 function unique(values: string[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -161,7 +181,13 @@ function sourceQualityScore(profile: KnowledgeMetadataProfile): number {
   return profile.confidence === "high" ? 75 : profile.confidence === "medium" ? 55 : 35;
 }
 
-function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan): number {
+function profileEmbeddingScore(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number | null {
+  if (!profile.profileEmbedding) return null;
+  const queryVector = embedKnowledgeText(routeSignalText(routePlan, query));
+  return Math.max(0, cosineSimilarity(queryVector, profile.profileEmbedding)) * 100;
+}
+
+function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number {
   const text = normalize(metadataText(profile));
   const profileSubtopics = profile.subtopics.map(normalize);
   const exactDomain = profile.domains.map(normalize).includes(normalize(routePlan.domain));
@@ -183,8 +209,7 @@ function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: Doma
 
   return weightedRouterScore(
     {
-      // Profile embeddings are introduced in the next phase. Until then, inactive weights are renormalized out.
-      profileEmbedding: null,
+      profileEmbedding: profileEmbeddingScore(profile, routePlan, query),
       lexicalKeyword,
       sampleQuestion,
       domainHint,
@@ -197,6 +222,7 @@ function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: Doma
 function metadataCandidateForRoute(
   collection: KnowledgeCollectionAccessItem,
   routePlan: DomainRoutePlan | null,
+  query?: string,
 ): KnowledgeMetadataRouteCandidate | null {
   if (!routePlan || routePlan.domain === "general") return null;
   const profiles = collectionMetadataProfiles(collection);
@@ -211,7 +237,7 @@ function metadataCandidateForRoute(
       ];
       return {
         profile,
-        score: scoreMetadataProfile(profile, routePlan),
+        score: scoreMetadataProfile(profile, routePlan, query),
         matchedTerms: [...new Set(matchedTerms)].slice(0, 8),
       };
     })
@@ -270,6 +296,7 @@ export function collectionMatchesRoute(
 export function scoreCollectionForRoute(
   collection: KnowledgeCollectionAccessItem,
   routePlan: DomainRoutePlan | null,
+  query?: string,
 ): number {
   const text = collectionMetadataText(collection);
   const inferred = routeQuery(text);
@@ -281,7 +308,7 @@ export function scoreCollectionForRoute(
 
   const metadataScore = Math.max(
     0,
-    ...collectionMetadataProfiles(collection).map((profile) => scoreMetadataProfile(profile, routePlan)),
+    ...collectionMetadataProfiles(collection).map((profile) => scoreMetadataProfile(profile, routePlan, query)),
   );
   score += metadataScore;
 
@@ -360,6 +387,7 @@ export function explainCollectionRouteSuggestion(
 export function rankSuggestedKnowledgeCollections(opts: {
   collections: KnowledgeCollectionAccessItem[];
   routePlan: DomainRoutePlan | null;
+  query?: string;
   excludedIds?: Set<string>;
   limit?: number;
 }): KnowledgeCollectionAccessItem[] {
@@ -369,7 +397,7 @@ export function rankSuggestedKnowledgeCollections(opts: {
     .filter((collection) => !excludedIds.has(collection.id))
     .map((collection) => ({
       collection,
-      score: scoreCollectionForRoute(collection, routePlan),
+      score: scoreCollectionForRoute(collection, routePlan, opts.query),
     }))
     .filter(({ score, collection }) => {
       if (!routePlan || routePlan.domain === "general") return true;
@@ -392,13 +420,14 @@ export function rankSuggestedKnowledgeCollections(opts: {
 export function rankMetadataRouteCandidates(opts: {
   collections: KnowledgeCollectionAccessItem[];
   routePlan: DomainRoutePlan | null;
+  query?: string;
   excludedIds?: Set<string>;
   limit?: number;
 }): KnowledgeMetadataRouteCandidate[] {
   const excludedIds = opts.excludedIds ?? new Set<string>();
   return opts.collections
     .filter((collection) => !excludedIds.has(collection.id))
-    .map((collection) => metadataCandidateForRoute(collection, opts.routePlan))
+    .map((collection) => metadataCandidateForRoute(collection, opts.routePlan, opts.query))
     .filter((candidate): candidate is KnowledgeMetadataRouteCandidate => Boolean(candidate))
     .filter((candidate) => candidate.score >= 20)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
