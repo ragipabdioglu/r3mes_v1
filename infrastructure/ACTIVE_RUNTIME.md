@@ -13,7 +13,7 @@ updated.
 | AI proxy | apps/ai-engine on 8000 | Thin proxy around llama-compatible APIs. |
 | Backend | apps/backend-api on 3000 | Auth, access control, orchestration, RAG, safety. |
 | Frontend | apps/dApp on 3001 | Studio upload, source selection, chat UI. |
-| Vector memory | Qdrant on 6333 | Used with Prisma lexical candidates in true hybrid retrieval. |
+| Vector memory | Qdrant on 6333 | Used with Prisma lexical candidates in true hybrid retrieval; active vector size is 1024 for BGE-M3 embeddings. |
 | Relational memory | Postgres + pgvector on 5432 | Prisma source of truth for collections, docs, chunks, metadata. |
 | Knowledge | RAG | Knowledge is not carried by LoRA. |
 | LoRA | Optional behavior/style/persona | Default local scale can be 0 for clean base/RAG evaluation. |
@@ -36,6 +36,26 @@ updated.
 pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit
 pnpm --filter @r3mes/backend-api run eval:adaptive-rag
 ```
+
+## Active Embedding / Reindex Gate
+
+Qdrant reindex must not run on silent deterministic fallback when `R3MES_EMBEDDING_PROVIDER=ai-engine` or `bge-m3`.
+
+```powershell
+pnpm ai-engine:embedding
+$env:R3MES_REQUIRE_REAL_EMBEDDINGS='1'
+pnpm --filter @r3mes/backend-api run smoke:embedding-provider
+Remove-Item Env:R3MES_REQUIRE_REAL_EMBEDDINGS
+pnpm --filter @r3mes/backend-api run qdrant:reindex
+```
+
+Expected smoke diagnostics before reindex:
+
+```json
+{ "actualProvider": "ai-engine", "fallbackUsed": false, "dimension": 1024 }
+```
+
+The reindex script checks the Qdrant collection vector size before upsert and aborts if embedding fallback is used.
 
 Targeted unit tests for the active path live under:
 
