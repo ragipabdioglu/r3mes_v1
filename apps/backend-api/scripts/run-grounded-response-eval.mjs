@@ -199,6 +199,36 @@ function scoreCase(testCase, response) {
     }
   }
 
+  const reranker = retrievalDebug?.retrievalDiagnostics?.reranker;
+  if (testCase.expectedRerankerMode && reranker?.mode !== testCase.expectedRerankerMode) {
+    failures.push(`reranker_mode:${reranker?.mode ?? "missing"}`);
+  }
+
+  if (typeof testCase.expectedRerankerFallbackUsed === "boolean" && reranker?.fallbackUsed !== testCase.expectedRerankerFallbackUsed) {
+    failures.push(`reranker_fallback:${reranker?.fallbackUsed ?? "missing"}`);
+  }
+
+  if (Number.isFinite(Number(testCase.minRerankerInputCandidates))) {
+    const actual = Number(reranker?.inputCandidateCount ?? 0);
+    if (actual < Number(testCase.minRerankerInputCandidates)) {
+      failures.push(`reranker_input:${actual}<${Number(testCase.minRerankerInputCandidates)}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.minRerankerModelCandidates))) {
+    const actual = Number(reranker?.modelCandidateCount ?? 0);
+    if (actual < Number(testCase.minRerankerModelCandidates)) {
+      failures.push(`reranker_model_candidates:${actual}<${Number(testCase.minRerankerModelCandidates)}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.minRerankerReturnedCandidates))) {
+    const actual = Number(reranker?.returnedCandidateCount ?? 0);
+    if (actual < Number(testCase.minRerankerReturnedCandidates)) {
+      failures.push(`reranker_returned:${actual}<${Number(testCase.minRerankerReturnedCandidates)}`);
+    }
+  }
+
   if (Array.isArray(testCase.expectedConfidence) && testCase.expectedConfidence.length > 0) {
     const actual = readGroundingConfidence(response);
     if (!testCase.expectedConfidence.includes(actual)) {
@@ -364,6 +394,14 @@ function scoreCase(testCase, response) {
     redFlagCount: Array.isArray(evidence?.redFlags) ? evidence.redFlags.length : 0,
     alignmentFastFailed: alignment?.fastFailed ?? null,
     alignmentDroppedCandidateCount: alignment?.droppedCandidateCount ?? null,
+    rerankerMode: reranker?.mode ?? null,
+    rerankerFallbackUsed: reranker?.fallbackUsed ?? null,
+    rerankerInputCandidateCount: reranker?.inputCandidateCount ?? null,
+    rerankerModelCandidateCount: reranker?.modelCandidateCount ?? null,
+    rerankerReturnedCandidateCount: reranker?.returnedCandidateCount ?? null,
+    rerankerTopCandidateIds: Array.isArray(reranker?.topCandidates)
+      ? reranker.topCandidates.map((candidate) => candidate.chunkId ?? candidate.documentId ?? candidate.title).filter(Boolean)
+      : [],
     selectionMode: retrievalDebug?.sourceSelection?.selectionMode ?? null,
     routeDecisionMode: routeDecision?.mode ?? null,
     routeDecisionConfidence: routeDecision?.confidence ?? null,

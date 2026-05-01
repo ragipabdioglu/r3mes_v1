@@ -5,7 +5,7 @@ import type { GroundingConfidence } from "./answerSchema.js";
 import { buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
-import { rerankKnowledgeCardsWithFallback } from "./modelRerank.js";
+import { rerankKnowledgeCardsWithDiagnostics, type RerankDiagnostics } from "./modelRerank.js";
 import { prisma } from "./prisma.js";
 import {
   buildSourceConceptText,
@@ -62,6 +62,7 @@ export interface HybridRetrievedKnowledgeContext {
     rerankedCandidateCount: number;
     finalCandidateCount: number;
     alignment: AlignmentDiagnostics;
+    reranker: RerankDiagnostics;
     retrievalMode: "true_hybrid";
   };
 }
@@ -114,6 +115,23 @@ function emptyAlignmentDiagnostics(overrides: Partial<AlignmentDiagnostics> = {}
     mismatchCandidateCount: 0,
     droppedCandidateCount: 0,
     fastFailed: false,
+    ...overrides,
+  };
+}
+
+function emptyRerankDiagnostics(overrides: Partial<RerankDiagnostics> = {}): RerankDiagnostics {
+  return {
+    mode: "deterministic",
+    modelEnabled: false,
+    fallbackUsed: false,
+    inputCandidateCount: 0,
+    deterministicCandidateCount: 0,
+    modelCandidateCount: 0,
+    returnedCandidateCount: 0,
+    candidateLimit: 0,
+    modelWeight: 0,
+    timeoutMs: 0,
+    topCandidates: [],
     ...overrides,
   };
 }
@@ -522,6 +540,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         rerankedCandidateCount: 0,
         finalCandidateCount: 0,
         alignment: emptyAlignmentDiagnostics(),
+        reranker: emptyRerankDiagnostics(),
         retrievalMode: "true_hybrid",
       },
     };
@@ -557,6 +576,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         rerankedCandidateCount: 0,
         finalCandidateCount: 0,
         alignment: emptyAlignmentDiagnostics(),
+        reranker: emptyRerankDiagnostics(),
         retrievalMode: "true_hybrid",
       },
     };
@@ -579,6 +599,9 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         rerankedCandidateCount: 0,
         finalCandidateCount: 0,
         alignment: alignedPreRanked.diagnostics,
+        reranker: emptyRerankDiagnostics({
+          inputCandidateCount: candidatesForRerank.length,
+        }),
         retrievalMode: "true_hybrid",
       },
     };
@@ -598,6 +621,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         rerankedCandidateCount: 0,
         finalCandidateCount: 0,
         alignment: alignedPreRanked.diagnostics,
+        reranker: emptyRerankDiagnostics(),
         retrievalMode: "true_hybrid",
       },
     };
@@ -609,7 +633,8 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     embeddingScore: candidate.vectorScore ?? 0,
     fusedScore: candidate.preRankScore,
   }));
-  const reranked = await rerankKnowledgeCardsWithFallback(query, rerankInput, Math.max(limit, 3));
+  const rerankRun = await rerankKnowledgeCardsWithDiagnostics(query, rerankInput, Math.max(limit, 3));
+  const reranked = rerankRun.candidates;
   const topScore = reranked[0]?.rerankScore ?? 0;
   const accepted = reranked
     .filter((candidate, index) => {
@@ -649,6 +674,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         rerankedCandidateCount: reranked.length,
         finalCandidateCount: 0,
         alignment: finalAlignmentDiagnostics,
+        reranker: rerankRun.diagnostics,
         retrievalMode: "true_hybrid",
       },
     };
@@ -711,6 +737,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       rerankedCandidateCount: reranked.length,
       finalCandidateCount: finalCandidates.length,
       alignment: finalAlignmentDiagnostics,
+      reranker: rerankRun.diagnostics,
       retrievalMode: "true_hybrid",
     },
   };

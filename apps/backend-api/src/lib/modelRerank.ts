@@ -20,6 +20,40 @@ interface RerankCacheEntry {
   expiresAt: number;
 }
 
+export interface RerankTraceCandidate {
+  rank: number;
+  chunkId?: string;
+  documentId?: string;
+  collectionId?: string;
+  title?: string;
+  rerankScore: number;
+  fusedScore: number;
+  lexicalScore: number;
+  embeddingScore: number;
+  modelRawScore?: number;
+  modelNormalizedScore?: number;
+}
+
+export interface RerankDiagnostics {
+  mode: "deterministic" | "model" | "model_fallback";
+  modelEnabled: boolean;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  inputCandidateCount: number;
+  deterministicCandidateCount: number;
+  modelCandidateCount: number;
+  returnedCandidateCount: number;
+  candidateLimit: number;
+  modelWeight: number;
+  timeoutMs: number;
+  topCandidates: RerankTraceCandidate[];
+}
+
+export interface RerankWithDiagnosticsResult<TChunk> {
+  candidates: RerankCandidate<TChunk>[];
+  diagnostics: RerankDiagnostics;
+}
+
 const rerankScoreCache = new Map<string, RerankCacheEntry>();
 
 function rerankerMode(): string {
@@ -148,6 +182,82 @@ function writeCachedScores(cacheKey: string, scores: number[]): void {
   }
 }
 
+function readChunkField(chunk: unknown, field: string): string | undefined {
+  if (!chunk || typeof chunk !== "object") return undefined;
+  const value = (chunk as Record<string, unknown>)[field];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readChunkCollectionId(chunk: unknown): string | undefined {
+  if (!chunk || typeof chunk !== "object") return undefined;
+  const document = (chunk as { document?: unknown }).document;
+  if (!document || typeof document !== "object") return undefined;
+  const collectionId = (document as { collectionId?: unknown }).collectionId;
+  return typeof collectionId === "string" && collectionId.trim() ? collectionId : undefined;
+}
+
+function traceCandidates<TChunk>(
+  candidates: Array<RerankCandidate<TChunk>>,
+  modelScores?: { raw: number[]; normalized: number[] },
+): RerankTraceCandidate[] {
+  return candidates.slice(0, 5).map((candidate, index) => {
+    const modelTrace = candidate as RerankCandidate<TChunk> & {
+      modelRawScore?: unknown;
+      modelNormalizedScore?: unknown;
+    };
+    return {
+      rank: index + 1,
+      chunkId: readChunkField(candidate.chunk, "id"),
+      documentId: readChunkField(candidate.chunk, "documentId"),
+      collectionId: readChunkCollectionId(candidate.chunk),
+      title: readChunkTitle(candidate.chunk),
+      rerankScore: Number(candidate.rerankScore.toFixed(4)),
+      fusedScore: Number(candidate.fusedScore.toFixed(4)),
+      lexicalScore: Number(candidate.lexicalScore.toFixed(4)),
+      embeddingScore: Number(candidate.embeddingScore.toFixed(4)),
+      modelRawScore:
+        typeof modelTrace.modelRawScore === "number"
+          ? Number(modelTrace.modelRawScore.toFixed(4))
+          : modelScores?.raw[index] == null
+            ? undefined
+            : Number(modelScores.raw[index].toFixed(4)),
+      modelNormalizedScore:
+        typeof modelTrace.modelNormalizedScore === "number"
+          ? Number(modelTrace.modelNormalizedScore.toFixed(4))
+          : modelScores?.normalized[index] == null
+            ? undefined
+            : Number(modelScores.normalized[index].toFixed(4)),
+    };
+  });
+}
+
+function buildDiagnostics<TChunk>(opts: {
+  mode: RerankDiagnostics["mode"];
+  modelEnabled: boolean;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  inputCandidateCount: number;
+  deterministicCandidateCount: number;
+  modelCandidateCount: number;
+  returned: Array<RerankCandidate<TChunk>>;
+  modelScores?: { raw: number[]; normalized: number[] };
+}): RerankDiagnostics {
+  return {
+    mode: opts.mode,
+    modelEnabled: opts.modelEnabled,
+    fallbackUsed: opts.fallbackUsed,
+    fallbackReason: opts.fallbackReason,
+    inputCandidateCount: opts.inputCandidateCount,
+    deterministicCandidateCount: opts.deterministicCandidateCount,
+    modelCandidateCount: opts.modelCandidateCount,
+    returnedCandidateCount: opts.returned.length,
+    candidateLimit: getCandidateLimit(),
+    modelWeight: getModelWeight(),
+    timeoutMs: getTimeoutMs(),
+    topCandidates: traceCandidates(opts.returned, opts.modelScores),
+  };
+}
+
 async function scoreDocumentsWithModel(query: string, documents: string[]): Promise<number[]> {
   const cacheKey = buildCacheKey(query, documents);
   const cached = readCachedScores(cacheKey);
@@ -191,9 +301,30 @@ export async function rerankKnowledgeCardsWithFallback<TChunk>(
   candidates: Array<HybridCandidate<TChunk> & { card: KnowledgeCard }>,
   limit = 4,
 ): Promise<RerankCandidate<TChunk>[]> {
+  const result = await rerankKnowledgeCardsWithDiagnostics(query, candidates, limit);
+  return result.candidates;
+}
+
+export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
+  query: string,
+  candidates: Array<HybridCandidate<TChunk> & { card: KnowledgeCard }>,
+  limit = 4,
+): Promise<RerankWithDiagnosticsResult<TChunk>> {
   const deterministic = rerankKnowledgeCards(query, candidates, candidates.length);
   if (!isModelRerankerEnabled() || deterministic.length === 0) {
-    return deterministic.slice(0, limit);
+    const returned = deterministic.slice(0, limit);
+    return {
+      candidates: returned,
+      diagnostics: buildDiagnostics({
+        mode: "deterministic",
+        modelEnabled: false,
+        fallbackUsed: false,
+        inputCandidateCount: candidates.length,
+        deterministicCandidateCount: deterministic.length,
+        modelCandidateCount: 0,
+        returned,
+      }),
+    };
   }
 
   const candidateLimit = Math.min(getCandidateLimit(), deterministic.length);
@@ -211,14 +342,41 @@ export async function rerankKnowledgeCardsWithFallback<TChunk>(
     const rescored = modelPool
       .map((candidate, index) => ({
         ...candidate,
+        modelRawScore: rawScores[index],
+        modelNormalizedScore: normalizedModelScores[index],
         rerankScore: candidate.rerankScore + normalizedModelScores[index] * modelWeight,
       }))
       .sort((a, b) => b.rerankScore - a.rerankScore);
 
-    return [...rescored, ...deterministic.slice(candidateLimit)].slice(0, limit);
+    const returned = [...rescored, ...deterministic.slice(candidateLimit)].slice(0, limit);
+    return {
+      candidates: returned,
+      diagnostics: buildDiagnostics({
+        mode: "model",
+        modelEnabled: true,
+        fallbackUsed: false,
+        inputCandidateCount: candidates.length,
+        deterministicCandidateCount: deterministic.length,
+        modelCandidateCount: modelPool.length,
+        returned,
+      }),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[backend-reranker] Falling back to deterministic reranker: ${message}`);
-    return deterministic.slice(0, limit);
+    const returned = deterministic.slice(0, limit);
+    return {
+      candidates: returned,
+      diagnostics: buildDiagnostics({
+        mode: "model_fallback",
+        modelEnabled: true,
+        fallbackUsed: true,
+        fallbackReason: message,
+        inputCandidateCount: candidates.length,
+        deterministicCandidateCount: deterministic.length,
+        modelCandidateCount: modelPool.length,
+        returned,
+      }),
+    };
   }
 }
