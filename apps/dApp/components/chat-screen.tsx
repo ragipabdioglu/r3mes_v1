@@ -223,57 +223,43 @@ function SourceList({
   collections: KnowledgeCollectionListItem[];
 }) {
   if (!sources || sources.length === 0) {
-    return (
-      <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-        {chat.sourceFallback}
-      </p>
-    );
+    return null;
   }
 
   const visibleSources = sources.slice(0, 3);
   const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length);
 
   return (
-    <div className="mt-3 space-y-2 rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-3">
+    <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[10px] uppercase tracking-wider text-zinc-500">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
           {chat.sourceSectionTitle}
         </p>
         <p className="text-[10px] text-zinc-500">
           {sources.length} kaynak kullanıldı
         </p>
       </div>
-      <ul className="space-y-2">
+      <ul className="mt-2 flex flex-wrap gap-1.5">
         {visibleSources.map((source, index) => {
           const collection = collections.find((item) => item.id === source.collectionId);
           return (
             <li
               key={`${source.collectionId}-${source.documentId ?? index}-${source.chunkIndex ?? 0}`}
-              className="space-y-1 text-[11px] leading-relaxed text-zinc-300"
+              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-zinc-800 bg-black/20 px-2.5 py-1 text-[11px] text-zinc-300"
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-medium text-zinc-200">{source.title}</p>
-                {collection ? <VisibilityPill visibility={collection.visibility} /> : null}
-              </div>
-              <p className="font-mono text-zinc-500">
+              <span className="truncate font-medium text-zinc-200">{source.title}</span>
+              {collection ? <VisibilityPill visibility={collection.visibility} /> : null}
+              <span className="font-mono text-[10px] text-zinc-600">
                 {shortId(source.collectionId)}
-                {source.chunkIndex != null ? ` · chunk ${source.chunkIndex}` : ""}
-              </p>
-              {source.excerpt ? (
-                <details className="rounded-lg border border-zinc-900 bg-black/20 px-2 py-1">
-                  <summary className="cursor-pointer text-zinc-500">
-                    Alıntıyı göster
-                  </summary>
-                  <p className="mt-1 text-zinc-400">{source.excerpt}</p>
-                </details>
-              ) : null}
+                {source.chunkIndex != null ? `#${source.chunkIndex}` : ""}
+              </span>
             </li>
           );
         })}
       </ul>
       {hiddenSourceCount > 0 ? (
-        <p className="text-[11px] text-zinc-500">
-          {hiddenSourceCount} ek kaynak gizlendi; detay için debug modunu açabilirsiniz.
+        <p className="mt-2 text-[11px] text-zinc-500">
+          {hiddenSourceCount} ek kaynak daha var.
         </p>
       ) : null}
     </div>
@@ -417,11 +403,6 @@ function SourceSelectionActionBadge({
   const selection = debug?.sourceSelection;
   if (!selection) return null;
   const isHealthy = selection.hasSources && !selection.warning;
-  const label = isHealthy
-    ? "Kaynak uygun"
-    : selection.hasSources
-      ? "Kaynak temkinli"
-      : "Kaynak bulunamadı";
   const actionSuggestions = [
     ...(selection.metadataRouteCandidates ?? []).map((candidate) => ({
       id: candidate.id,
@@ -438,6 +419,13 @@ function SourceSelectionActionBadge({
       source: "retrieval" as const,
     })),
   ].filter((suggestion, index, arr) => arr.findIndex((item) => item.id === suggestion.id) === index).slice(0, 3);
+  if (isHealthy && actionSuggestions.length === 0) return null;
+
+  const label = isHealthy
+    ? "Kaynak uygun"
+    : selection.hasSources
+      ? "Kaynak temkinli"
+      : "Kaynak bulunamadı";
   return (
     <div
       className={`mt-3 rounded-xl border px-3 py-2 text-[11px] leading-relaxed ${
@@ -449,9 +437,11 @@ function SourceSelectionActionBadge({
       }`}
     >
       <span className="font-medium">{label}</span>
-      <span className="ml-2 text-zinc-500">
-        {selection.usedCollectionIds.length} / {selection.accessibleCollectionIds.length} collection
-      </span>
+      {!isHealthy ? (
+        <span className="ml-2 text-zinc-500">
+          {selection.usedCollectionIds.length} / {selection.accessibleCollectionIds.length} collection
+        </span>
+      ) : null}
       {selection.warning ? (
         <p className="mt-1">{selection.warning}</p>
       ) : null}
@@ -479,11 +469,6 @@ function SourceSelectionActionBadge({
             Öneriye tıklayınca chat bu kaynakla sınırlandırılır.
           </p>
         </div>
-      ) : null}
-      {selection.metadataRouteCandidates && selection.metadataRouteCandidates.length > 0 ? (
-        <p className="mt-2 text-[10px] text-zinc-500">
-          Metadata eşleşmesi: {selection.metadataRouteCandidates.slice(0, 2).map((candidate) => `${candidate.name} (${candidate.score})`).join(", ")}
-        </p>
       ) : null}
     </div>
   );
