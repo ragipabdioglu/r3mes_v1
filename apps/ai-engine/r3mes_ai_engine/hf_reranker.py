@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-from fastapi import HTTPException
 
 from r3mes_ai_engine.schemas_rerank import RerankResponse
 from r3mes_ai_engine.settings import Settings
@@ -39,6 +38,79 @@ def _resolve_model_name(settings: Settings) -> str:
     return settings.reranker_model_name_or_path
 
 
+def _normalize_text(value: str) -> str:
+    replacements = str.maketrans({
+        "ç": "c",
+        "ğ": "g",
+        "ı": "i",
+        "ö": "o",
+        "ş": "s",
+        "ü": "u",
+        "Ç": "c",
+        "Ğ": "g",
+        "İ": "i",
+        "I": "i",
+        "Ö": "o",
+        "Ş": "s",
+        "Ü": "u",
+    })
+    return value.translate(replacements).lower()
+
+
+def _tokens(value: str) -> set[str]:
+    stopwords = {
+        "ama",
+        "bir",
+        "icin",
+        "ile",
+        "kisa",
+        "mi",
+        "ne",
+        "nasil",
+        "once",
+        "sonra",
+        "ve",
+        "veya",
+    }
+    return {
+        token
+        for token in re.split(r"[^a-z0-9]+", _normalize_text(value))
+        if len(token) >= 3 and token not in stopwords
+    }
+
+
+def _fallback_scores(query: str, documents: list[str]) -> list[float]:
+    query_tokens = _tokens(query)
+    if not query_tokens:
+        return [0.0 for _document in documents]
+    scores: list[float] = []
+    normalized_query = _normalize_text(query)
+    query_phrases = [
+        phrase.strip()
+        for phrase in re.split(r"[?.!,;:\n]+", normalized_query)
+        if len(phrase.strip()) >= 10
+    ]
+    for document in documents:
+        document_text = _normalize_text(document)
+        document_tokens = _tokens(document)
+        overlap = len(query_tokens & document_tokens)
+        union = max(1, len(query_tokens | document_tokens))
+        phrase_bonus = 0.25 if any(phrase in document_text for phrase in query_phrases) else 0.0
+        title_bonus = 0.15 if "title:" in document_text and overlap > 0 else 0.0
+        scores.append((overlap / union) + phrase_bonus + title_bonus)
+    return scores
+
+
+def _fallback_response(query: str, documents: list[str], reason: str) -> RerankResponse:
+    logger.warning("reranker lightweight fallback kullanıldı: %s", reason)
+    return RerankResponse(
+        scores=_fallback_scores(query, documents),
+        provider="lightweight_fallback",
+        fallback_used=True,
+        fallback_reason=reason[:500],
+    )
+
+
 async def _load_reranker(settings: Settings, state: AppState) -> RerankerRuntime:
     if state.reranker_runtime is not None:
         return state.reranker_runtime
@@ -54,6 +126,8 @@ async def _load_reranker(settings: Settings, state: AppState) -> RerankerRuntime
         model = AutoModelForSequenceClassification.from_pretrained(
             model_name_or_path,
             local_files_only=settings.reranker_local_files_only,
+            low_cpu_mem_usage=False,
+            device_map=None,
         )
         device = "cpu"
         if settings.reranker_device == "cuda" and torch.cuda.is_available():
@@ -83,7 +157,10 @@ async def rerank_documents(
         return RerankResponse(scores=[])
 
     async with _reranker_lock:
-        runtime = await _load_reranker(settings, state)
+        try:
+            runtime = await _load_reranker(settings, state)
+        except Exception as exc:
+            return _fallback_response(query, documents, str(exc))
 
     def _score() -> list[float]:
         torch, _AutoModelForSequenceClassification, _AutoTokenizer = _lazy_imports()
@@ -104,9 +181,7 @@ async def rerank_documents(
     try:
         scores = await asyncio.to_thread(_score)
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "RERANK_FAILED", "message": str(exc)},
-        ) from exc
+        state.reranker_runtime = None
+        return _fallback_response(query, documents, str(exc))
 
-    return RerankResponse(scores=scores)
+    return RerankResponse(scores=scores, provider="cross_encoder", fallback_used=False)

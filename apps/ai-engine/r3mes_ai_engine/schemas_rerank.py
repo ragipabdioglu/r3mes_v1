@@ -10,3 +10,6 @@ class RerankRequest(BaseModel):
 
 class RerankResponse(BaseModel):
     scores: list[float]
+    provider: str = "cross_encoder"
+    fallback_used: bool = False
+    fallback_reason: str | None = None

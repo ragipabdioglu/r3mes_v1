@@ -229,6 +229,22 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (testCase.expectedRerankerTopTitleIncludes) {
+    const expectedTerms = Array.isArray(testCase.expectedRerankerTopTitleIncludes)
+      ? testCase.expectedRerankerTopTitleIncludes
+      : [testCase.expectedRerankerTopTitleIncludes];
+    const topCandidate = Array.isArray(reranker?.topCandidates) ? reranker.topCandidates[0] : null;
+    const topText = normalize([
+      topCandidate?.title,
+      topCandidate?.documentId,
+      topCandidate?.chunkId,
+    ].filter(Boolean).join(" "));
+    const hasExpectedTopTerm = expectedTerms.some((term) => topText.includes(normalize(term)));
+    if (!hasExpectedTopTerm) {
+      failures.push(`reranker_top:${topText || "missing"}`);
+    }
+  }
+
   if (Array.isArray(testCase.expectedConfidence) && testCase.expectedConfidence.length > 0) {
     const actual = readGroundingConfidence(response);
     if (!testCase.expectedConfidence.includes(actual)) {
@@ -401,6 +417,9 @@ function scoreCase(testCase, response) {
     rerankerReturnedCandidateCount: reranker?.returnedCandidateCount ?? null,
     rerankerTopCandidateIds: Array.isArray(reranker?.topCandidates)
       ? reranker.topCandidates.map((candidate) => candidate.chunkId ?? candidate.documentId ?? candidate.title).filter(Boolean)
+      : [],
+    rerankerTopCandidateTitles: Array.isArray(reranker?.topCandidates)
+      ? reranker.topCandidates.map((candidate) => candidate.title ?? candidate.documentId ?? candidate.chunkId).filter(Boolean)
       : [],
     selectionMode: retrievalDebug?.sourceSelection?.selectionMode ?? null,
     routeDecisionMode: routeDecision?.mode ?? null,

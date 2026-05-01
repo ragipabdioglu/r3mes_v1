@@ -13,11 +13,24 @@ const AI_ENGINE_DEFAULT = "http://127.0.0.1:8000";
 
 interface ModelRerankResponse {
   scores?: number[];
+  provider?: string;
+  fallback_used?: boolean;
+  fallback_reason?: string;
 }
 
 interface RerankCacheEntry {
   scores: number[];
+  provider?: string;
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
   expiresAt: number;
+}
+
+interface ModelRerankScores {
+  scores: number[];
+  provider?: string;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
 }
 
 export interface RerankTraceCandidate {
@@ -159,7 +172,7 @@ function buildCacheKey(query: string, documents: string[]): string {
   return hash.digest("hex");
 }
 
-function readCachedScores(cacheKey: string): number[] | null {
+function readCachedScores(cacheKey: string): ModelRerankScores | null {
   const entry = rerankScoreCache.get(cacheKey);
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
@@ -168,13 +181,24 @@ function readCachedScores(cacheKey: string): number[] | null {
   }
   rerankScoreCache.delete(cacheKey);
   rerankScoreCache.set(cacheKey, entry);
-  return [...entry.scores];
+  return {
+    scores: [...entry.scores],
+    provider: entry.provider,
+    fallbackUsed: entry.fallbackUsed ?? false,
+    fallbackReason: entry.fallbackReason,
+  };
 }
 
-function writeCachedScores(cacheKey: string, scores: number[]): void {
+function writeCachedScores(cacheKey: string, result: ModelRerankScores): void {
   const maxEntries = getCacheMaxEntries();
   if (maxEntries <= 0) return;
-  rerankScoreCache.set(cacheKey, { scores: [...scores], expiresAt: Date.now() + getCacheTtlMs() });
+  rerankScoreCache.set(cacheKey, {
+    scores: [...result.scores],
+    provider: result.provider,
+    fallbackUsed: result.fallbackUsed,
+    fallbackReason: result.fallbackReason,
+    expiresAt: Date.now() + getCacheTtlMs(),
+  });
   while (rerankScoreCache.size > maxEntries) {
     const oldest = rerankScoreCache.keys().next().value;
     if (!oldest) break;
@@ -258,7 +282,7 @@ function buildDiagnostics<TChunk>(opts: {
   };
 }
 
-async function scoreDocumentsWithModel(query: string, documents: string[]): Promise<number[]> {
+async function scoreDocumentsWithModel(query: string, documents: string[]): Promise<ModelRerankScores> {
   const cacheKey = buildCacheKey(query, documents);
   const cached = readCachedScores(cacheKey);
   if (cached) return cached;
@@ -280,8 +304,14 @@ async function scoreDocumentsWithModel(query: string, documents: string[]): Prom
     if (!Array.isArray(parsed.scores)) {
       throw new Error("ai-engine rerank response missing scores");
     }
-    writeCachedScores(cacheKey, parsed.scores);
-    return parsed.scores;
+    const result = {
+      scores: parsed.scores,
+      provider: parsed.provider,
+      fallbackUsed: parsed.fallback_used === true,
+      fallbackReason: parsed.fallback_reason,
+    };
+    writeCachedScores(cacheKey, result);
+    return result;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`Model reranker timed out after ${timeoutMs}ms`);
@@ -332,7 +362,8 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
   const documents = modelPool.map((candidate) => buildRerankerDocumentText(candidate));
 
   try {
-    const rawScores = await scoreDocumentsWithModel(query, documents);
+    const modelResult = await scoreDocumentsWithModel(query, documents);
+    const rawScores = modelResult.scores;
     if (rawScores.length !== modelPool.length) {
       throw new Error(`Expected ${modelPool.length} rerank scores, received ${rawScores.length}`);
     }
@@ -352,9 +383,10 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
     return {
       candidates: returned,
       diagnostics: buildDiagnostics({
-        mode: "model",
+        mode: modelResult.fallbackUsed ? "model_fallback" : "model",
         modelEnabled: true,
-        fallbackUsed: false,
+        fallbackUsed: modelResult.fallbackUsed,
+        fallbackReason: modelResult.fallbackReason,
         inputCandidateCount: candidates.length,
         deterministicCandidateCount: deterministic.length,
         modelCandidateCount: modelPool.length,

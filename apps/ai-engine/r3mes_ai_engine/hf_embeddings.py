@@ -63,8 +63,20 @@ async def _load_embedding(settings: Settings, state: AppState) -> EmbeddingRunti
         )
         device = "cpu"
         if settings.embedding_device == "cuda" and torch.cuda.is_available():
-            model = model.to("cuda")
-            device = "cuda"
+            try:
+                model = model.to("cuda")
+                device = "cuda"
+            except Exception as exc:
+                logger.warning(
+                    "embedding CUDA yüklenemedi, CPU fallback kullanılacak model=%s reason=%s",
+                    model_name_or_path,
+                    exc,
+                )
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                model = model.to("cpu")
         model.eval()
         return EmbeddingRuntime(
             model_name_or_path=model_name_or_path,
