@@ -151,4 +151,29 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered.split("\n")[0]).toContain("net ve kesin bir cevap vermek doğru olmaz");
     expect(rendered).toContain("Pratik anlamı:");
   });
+
+  it("surfaces query-relevant evidence details that are not selected as the main action", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "legal",
+      answerIntent: "steps",
+      groundingConfidence: "high",
+      userQuery: "Bozuk ürün için fatura ve fotoğraf gibi belgelerle nasıl ilerlemeliyim?",
+      tone: "direct",
+      sections: ["action", "assessment", "caution", "summary"],
+      assessment: "Tüketici ayıplı ürün aldığını ve satıcının iade kabul etmediğini söylüyor.",
+      action: "Tüketici belgeleri saklayarak satıcıya yazılı başvuru yapmalıdır.",
+      caution: ["Sürelerin kaçması veya delil niteliğinin kaybolması risk oluşturabilir."],
+      summary: "Ayıplı ürün uyuşmazlığında belgeli ilerlemek gerekir.",
+      unknowns: [],
+      sourceIds: ["defective-product"],
+      facts: [
+        "Ayıplı ürün uyuşmazlığında fatura, garanti belgesi, yazışmalar, fotoğraf ve başvuru tarihleri önemlidir.",
+        "Tüketici belgeleri saklayarak satıcıya yazılı başvuru yapmalıdır.",
+      ],
+    });
+
+    expect(rendered).toContain("Ek kontrol:");
+    expect(rendered).toContain("fatura");
+    expect(rendered).toContain("fotoğraf");
+  });
 });

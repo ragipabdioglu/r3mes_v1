@@ -9,7 +9,7 @@ import { EMPTY_GROUNDED_MEDICAL_ANSWER, type GroundedMedicalAnswer } from "../li
 import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
-import { composeDomainEvidenceAnswer } from "../lib/domainEvidenceComposer.js";
+import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
 import { retrieveKnowledgeContextTrueHybrid } from "../lib/hybridKnowledgeRetrieval.js";
 import {
@@ -567,7 +567,7 @@ function applyRenderedAnswer(
     shouldUseSafeRenderedTemplate(enrichedAnswer, retrievalWasUsed);
   const rendered =
     useSafeTemplate
-      ? composeDomainEvidenceAnswer(enrichedAnswer)
+      ? composeAnswerSpec(answerSpec)
       : renderGroundedMedicalAnswer(enrichedAnswer, {
           useFallbackTemplate: useSafeTemplate,
         });

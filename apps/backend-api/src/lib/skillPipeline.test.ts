@@ -14,7 +14,7 @@ describe("skill pipeline query planner", () => {
 
     expect(plan.expectedEvidenceType).toBe("symptom_card");
     expect(plan.routePlan.domain).toBe("medical");
-    expect(plan.routePlan.subtopics).toEqual(expect.arrayContaining(["kasik_agrisi"]));
+    expect(plan.routePlan.subtopics).toEqual(expect.arrayContaining(["karin_agrisi"]));
     expect(plan.searchQueries).toContain("karın ağrısı genel triyaj");
     expect(plan.searchQueries).toContain("karın ağrısı ateş kusma kanama acil belirtiler");
     expect(plan.mustIncludeTerms).toEqual(

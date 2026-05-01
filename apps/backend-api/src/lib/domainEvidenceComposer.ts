@@ -20,6 +20,72 @@ function sentence(value: string): string {
   return /[.!?]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
+function normalizeForMatch(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ");
+}
+
+function matchTokens(value: string): string[] {
+  const stopwords = new Set([
+    "acaba",
+    "ama",
+    "bana",
+    "ben",
+    "bir",
+    "bu",
+    "da",
+    "de",
+    "diye",
+    "gibi",
+    "hangi",
+    "icin",
+    "için",
+    "ile",
+    "kisa",
+    "kısa",
+    "mi",
+    "ne",
+    "nasil",
+    "nasıl",
+    "nereye",
+    "once",
+    "önce",
+    "sonra",
+    "ve",
+    "veya",
+  ]);
+  return normalizeForMatch(value)
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3 && !stopwords.has(part));
+}
+
+function queryRelevantFact(spec: AnswerSpec, usedText: string): string | null {
+  const queryTokens = new Set(matchTokens(spec.userQuery));
+  if (queryTokens.size === 0) return null;
+  const used = normalizeForMatch(usedText);
+  let best: { fact: string; score: number } | null = null;
+  for (const fact of spec.facts) {
+    const cleaned = clean(fact, "");
+    const normalizedFact = normalizeForMatch(cleaned);
+    if (!cleaned || used.includes(normalizedFact.slice(0, 80))) continue;
+    const factTokens = matchTokens(cleaned);
+    const overlap = factTokens.filter((token) => queryTokens.has(token)).length;
+    const evidenceBonus = factTokens.some((token) =>
+      ["belge", "fatura", "dekont", "tutanak", "kayıt", "kayit"].includes(token),
+    )
+      ? 0.5
+      : 0;
+    const score = overlap + evidenceBonus;
+    if (score >= 2 && (!best || score > best.score)) {
+      best = { fact: cleaned, score };
+    }
+  }
+  return best?.fact ?? null;
+}
+
 function lowGroundingLead(spec: AnswerSpec): string | null {
   if (spec.groundingConfidence !== "low") return null;
   return "Bu kaynaklarla net ve kesin bir cevap vermek doğru olmaz; aşağıdaki yanıt yalnızca eldeki sınırlı dayanağa göre okunmalı.";
@@ -35,6 +101,7 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
   const action = clean(spec.action, "Kaynak yetersizse karar vermeden önce ilgili uzman veya yetkili kurumdan destek alın.");
   const caution = joinItems(spec.caution, "Kaynakta açık dayanak yoksa kesin sonuç veya garanti ifade edilmemelidir.");
   const summary = clean(spec.summary || assessment, "Kaynaklara bağlı kalarak temkinli ilerlemek gerekir.");
+  const relevantFact = queryRelevantFact(spec, [assessment, action, caution, summary].join(" "));
 
   const lead = lowGroundingLead(spec);
   const lines: string[] = [];
@@ -56,8 +123,9 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
       `1. ${sentence(action)}`,
       `2. ${sentence(assessment)}`,
       `3. ${sentence(caution)}`,
-      `Özet: ${sentence(summary)}`,
     );
+    if (relevantFact) lines.push(`Ek kontrol: ${sentence(relevantFact)}`);
+    lines.push(`Özet: ${sentence(summary)}`);
     return lines.join("\n");
   }
 

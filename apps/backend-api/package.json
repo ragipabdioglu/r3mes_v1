@@ -27,6 +27,7 @@
     "eval:collection-suggestion": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/collection-suggestion/golden.jsonl --out artifacts/evals/collection-suggestion/latest.json",
     "eval:rag-quality-gates": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/rag-quality-gates/golden.jsonl --out artifacts/evals/rag-quality-gates/latest.json",
     "eval:retrieval-quality": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/retrieval-quality/golden.jsonl --out artifacts/evals/retrieval-quality/latest.json",
+    "eval:realistic-rag": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/realistic-rag/golden.jsonl --out artifacts/evals/realistic-rag/latest.json",
     "smoke:embedding-provider": "node --env-file=.env scripts/smoke-embedding-provider.mjs",
     "smoke:reranker-provider": "node --env-file=.env scripts/smoke-reranker-provider.mjs",
     "lora:scale": "node scripts/set-llama-lora-scale.mjs",
