@@ -1,4 +1,6 @@
 import { PrismaClient } from "@prisma/client";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { embedTextsForQdrantWithDiagnostics, getQdrantVectorSize } from "../dist/lib/qdrantEmbedding.js";
 import { buildQdrantPayloadMetadata, upsertQdrantKnowledgePoints } from "../dist/lib/qdrantStore.js";
 import { parseKnowledgeCard } from "../dist/lib/knowledgeCard.js";
@@ -6,10 +8,20 @@ import { routeQuery } from "../dist/lib/queryRouter.js";
 
 const prisma = new PrismaClient();
 const batchSize = Number.parseInt(process.env.R3MES_QDRANT_REINDEX_BATCH_SIZE || "32", 10);
+const checkpointPath = resolve(process.env.R3MES_QDRANT_REINDEX_CHECKPOINT || "../../artifacts/qdrant-reindex-checkpoint.json");
 const requestedEmbeddingProvider = (process.env.R3MES_EMBEDDING_PROVIDER ?? "deterministic").trim().toLowerCase();
 const requireRealEmbeddings = process.env.R3MES_QDRANT_REINDEX_REQUIRE_REAL_EMBEDDINGS
   ? process.env.R3MES_QDRANT_REINDEX_REQUIRE_REAL_EMBEDDINGS === "1"
   : requestedEmbeddingProvider === "ai-engine" || requestedEmbeddingProvider === "bge-m3";
+const args = new Set(process.argv.slice(2));
+const argValue = (name) => {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+};
+const explicitAfter = argValue("--after");
+const maxBatches = Number.parseInt(argValue("--max-batches") || "0", 10);
+const resetCheckpoint = args.has("--reset-checkpoint");
+const noCheckpoint = args.has("--no-checkpoint");
 
 function getQdrantBaseUrl() {
   return (process.env.R3MES_QDRANT_URL ?? "http://127.0.0.1:6333").replace(/\/$/, "");
@@ -54,19 +66,50 @@ async function assertQdrantVectorSizeIfCollectionExists() {
   }
 }
 
+function readCheckpoint() {
+  if (noCheckpoint || resetCheckpoint || !existsSync(checkpointPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(checkpointPath, "utf8"));
+    if (parsed?.collection !== getQdrantCollectionName()) return null;
+    if (parsed?.vectorSize !== getQdrantVectorSize()) return null;
+    if (typeof parsed?.lastChunkId !== "string" || !parsed.lastChunkId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCheckpoint(payload) {
+  if (noCheckpoint) return;
+  mkdirSync(dirname(checkpointPath), { recursive: true });
+  writeFileSync(checkpointPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+function clearCheckpoint() {
+  if (noCheckpoint || !existsSync(checkpointPath)) return;
+  unlinkSync(checkpointPath);
+}
+
 async function main() {
+  if (resetCheckpoint) clearCheckpoint();
   await assertQdrantVectorSizeIfCollectionExists();
+  const checkpoint = readCheckpoint();
+  const startAfter = explicitAfter ?? checkpoint?.lastChunkId;
   console.log(JSON.stringify({
     phase: "qdrant_reindex_start",
     batchSize,
+    checkpointPath: noCheckpoint ? null : checkpointPath,
+    resumeAfter: startAfter ?? null,
+    maxBatches: Number.isFinite(maxBatches) && maxBatches > 0 ? maxBatches : null,
     requestedEmbeddingProvider,
     requireRealEmbeddings,
     vectorSize: getQdrantVectorSize(),
     collection: getQdrantCollectionName(),
   }));
 
-  let cursor = undefined;
+  let cursor = startAfter;
   let total = 0;
+  let batches = 0;
 
   for (;;) {
     const chunks = await prisma.knowledgeChunk.findMany({
@@ -134,11 +177,37 @@ async function main() {
 
     await upsertQdrantKnowledgePoints(points);
     total += points.length;
+    batches += 1;
     cursor = chunks.at(-1)?.id;
-    console.log(JSON.stringify({ indexed: total, lastChunkId: cursor, embedding: diagnostics }));
+    const progress = {
+      phase: "qdrant_reindex_progress",
+      indexedThisRun: total,
+      batchesThisRun: batches,
+      batchSize: points.length,
+      lastChunkId: cursor,
+      collection: getQdrantCollectionName(),
+      vectorSize: getQdrantVectorSize(),
+      embedding: diagnostics,
+      updatedAt: new Date().toISOString(),
+    };
+    writeCheckpoint(progress);
+    console.log(JSON.stringify(progress));
+
+    if (Number.isFinite(maxBatches) && maxBatches > 0 && batches >= maxBatches) {
+      console.log(JSON.stringify({
+        ok: true,
+        partial: true,
+        indexedThisRun: total,
+        batchesThisRun: batches,
+        lastChunkId: cursor,
+        checkpointPath: noCheckpoint ? null : checkpointPath,
+      }, null, 2));
+      return;
+    }
   }
 
-  console.log(JSON.stringify({ ok: true, indexed: total }, null, 2));
+  clearCheckpoint();
+  console.log(JSON.stringify({ ok: true, partial: false, indexedThisRun: total, batchesThisRun: batches }, null, 2));
 }
 
 main()

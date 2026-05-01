@@ -110,7 +110,25 @@ Expected smoke diagnostics before reindex:
 { "actualProvider": "ai-engine", "fallbackUsed": false, "dimension": 1024 }
 ```
 
-The reindex script checks the Qdrant collection vector size before upsert and aborts if embedding fallback is used.
+The reindex script checks the Qdrant collection vector size before upsert and aborts if embedding fallback is used. It also writes a resumable checkpoint to `artifacts/qdrant-reindex-checkpoint.json` after every successful batch, so slow real-embedding reindex jobs can continue after a timeout instead of starting over.
+
+Useful reindex controls:
+
+```powershell
+# Start from scratch and write a fresh checkpoint as batches complete.
+pnpm --filter @r3mes/backend-api run qdrant:reindex -- --reset-checkpoint
+
+# Continue from the last checkpoint automatically.
+pnpm --filter @r3mes/backend-api run qdrant:reindex
+
+# Reindex only one batch to verify provider, payload and checkpoint behavior.
+pnpm --filter @r3mes/backend-api run qdrant:reindex -- --max-batches 1
+
+# Manually resume after a known chunk id.
+pnpm --filter @r3mes/backend-api run qdrant:reindex -- --after <knowledgeChunkId>
+```
+
+When the job finishes fully, the checkpoint file is removed automatically. If the checkpoint remains, the previous run was intentionally partial or interrupted and the next run will resume from `lastChunkId`.
 
 Targeted unit tests for the active path live under:
 
