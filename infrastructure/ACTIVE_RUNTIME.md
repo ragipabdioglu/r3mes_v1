@@ -107,7 +107,7 @@ pnpm --filter @r3mes/backend-api run qdrant:reindex
 Expected smoke diagnostics before reindex:
 
 ```json
-{ "actualProvider": "ai-engine", "fallbackUsed": false, "dimension": 1024 }
+{ "actualProvider": "ai-engine", "fallbackUsed": false, "dimension": 1024, "model": "C:\\r3mes-hf-model-cache\\bge-m3" }
 ```
 
 The reindex script checks the Qdrant collection vector size before upsert and aborts if embedding fallback is used. It also writes a resumable checkpoint to `artifacts/qdrant-reindex-checkpoint.json` after every successful batch, so slow real-embedding reindex jobs can continue after a timeout instead of starting over.

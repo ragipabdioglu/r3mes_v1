@@ -7,6 +7,7 @@ const DEFAULT_QDRANT_VECTOR_SIZE = 1024;
 const DEFAULT_EMBEDDING_TIMEOUT_MS = 15_000;
 
 interface EmbeddingsResponse {
+  model?: string;
   data?: Array<{ index?: number; embedding?: number[] }>;
 }
 
@@ -17,6 +18,7 @@ export interface QdrantEmbeddingDiagnostics {
   actualProvider: QdrantEmbeddingProvider;
   fallbackUsed: boolean;
   dimension: number;
+  model?: string;
   error?: string;
 }
 
@@ -61,7 +63,7 @@ export function embedTextDeterministicForQdrant(text: string, dimensions = getQd
   return normalizeVector(values);
 }
 
-async function embedWithAiEngine(texts: string[]): Promise<number[][]> {
+async function embedWithAiEngine(texts: string[]): Promise<{ vectors: number[][]; model?: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
@@ -84,7 +86,10 @@ async function embedWithAiEngine(texts: string[]): Promise<number[][]> {
     if (vectors.length !== texts.length || vectors.some((vector) => !Array.isArray(vector) || vector.length === 0)) {
       throw new Error("ai-engine embeddings response missing vectors");
     }
-    return vectors.map((vector) => normalizeVector(vector!.map(Number)));
+    return {
+      vectors: vectors.map((vector) => normalizeVector(vector!.map(Number))),
+      model: typeof parsed.model === "string" ? parsed.model : undefined,
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -94,7 +99,7 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
   const provider = (process.env.R3MES_EMBEDDING_PROVIDER ?? "deterministic").trim().toLowerCase();
   if (provider === "ai-engine" || provider === "bge-m3") {
     try {
-      const vectors = await embedWithAiEngine(texts);
+      const { vectors, model } = await embedWithAiEngine(texts);
       const dimension = getQdrantVectorSize();
       if (vectors.every((vector) => vector.length === dimension)) {
         return {
@@ -104,6 +109,7 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
             actualProvider: provider,
             fallbackUsed: false,
             dimension,
+            model,
           },
         };
       }
@@ -116,6 +122,7 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
           actualProvider: "deterministic",
           fallbackUsed: true,
           dimension: fallbackVectors[0]?.length ?? dimension,
+          model,
           error: "vector size mismatch",
         },
       };

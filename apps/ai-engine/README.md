@@ -119,7 +119,8 @@ Beklenen sonuç:
   "diagnostics": {
     "actualProvider": "ai-engine",
     "fallbackUsed": false,
-    "dimension": 1024
+    "dimension": 1024,
+    "model": "C:\\r3mes-hf-model-cache\\bge-m3"
   },
   "passed": true
 }

@@ -37,6 +37,7 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
+          model: "C:/r3mes-hf-model-cache/bge-m3",
           data: [
             { index: 0, embedding: vector(4, 1) },
             { index: 1, embedding: vector(4, 2) },
@@ -57,6 +58,7 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
       actualProvider: "bge-m3",
       fallbackUsed: false,
       dimension: 4,
+      model: "C:/r3mes-hf-model-cache/bge-m3",
     });
   });
 
@@ -64,7 +66,7 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
     vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "bge-m3");
     vi.stubEnv("R3MES_QDRANT_VECTOR_SIZE", "4");
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ index: 0, embedding: vector(3, 1) }] }), {
+      new Response(JSON.stringify({ model: "bad-dim-model", data: [{ index: 0, embedding: vector(3, 1) }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
@@ -80,6 +82,7 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
       actualProvider: "deterministic",
       fallbackUsed: true,
       dimension: 4,
+      model: "bad-dim-model",
       error: "vector size mismatch",
     });
   });
