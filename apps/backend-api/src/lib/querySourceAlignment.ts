@@ -202,6 +202,18 @@ export function buildQueryConceptTerms(query: string, routePlan?: DomainRoutePla
   );
 }
 
+function routeSubtopicTerms(routePlan?: DomainRoutePlan | null): string[] {
+  if (!routePlan || routePlan.confidence !== "high") return [];
+  return unique(
+    routePlan.subtopics
+      .flatMap((subtopic) => alignmentTokens(subtopic.replace(/_/g, " "), 8))
+      .filter((term) => term.length >= 4)
+      .filter((term) => !GENERIC_TERMS.has(term))
+      .filter((term) => !["general", "genel"].includes(term)),
+    12,
+  );
+}
+
 export function buildSourceConceptText(opts: {
   title: string;
   content: string;
@@ -251,11 +263,18 @@ export function scoreQuerySourceAlignment(opts: {
       ? 0.08
       : 0;
   const genericOnlyPenalty = matchedTerms.length === 0 && genericMatchedTerms.length > 0 ? opts.genericPenalty : 0;
-  const score = Math.max(0, Math.min(1, overlapScore + phraseBonus + routeDomainBonus - genericOnlyPenalty));
+  const routeSpecificTerms = routeSubtopicTerms(opts.routePlan);
+  const hasRouteSpecificMatch =
+    routeSpecificTerms.length === 0 ||
+    routeSpecificTerms.some((term) => sourceTerms.some((sourceTerm) => fuzzyMatch(term, sourceTerm)) || sourceText.includes(term));
+  const rawScore = Math.max(0, Math.min(1, overlapScore + phraseBonus + routeDomainBonus - genericOnlyPenalty));
+  const score = hasRouteSpecificMatch ? rawScore : Math.min(rawScore, Math.max(0, opts.minScore - 0.001));
   const mode: AlignmentMode = score >= opts.weakScore ? "aligned" : score >= opts.minScore ? "weak" : "mismatch";
   const reason =
     mode === "mismatch"
-      ? genericMatchedTerms.length > 0 && matchedTerms.length === 0
+      ? !hasRouteSpecificMatch
+        ? "Source does not match the high-confidence route subtopic."
+        : genericMatchedTerms.length > 0 && matchedTerms.length === 0
         ? "Only generic query terms matched the source."
         : "Query concepts did not match source concepts."
       : mode === "weak"

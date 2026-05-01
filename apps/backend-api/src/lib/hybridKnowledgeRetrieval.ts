@@ -448,7 +448,15 @@ export function alignHybridKnowledgeCandidates<T extends AlignableKnowledgeCandi
     });
     return { ...candidate, alignment };
   });
-  const kept = scored.filter((candidate) => candidate.alignment.mode !== "mismatch");
+  const shouldDropWeak =
+    opts.routePlan?.confidence === "high" &&
+    opts.routePlan.subtopics.length > 0 &&
+    opts.routePlan.subtopics.some((subtopic) => !["general", "genel"].includes(normalize(subtopic)));
+  const kept = scored.filter((candidate) => {
+    if (candidate.alignment.mode === "mismatch") return false;
+    if (shouldDropWeak && candidate.alignment.mode === "weak") return false;
+    return true;
+  });
   return {
     candidates: kept,
     diagnostics: emptyAlignmentDiagnostics({

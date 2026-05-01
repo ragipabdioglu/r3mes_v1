@@ -276,4 +276,33 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.diagnostics.fastFailed).toBe(true);
     expect(result.diagnostics.mismatchCandidateCount).toBe(2);
   });
+
+  it("drops weak same-domain candidates when the route has a specific high-confidence subtopic", () => {
+    vi.stubEnv("R3MES_ALIGNMENT_MIN_SCORE", "0.34");
+    vi.stubEnv("R3MES_ALIGNMENT_WEAK_SCORE", "0.5");
+    const result = alignHybridKnowledgeCandidates({
+      query: "Trafik cezasına itiraz süresini kaçırmamak için hangi tarihe ve belgelere bakmalıyım?",
+      routePlan: {
+        domain: "legal",
+        subtopics: ["trafik"],
+        riskLevel: "medium",
+        retrievalHints: ["trafik cezası itiraz", "süre ve belge"],
+        mustIncludeTerms: ["trafik", "ceza", "itiraz", "süre", "belge"],
+        mustExcludeTerms: [],
+        confidence: "high",
+      },
+      candidates: [
+        candidate({
+          id: "divorce-protocol",
+          title: "anlaşmalı boşanma protokolü",
+          content:
+            "Anlaşmalı boşanma protokolünde velayet, nafaka, mal paylaşımı, belge ve kısa süreli mahkeme tarihi değerlendirilir.",
+        }),
+      ],
+    });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.diagnostics.fastFailed).toBe(true);
+    expect(result.diagnostics.droppedCandidateCount).toBe(1);
+  });
 });
