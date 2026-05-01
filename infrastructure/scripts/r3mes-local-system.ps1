@@ -63,6 +63,15 @@ function Show-Status {
   docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 }
 
+function Invoke-AiEngineWarmup {
+  try {
+    "ai-engine warmup:"
+    pnpm ai-engine:warmup
+  } catch {
+    Write-Warning ("ai-engine warmup failed; system will continue cold-start capable: " + $_.Exception.Message)
+  }
+}
+
 function Start-System {
   Ensure-Logs
   Push-Location $Root
@@ -93,6 +102,7 @@ function Start-System {
         -RedirectStandardError (Join-Path $Logs "ai-engine.err.log") | Out-Null
     }
     Start-Sleep -Seconds 5
+    Invoke-AiEngineWarmup
 
     if (-not (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue)) {
       Start-Process -FilePath "node" -ArgumentList "--env-file=.env","dist/index.js" `

@@ -31,6 +31,9 @@ async function main() {
     aiEngineUrl: AI_ENGINE_URL,
     query,
     scores: parsed.scores,
+    provider: parsed.provider ?? null,
+    fallbackUsed: parsed.fallback_used === true,
+    fallbackReason: parsed.fallback_reason ?? null,
     latencyMs: Date.now() - started,
   }, null, 2));
 }
