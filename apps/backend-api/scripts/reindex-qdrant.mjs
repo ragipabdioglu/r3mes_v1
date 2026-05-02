@@ -22,6 +22,9 @@ const explicitAfter = argValue("--after");
 const maxBatches = Number.parseInt(argValue("--max-batches") || "0", 10);
 const resetCheckpoint = args.has("--reset-checkpoint");
 const noCheckpoint = args.has("--no-checkpoint");
+const statusOnly = args.has("--status");
+const verifyCount = args.has("--verify-count") || statusOnly;
+const CHECKPOINT_SCHEMA_VERSION = 2;
 
 function getQdrantBaseUrl() {
   return (process.env.R3MES_QDRANT_URL ?? "http://127.0.0.1:6333").replace(/\/$/, "");
@@ -47,15 +50,8 @@ function resolveVectorSize(collectionInfo) {
 }
 
 async function assertQdrantVectorSizeIfCollectionExists() {
-  const collection = encodeURIComponent(getQdrantCollectionName());
-  const response = await fetch(`${getQdrantBaseUrl()}/collections/${collection}`, {
-    headers: { accept: "application/json" },
-  });
-  if (response.status === 404) return;
-  if (!response.ok) {
-    throw new Error(`Qdrant collection check failed: ${response.status} ${await response.text()}`);
-  }
-  const parsed = await response.json();
+  const parsed = await readQdrantCollectionInfo();
+  if (!parsed) return;
   const currentSize = resolveVectorSize(parsed);
   const expectedSize = getQdrantVectorSize();
   if (currentSize !== null && currentSize !== expectedSize) {
@@ -64,6 +60,43 @@ async function assertQdrantVectorSizeIfCollectionExists() {
         "Use a fresh collection name or recreate the collection before reindexing.",
     );
   }
+}
+
+async function readQdrantCollectionInfo() {
+  const collection = encodeURIComponent(getQdrantCollectionName());
+  const response = await fetch(`${getQdrantBaseUrl()}/collections/${collection}`, {
+    headers: { accept: "application/json" },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Qdrant collection check failed: ${response.status} ${await response.text()}`);
+  }
+  return response.json();
+}
+
+async function qdrantPointCount() {
+  const info = await readQdrantCollectionInfo();
+  const result = info?.result;
+  if (!result || typeof result !== "object") return null;
+  if (typeof result.points_count === "number") return result.points_count;
+  if (typeof result.vectors_count === "number") return result.vectors_count;
+  return null;
+}
+
+async function chunkStats(afterId = null) {
+  const [totalChunks, remainingChunks] = await Promise.all([
+    prisma.knowledgeChunk.count(),
+    afterId
+      ? prisma.knowledgeChunk.count({
+          where: { id: { gt: afterId } },
+        })
+      : prisma.knowledgeChunk.count(),
+  ]);
+  return {
+    totalChunks,
+    remainingChunks,
+    completedChunks: Math.max(0, totalChunks - remainingChunks),
+  };
 }
 
 function readCheckpoint() {
@@ -90,11 +123,38 @@ function clearCheckpoint() {
   unlinkSync(checkpointPath);
 }
 
+async function printStatus(startAfter) {
+  const stats = await chunkStats(startAfter ?? null);
+  const pointCount = verifyCount ? await qdrantPointCount() : null;
+  const status = {
+    phase: "qdrant_reindex_status",
+    ok: true,
+    checkpointPath: noCheckpoint ? null : checkpointPath,
+    resumeAfter: startAfter ?? null,
+    collection: getQdrantCollectionName(),
+    vectorSize: getQdrantVectorSize(),
+    requestedEmbeddingProvider,
+    requireRealEmbeddings,
+    totalChunks: stats.totalChunks,
+    completedChunks: stats.completedChunks,
+    remainingChunks: stats.remainingChunks,
+    qdrantPointCount: pointCount,
+    countMatches: pointCount == null ? null : pointCount >= stats.totalChunks,
+  };
+  console.log(JSON.stringify(status, null, 2));
+}
+
 async function main() {
   if (resetCheckpoint) clearCheckpoint();
   await assertQdrantVectorSizeIfCollectionExists();
   const checkpoint = readCheckpoint();
   const startAfter = explicitAfter ?? checkpoint?.lastChunkId;
+  if (statusOnly) {
+    await printStatus(startAfter);
+    return;
+  }
+  const statsAtStart = await chunkStats(startAfter ?? null);
+  const startedAt = new Date().toISOString();
   console.log(JSON.stringify({
     phase: "qdrant_reindex_start",
     batchSize,
@@ -105,6 +165,9 @@ async function main() {
     requireRealEmbeddings,
     vectorSize: getQdrantVectorSize(),
     collection: getQdrantCollectionName(),
+    totalChunks: statsAtStart.totalChunks,
+    remainingChunks: statsAtStart.remainingChunks,
+    qdrantPointCount: verifyCount ? await qdrantPointCount() : null,
   }));
 
   let cursor = startAfter;
@@ -180,6 +243,7 @@ async function main() {
     batches += 1;
     cursor = chunks.at(-1)?.id;
     const progress = {
+      schemaVersion: CHECKPOINT_SCHEMA_VERSION,
       phase: "qdrant_reindex_progress",
       indexedThisRun: total,
       batchesThisRun: batches,
@@ -187,7 +251,11 @@ async function main() {
       lastChunkId: cursor,
       collection: getQdrantCollectionName(),
       vectorSize: getQdrantVectorSize(),
+      totalChunks: statsAtStart.totalChunks,
+      completedChunksApprox: Math.min(statsAtStart.totalChunks, statsAtStart.completedChunks + total),
+      remainingChunksApprox: Math.max(0, statsAtStart.remainingChunks - total),
       embedding: diagnostics,
+      startedAt,
       updatedAt: new Date().toISOString(),
     };
     writeCheckpoint(progress);
@@ -201,13 +269,23 @@ async function main() {
         batchesThisRun: batches,
         lastChunkId: cursor,
         checkpointPath: noCheckpoint ? null : checkpointPath,
+        resumeCommand: `pnpm --filter @r3mes/backend-api run qdrant:reindex`,
       }, null, 2));
       return;
     }
   }
 
+  const finalPointCount = verifyCount ? await qdrantPointCount() : null;
   clearCheckpoint();
-  console.log(JSON.stringify({ ok: true, partial: false, indexedThisRun: total, batchesThisRun: batches }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    partial: false,
+    indexedThisRun: total,
+    batchesThisRun: batches,
+    totalChunks: statsAtStart.totalChunks,
+    qdrantPointCount: finalPointCount,
+    countMatches: finalPointCount == null ? null : finalPointCount >= statsAtStart.totalChunks,
+  }, null, 2));
 }
 
 main()

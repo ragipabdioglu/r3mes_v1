@@ -72,6 +72,20 @@ Fastify + Prisma + Sui operatör köprüsü. **Kanonik REST sözleşmesi:** [doc
 
 `.env.example` dosyasına bakın; üst satırda Faz 6 matrisine referans vardır. Test/CI için: `R3MES_DISABLE_RATE_LIMIT=1`, entegrasyon testleri için imza atlaması: `R3MES_SKIP_WALLET_AUTH=1` + `R3MES_DEV_WALLET`.
 
+## RAG / Qdrant reindex operasyonu
+
+Qdrant reindex uzun sürebilir; script kesintide baştan başlamamak için varsayılan olarak checkpoint yazar:
+
+| Komut | Amaç |
+|-------|------|
+| `pnpm --filter @r3mes/backend-api run qdrant:reindex -- --status` | DB chunk sayısı, Qdrant point sayısı ve varsa resume cursor durumunu gösterir; embedding çağırmaz. |
+| `pnpm --filter @r3mes/backend-api run qdrant:reindex` | Checkpoint varsa kaldığı `lastChunkId` sonrasından devam eder. |
+| `pnpm --filter @r3mes/backend-api run qdrant:reindex -- --reset-checkpoint` | Checkpoint'i temizleyip baştan tarar. |
+| `pnpm --filter @r3mes/backend-api run qdrant:reindex -- --max-batches 1` | Küçük smoke/recovery testi için sınırlı batch çalıştırır. |
+| `pnpm --filter @r3mes/backend-api run qdrant:reindex -- --verify-count` | Çalışma sonunda Qdrant point count ile DB chunk sayısını raporlar. |
+
+Gerçek embedding zorunluluğu için `R3MES_EMBEDDING_PROVIDER=ai-engine` veya `bge-m3` kullanıldığında script fallback'i hata kabul eder. Bu sayede yanlışlıkla deterministic fallback ile production Qdrant index'i basılmaz.
+
 ## Faz 7 — uçtan uca yaşam döngüsü (kanıt)
 
 **Hedef:** Upload → kuyruk → QA webhook → **ACTIVE** → chat’te `adapter_cid` çözümü. Yalnızca birim testlerin geçmesi yeterli değildir; **tekrarlanabilir** doğrulama gerekir.
