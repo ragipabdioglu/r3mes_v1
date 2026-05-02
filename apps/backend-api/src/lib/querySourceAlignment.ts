@@ -47,6 +47,7 @@ const STOPWORDS = new Set([
   "icin",
   "ile",
   "kisa",
+  "lazim",
   "mi",
   "mu",
   "mı",
@@ -57,10 +58,16 @@ const STOPWORDS = new Set([
   "olarak",
   "once",
   "önce",
+  "sakin",
   "sonra",
   "var",
   "ve",
   "veya",
+  "yapabilirim",
+  "yapabiliriz",
+  "yapmali",
+  "yapmaliyim",
+  "yapmalıyım",
   "ya",
 ]);
 
@@ -137,7 +144,6 @@ function firstWords(value: string, maxWords: number): string {
 function metadataText(value: unknown): string {
   if (!value || typeof value !== "object") return "";
   const record = value as Record<string, unknown>;
-  const profile = record.profile && typeof record.profile === "object" ? record.profile as Record<string, unknown> : null;
   const readArray = (input: unknown): string[] => Array.isArray(input) ? input.filter((item): item is string => typeof item === "string") : [];
   return [
     record.domain,
@@ -147,13 +153,6 @@ function metadataText(value: unknown): string {
     ...(readArray(record.tags)),
     ...(readArray(record.entities)),
     record.summary,
-    profile?.summary,
-    profile?.profileText,
-    ...(profile ? readArray(profile.domains) : []),
-    ...(profile ? readArray(profile.subtopics) : []),
-    ...(profile ? readArray(profile.keywords) : []),
-    ...(profile ? readArray(profile.entities) : []),
-    ...(profile ? readArray(profile.sampleQuestions) : []),
   ].filter((item): item is string => typeof item === "string").join(" ");
 }
 
@@ -172,15 +171,86 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return intersection / (a.size + b.size - intersection);
 }
 
-function fuzzyMatch(a: string, b: string): boolean {
-  if (a === b) return true;
-  if (a.startsWith(b) || b.startsWith(a)) {
-    const shorter = Math.min(a.length, b.length);
-    const longer = Math.max(a.length, b.length);
-    return shorter >= 4 || (shorter >= 3 && longer - shorter <= 2);
+const TURKISH_SUFFIXES = [
+  "larimizdan",
+  "lerimizden",
+  "larindan",
+  "lerinden",
+  "larimiz",
+  "lerimiz",
+  "lariniz",
+  "leriniz",
+  "larina",
+  "lerine",
+  "lardan",
+  "lerden",
+  "larin",
+  "lerin",
+  "lari",
+  "leri",
+  "imiz",
+  "iniz",
+  "indan",
+  "inden",
+  "undan",
+  "unden",
+  "im",
+  "in",
+  "um",
+  "un",
+  "si",
+  "su",
+  "dan",
+  "den",
+  "da",
+  "de",
+  "ya",
+  "ye",
+  "a",
+  "e",
+  "i",
+  "u",
+];
+
+function softenFinalConsonant(value: string): string[] {
+  if (value.length < 4) return [value];
+  const last = value.at(-1);
+  if (last === "g") return [value, `${value.slice(0, -1)}k`];
+  if (last === "b") return [value, `${value.slice(0, -1)}p`];
+  if (last === "d") return [value, `${value.slice(0, -1)}t`];
+  return [value];
+}
+
+function tokenVariants(value: string): string[] {
+  const normalized = tokenKey(value);
+  const variants = new Set<string>(softenFinalConsonant(normalized));
+  for (const suffix of TURKISH_SUFFIXES) {
+    if (!normalized.endsWith(suffix)) continue;
+    const stem = normalized.slice(0, -suffix.length);
+    if (stem.length < 3) continue;
+    for (const variant of softenFinalConsonant(stem)) variants.add(variant);
   }
-  if (a.length < 4 || b.length < 4) return false;
-  return jaccard(trigrams(a), trigrams(b)) >= 0.58;
+  return [...variants];
+}
+
+function fuzzyMatch(a: string, b: string): boolean {
+  for (const left of tokenVariants(a)) {
+    for (const right of tokenVariants(b)) {
+      if (left === right) return true;
+      if (Math.min(left.length, right.length) <= 5) continue;
+      if (left.startsWith(right) || right.startsWith(left)) {
+        const shorter = Math.min(left.length, right.length);
+        const longer = Math.max(left.length, right.length);
+        if (shorter >= 4 || (shorter >= 3 && longer - shorter <= 2)) return true;
+      }
+      // Keep fuzzy trigram matching away from short body-part/entity terms like
+      // "basim"; short Turkish words otherwise collide with unrelated verbs.
+      if (left.length >= 6 && right.length >= 6 && jaccard(trigrams(left), trigrams(right)) >= 0.58) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function phraseTerms(value: string): string[] {
@@ -249,10 +319,10 @@ export function scoreQuerySourceAlignment(opts: {
   const importantQueryTerms = queryTerms.filter((term) => !GENERIC_TERMS.has(term));
   const genericQueryTerms = queryTerms.filter((term) => GENERIC_TERMS.has(term));
   const matchedTerms = importantQueryTerms.filter((queryTerm) =>
-    sourceTerms.some((sourceTerm) => fuzzyMatch(queryTerm, sourceTerm)) || sourceText.includes(queryTerm),
+    sourceTerms.some((sourceTerm) => fuzzyMatch(queryTerm, sourceTerm)),
   );
   const genericMatchedTerms = genericQueryTerms.filter((queryTerm) =>
-    sourceTerms.some((sourceTerm) => fuzzyMatch(queryTerm, sourceTerm)) || sourceText.includes(queryTerm),
+    sourceTerms.some((sourceTerm) => fuzzyMatch(queryTerm, sourceTerm)),
   );
   const phraseMatches = phraseTerms(opts.query).filter((phrase) => sourceText.includes(phrase));
   const denominator = Math.max(1, importantQueryTerms.length);

@@ -46,6 +46,9 @@ interface AlignableKnowledgeCandidate {
   chunk: HybridKnowledgeChunk;
   card: KnowledgeCard;
   alignment?: AlignmentScore;
+  vectorScore?: number;
+  embeddingScore?: number;
+  preRankScore?: number;
 }
 
 export interface HybridRetrievedKnowledgeContext {
@@ -407,8 +410,12 @@ function scoreLightweightCandidate(query: string, candidate: HybridKnowledgeCand
   ]);
   const routeBonus = routeTerms.filter((term) => text.includes(term)).length * 0.35;
   const sourceBonus = candidate.sources.length > 1 ? 0.75 : 0;
+  const semanticBonus =
+    (candidate.vectorScore ?? 0) >= getAlignmentConfig().semanticKeepScore
+      ? (candidate.vectorScore ?? 0) * 3
+      : 0;
   const lengthPenalty = candidate.chunk.content.trim().length < 80 ? 1 : 0;
-  return overlap + phraseBonus + routeBonus + sourceBonus - lengthPenalty;
+  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus - lengthPenalty;
 }
 
 export function preRankHybridKnowledgeCandidates(opts: {
@@ -422,7 +429,7 @@ export function preRankHybridKnowledgeCandidates(opts: {
       ...candidate,
       preRankScore: scoreLightweightCandidate(opts.query, candidate, opts.routePlan),
     }))
-    .filter((candidate) => candidate.preRankScore > 0 || candidate.sources.length > 1)
+    .filter((candidate) => candidate.preRankScore > 0 || candidate.sources.length > 1 || (candidate.vectorScore ?? 0) >= getAlignmentConfig().semanticKeepScore)
     .sort((a, b) => b.preRankScore - a.preRankScore)
     .slice(0, opts.limit ?? preRankLimit());
 }
@@ -431,6 +438,7 @@ export function alignHybridKnowledgeCandidates<T extends AlignableKnowledgeCandi
   query: string;
   candidates: T[];
   routePlan?: DomainRoutePlan | null;
+  allowSemanticReview?: boolean;
 }): { candidates: Array<T & { alignment: AlignmentScore }>; diagnostics: AlignmentDiagnostics } {
   const config = getAlignmentConfig();
   if (!config.enabled) {
@@ -456,7 +464,7 @@ export function alignHybridKnowledgeCandidates<T extends AlignableKnowledgeCandi
   }
 
   const scored = opts.candidates.map((candidate) => {
-    const alignment = scoreQuerySourceAlignment({
+    const lexicalAlignment = scoreQuerySourceAlignment({
       query: opts.query,
       sourceText: buildRerankCandidateText(candidate, config.maxRerankWords),
       routePlan: opts.routePlan,
@@ -464,6 +472,19 @@ export function alignHybridKnowledgeCandidates<T extends AlignableKnowledgeCandi
       weakScore: config.weakScore,
       genericPenalty: config.genericPenalty,
     });
+    const semanticScore = Math.max(candidate.vectorScore ?? 0, candidate.embeddingScore ?? 0);
+    const shouldKeepForSemanticReview =
+      opts.allowSemanticReview === true &&
+      lexicalAlignment.mode === "mismatch" &&
+      semanticScore >= config.semanticKeepScore;
+    const alignment: AlignmentScore = shouldKeepForSemanticReview
+      ? {
+          ...lexicalAlignment,
+          mode: "weak",
+          score: Math.max(lexicalAlignment.score, Number(config.minScore.toFixed(3))),
+          reason: `Lexical alignment is weak, but semantic score ${semanticScore.toFixed(3)} is high enough for reranker review.`,
+        }
+      : lexicalAlignment;
     return { ...candidate, alignment };
   });
   const shouldDropWeak =
@@ -582,7 +603,12 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     };
   }
   const preRanked = preRankHybridKnowledgeCandidates({ query, candidates: deduped, routePlan });
-  const alignedPreRanked = alignHybridKnowledgeCandidates({ query: evidenceQuery, candidates: preRanked, routePlan });
+  const alignedPreRanked = alignHybridKnowledgeCandidates({
+    query: evidenceQuery,
+    candidates: preRanked,
+    routePlan,
+    allowSemanticReview: true,
+  });
   const candidatesForRerank = alignedPreRanked.candidates;
   if (alignedPreRanked.diagnostics.fastFailed) {
     return {

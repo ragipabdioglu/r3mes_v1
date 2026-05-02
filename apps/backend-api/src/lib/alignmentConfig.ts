@@ -5,6 +5,7 @@ export interface AlignmentConfig {
   weakScore: number;
   genericPenalty: number;
   maxRerankWords: number;
+  semanticKeepScore: number;
 }
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -34,5 +35,6 @@ export function getAlignmentConfig(): AlignmentConfig {
     weakScore: readNumber(process.env.R3MES_ALIGNMENT_WEAK_SCORE, 0.5),
     genericPenalty: readNumber(process.env.R3MES_ALIGNMENT_GENERIC_PENALTY, 0.18),
     maxRerankWords: readPositiveInt(process.env.R3MES_ALIGNMENT_MAX_RERANK_WORDS, 300),
+    semanticKeepScore: readNumber(process.env.R3MES_ALIGNMENT_SEMANTIC_KEEP_SCORE, 0.62),
   };
 }

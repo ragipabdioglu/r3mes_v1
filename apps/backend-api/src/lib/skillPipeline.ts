@@ -1,5 +1,6 @@
 import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import type { AnswerIntent } from "./answerSchema.js";
+import { normalizeAlignmentText } from "./querySourceAlignment.js";
 
 export type SkillName =
   | "intent-router"
@@ -275,26 +276,18 @@ function sentenceFragments(text: string, limit = 2): string[] {
 }
 
 function tokenizeForOverlap(text: string): string[] {
-  return text
-    .toLocaleLowerCase("tr-TR")
+  return normalizeAlignmentText(text)
     .split(/[^\p{L}\p{N}-]+/u)
     .map((part) => part.trim())
     .map((part) => {
       const canonical: Record<string, string> = {
-        "ağrım": "ağrı",
         agrim: "agri",
-        "ağrısı": "ağrı",
         agrisi: "agri",
-        "karnım": "karın",
         karnim: "karin",
         kasigim: "kasik",
-        "kasığım": "kasık",
         okulda: "okul",
-        "desteği": "destek",
         destegi: "destek",
-        "adımları": "adım",
         adimlari: "adim",
-        "konuşmalıyım": "konuş",
         konusmaliyim: "konus",
       };
       const direct = canonical[part] ?? part;
@@ -302,15 +295,15 @@ function tokenizeForOverlap(text: string): string[] {
       if (direct.startsWith("protokol")) return "protokol";
       if (direct.startsWith("belge")) return "belge";
       if (direct.startsWith("dekont")) return "belge";
-      if (direct.startsWith("sözleşme") || direct.startsWith("sozlesme")) return "sözleşme";
-      if (direct.startsWith("boşanma") || direct.startsWith("bosanma")) return "boşanma";
-      if (direct.startsWith("anlaşma") || direct.startsWith("anlasma")) return "anlaşma";
-      if (direct.startsWith("başlık") || direct.startsWith("baslik")) return "başlık";
-      if (direct.startsWith("netleştir") || direct.startsWith("netlestir")) return "netleştir";
+      if (direct.startsWith("sozlesme")) return "sozlesme";
+      if (direct.startsWith("bosanma")) return "bosanma";
+      if (direct.startsWith("anlasma")) return "anlasma";
+      if (direct.startsWith("baslik")) return "baslik";
+      if (direct.startsWith("netlestir")) return "netlestir";
       if (direct.startsWith("velayet")) return "velayet";
       if (direct.startsWith("nafaka")) return "nafaka";
-      if (direct.startsWith("kayıt") || direct.startsWith("kayit")) return "kayıt";
-      if (direct.startsWith("başvuru") || direct.startsWith("basvuru")) return "başvuru";
+      if (direct.startsWith("kayit")) return "kayit";
+      if (direct.startsWith("basvuru")) return "basvuru";
       return direct;
     })
     .filter((part) => part.length >= 3);
@@ -318,6 +311,23 @@ function tokenizeForOverlap(text: string): string[] {
 
 function queryOverlapScore(queryTokens: Set<string>, text: string): number {
   return tokenizeForOverlap(text).filter((token) => queryTokens.has(token)).length;
+}
+
+const GENERIC_OVERLAP_TOKENS = new Set([
+  "agri",
+  "agriyor",
+  "belirti",
+  "durum",
+  "genel",
+  "kontrol",
+  "sikayet",
+  "sorun",
+  "takip",
+  "uzman",
+]);
+
+function queryCoreOverlapScore(queryTokens: Set<string>, text: string): number {
+  return tokenizeForOverlap(text).filter((token) => queryTokens.has(token) && !GENERIC_OVERLAP_TOKENS.has(token)).length;
 }
 
 function hasStrongQueryOverlap(queryTokens: Set<string>, text: string): boolean {
@@ -638,13 +648,14 @@ export function buildDeterministicEvidenceExtraction(
     const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
     if (!sanitized.trim()) return;
     const overlap = queryOverlapScore(queryTokens, sanitized);
+    const coreOverlap = queryCoreOverlapScore(queryTokens, sanitized);
     const strongOverlap = hasStrongQueryOverlap(queryTokens, sanitized);
     const offQuerySymptom = hasOffQuerySymptom(input.userQuery, sanitized);
     if (offQuerySymptom && !opts.allowGenericGuidance) return;
-    const acceptDirect = opts.kind !== "supporting" && (strongOverlap || (weakIntent === "explain" && overlap > 0));
+    const acceptDirect = opts.kind !== "supporting" && (strongOverlap || coreOverlap > 0 || (weakIntent === "explain" && overlap > 0));
     const acceptSupporting =
       opts.kind === "supporting" &&
-      (strongOverlap || (opts.allowGenericGuidance && overlap > 0));
+      (strongOverlap || coreOverlap > 0 || (opts.allowGenericGuidance && overlap > 0));
     if (acceptDirect || acceptSupporting) {
       const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized));
       usableFacts.push(line);
