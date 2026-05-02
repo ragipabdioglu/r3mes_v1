@@ -1,6 +1,6 @@
 import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import type { AnswerIntent } from "./answerSchema.js";
-import { normalizeAlignmentText } from "./querySourceAlignment.js";
+import { expandConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 
 export type SkillName =
   | "intent-router"
@@ -276,7 +276,10 @@ function sentenceFragments(text: string, limit = 2): string[] {
 }
 
 function tokenizeForOverlap(text: string): string[] {
-  return normalizeAlignmentText(text)
+  const normalized = normalizeConceptText(text);
+  return [
+    ...expandConceptTerms(normalized),
+    ...normalized
     .split(/[^\p{L}\p{N}-]+/u)
     .map((part) => part.trim())
     .map((part) => {
@@ -306,7 +309,8 @@ function tokenizeForOverlap(text: string): string[] {
       if (direct.startsWith("basvuru")) return "basvuru";
       return direct;
     })
-    .filter((part) => part.length >= 3);
+    .filter((part) => part.length >= 3),
+  ];
 }
 
 function queryOverlapScore(queryTokens: Set<string>, text: string): number {

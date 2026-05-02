@@ -1,5 +1,6 @@
 import type { KnowledgeCard } from "./knowledgeCard.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
+import { expandConceptTerms, inferCanonicalConcepts, normalizeConceptText } from "./conceptNormalizer.js";
 
 export type AlignmentMode = "aligned" | "weak" | "mismatch";
 
@@ -24,16 +25,6 @@ export interface AlignmentDiagnostics {
   droppedCandidateCount: number;
   fastFailed: boolean;
 }
-
-const TURKISH_FOLD: Record<string, string> = {
-  ç: "c",
-  ğ: "g",
-  ı: "i",
-  İ: "i",
-  ö: "o",
-  ş: "s",
-  ü: "u",
-};
 
 const STOPWORDS = new Set([
   "acaba",
@@ -91,19 +82,8 @@ const GENERIC_TERMS = new Set([
   "uzman",
 ]);
 
-function foldTurkish(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(/[çğıİöşü]/g, (char) => TURKISH_FOLD[char] ?? char)
-    .toLocaleLowerCase("tr-TR");
-}
-
 export function normalizeAlignmentText(value: string): string {
-  return foldTurkish(value)
-    .replace(/[_-]+/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeConceptText(value);
 }
 
 function tokenKey(value: string): string {
@@ -266,6 +246,8 @@ export function buildQueryConceptTerms(query: string, routePlan?: DomainRoutePla
   void routePlan;
   return unique(
     [
+      ...inferCanonicalConcepts(query),
+      ...expandConceptTerms(query),
       ...alignmentTokens(query, 32),
     ],
     48,
@@ -314,7 +296,14 @@ export function scoreQuerySourceAlignment(opts: {
   genericPenalty: number;
 }): AlignmentScore {
   const queryTerms = buildQueryConceptTerms(opts.query, opts.routePlan);
-  const sourceTerms = alignmentTokens(opts.sourceText, 80);
+  const sourceTerms = unique(
+    [
+      ...inferCanonicalConcepts(opts.sourceText),
+      ...expandConceptTerms(opts.sourceText),
+      ...alignmentTokens(opts.sourceText, 80),
+    ],
+    96,
+  );
   const sourceText = normalizeAlignmentText(opts.sourceText);
   const importantQueryTerms = queryTerms.filter((term) => !GENERIC_TERMS.has(term));
   const genericQueryTerms = queryTerms.filter((term) => GENERIC_TERMS.has(term));
