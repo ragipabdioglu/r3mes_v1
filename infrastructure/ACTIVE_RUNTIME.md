@@ -138,6 +138,35 @@ pnpm --filter @r3mes/backend-api run qdrant:reindex -- --after <knowledgeChunkId
 
 When the job finishes fully, the checkpoint file is removed automatically. If the checkpoint remains, the previous run was intentionally partial or interrupted and the next run will resume from `lastChunkId`.
 
+## Post-Upload Knowledge Quality Refresh
+
+After a meaningful upload, profile change, parser change, or metadata extraction change, run the refresh gate:
+
+```powershell
+pnpm knowledge:quality-refresh
+```
+
+The command runs:
+
+- TypeScript check.
+- Real BGE-M3 / cross-encoder provider smoke.
+- Knowledge metadata backfill.
+- Qdrant reindex with real embeddings.
+- Generated collection smoke eval, including positive, wrong-source suggestion, same-domain wrong-topic, and thin-profile caution cases.
+
+Useful local shortcuts:
+
+```powershell
+# Fast check after code-only eval generator changes.
+pnpm knowledge:quality-refresh -- --skip-backfill --skip-reindex
+
+# Verify reindex plumbing without processing the full collection.
+pnpm knowledge:quality-refresh -- --skip-eval --max-batches 1
+
+# Rebuild metadata/eval only, keeping Qdrant as-is.
+pnpm knowledge:quality-refresh -- --skip-reindex
+```
+
 Targeted unit tests for the active path live under:
 
 - `apps/backend-api/src/lib/skillPipeline.test.ts`

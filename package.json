@@ -33,7 +33,8 @@
     "eval:grounded-stress": "node infrastructure/scripts/run-grounded-stress.mjs",
     "eval:adaptive-rag": "pnpm --filter @r3mes/backend-api run eval:adaptive-rag",
     "eval:realistic-rag": "pnpm --filter @r3mes/backend-api run eval:realistic-rag",
-    "eval:collection-smoke": "pnpm --filter @r3mes/backend-api run eval:collection-smoke"
+    "eval:collection-smoke": "pnpm --filter @r3mes/backend-api run eval:collection-smoke",
+    "knowledge:quality-refresh": "pnpm --filter @r3mes/backend-api run knowledge:quality-refresh"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
