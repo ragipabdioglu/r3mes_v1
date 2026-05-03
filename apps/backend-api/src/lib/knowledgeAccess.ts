@@ -274,6 +274,11 @@ function percentScore(matches: number, possible: number): number {
   return Math.min(100, (matches / possible) * 100);
 }
 
+function routeHintScoreWeight(): number {
+  const parsed = Number.parseFloat(process.env.R3MES_ROUTE_HINT_SCORE_WEIGHT ?? "0.35");
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0.35;
+}
+
 function sourceQualityScore(profile: KnowledgeMetadataProfile): number {
   if (profile.sourceQuality === "structured") return 100;
   if (profile.sourceQuality === "inferred") return 65;
@@ -603,21 +608,24 @@ export function scoreCollectionForRoute(
   const adaptiveScore = adaptiveProfileRoutingScore(collection, routePlan, query);
   score += adaptiveScore;
 
-  if (metadataScore === 0 && inferred.domain === routePlan.domain) score += 40;
-  if (collectionMatchesRoute(collection, routePlan.domain)) score += 20;
+  let routeHintScore = 0;
+  if (metadataScore === 0 && inferred.domain === routePlan.domain) routeHintScore += 40;
+  if (collectionMatchesRoute(collection, routePlan.domain)) routeHintScore += 20;
 
   for (const subtopic of routePlan.subtopics) {
-    if (inferred.subtopics.includes(subtopic)) score += 14;
-    if (containsTerm(text, subtopic.replace(/_/g, " "))) score += 8;
+    if (inferred.subtopics.includes(subtopic)) routeHintScore += 14;
+    if (containsTerm(text, subtopic.replace(/_/g, " "))) routeHintScore += 8;
   }
 
   for (const hint of routePlan.retrievalHints) {
-    if (containsTerm(text, hint)) score += 4;
+    if (containsTerm(text, hint)) routeHintScore += 4;
   }
 
   for (const term of routePlan.mustIncludeTerms) {
-    if (containsTerm(text, term)) score += 3;
+    if (containsTerm(text, term)) routeHintScore += 3;
   }
+
+  score += routeHintScore * routeHintScoreWeight();
 
   return score;
 }
