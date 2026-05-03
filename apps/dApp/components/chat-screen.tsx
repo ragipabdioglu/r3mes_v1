@@ -801,7 +801,7 @@ export function ChatScreen() {
                 type="checkbox"
                 checked={includePublic}
                 onChange={(e) => setIncludePublic(e.target.checked)}
-                className="rounded border-zinc-700 bg-zinc-950 text-violet-500 focus:ring-violet-500/40"
+                className="rounded border-zinc-700 bg-zinc-950 text-cyan-500 focus:ring-cyan-500/40"
               />
               Public havuzu da kullan
             </label>
@@ -819,64 +819,75 @@ export function ChatScreen() {
           ) : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {KNOWLEDGE_DOMAIN_FILTERS.map((filter) => {
-                const active = knowledgeDomainFilter === filter.id;
-                return (
-                  <button
-                    key={filter.id}
-                    type="button"
-                    onClick={() => setKnowledgeDomainFilter(filter.id)}
-                    className={`rounded-full border px-3 py-1.5 text-[11px] font-medium ${
-                      active
-                        ? "border-emerald-500/40 bg-emerald-950/20 text-emerald-100"
-                        : "border-zinc-800 bg-zinc-950/60 text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    {filter.label}
-                    {filter.id === "auto" && autoDomain ? `: ${autoDomain}` : ""}
-                  </button>
-                );
-              })}
-            </div>
-            <input
-              value={knowledgeSearch}
-              onChange={(e) => setKnowledgeSearch(e.target.value)}
-              placeholder="Kaynak ara…"
-              className="min-h-[36px] min-w-[220px] flex-1 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-violet-500/40 focus:outline-none"
-            />
+            <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-medium text-cyan-100">
+              Auto source aktif
+            </span>
             {selectedCollectionIds.length > 0 ? (
               <button
                 type="button"
                 onClick={() => setSelectedCollectionIds([])}
-                className="rounded-lg border border-zinc-800 px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200"
+                className="rounded-full border border-zinc-800 px-3 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200"
               >
                 Seçimi temizle
               </button>
             ) : null}
-            {hiddenInternalCount > 0 ? (
-              <label className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-xs text-zinc-400">
-                <input
-                  type="checkbox"
-                  checked={showInternalKnowledge}
-                  onChange={(e) => setShowInternalKnowledge(e.target.checked)}
-                  className="rounded border-zinc-700 bg-zinc-950 text-violet-500 focus:ring-violet-500/40"
-                />
-                Test/demo kaynakları göster ({hiddenInternalCount})
-              </label>
-            ) : null}
-            {CHAT_DEBUG_ENABLED ? (
-              <label className="inline-flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-100/90">
-                <input
-                  type="checkbox"
-                  checked={showDebugDetails}
-                  onChange={(e) => setShowDebugDetails(e.target.checked)}
-                  className="rounded border-amber-700 bg-zinc-950 text-amber-500 focus:ring-amber-500/40"
-                />
-                Debug göster
-              </label>
-            ) : null}
           </div>
+
+          <details className="mt-3 rounded-xl border border-zinc-800/80 bg-black/10 p-3">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              Kaynakları elle yönet
+            </summary>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {KNOWLEDGE_DOMAIN_FILTERS.map((filter) => {
+                  const active = knowledgeDomainFilter === filter.id;
+                  return (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      onClick={() => setKnowledgeDomainFilter(filter.id)}
+                      className={`rounded-full border px-3 py-1.5 text-[11px] font-medium ${
+                        active
+                          ? "border-emerald-500/40 bg-emerald-950/20 text-emerald-100"
+                          : "border-zinc-800 bg-zinc-950/60 text-zinc-500 hover:text-zinc-300"
+                      }`}
+                    >
+                      {filter.label}
+                      {filter.id === "auto" && autoDomain ? `: ${autoDomain}` : ""}
+                    </button>
+                  );
+                })}
+              </div>
+              <input
+                value={knowledgeSearch}
+                onChange={(e) => setKnowledgeSearch(e.target.value)}
+                placeholder="Kaynak ara…"
+                className="min-h-[36px] min-w-[220px] flex-1 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-cyan-500/40 focus:outline-none"
+              />
+              {hiddenInternalCount > 0 ? (
+                <label className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-xs text-zinc-400">
+                  <input
+                    type="checkbox"
+                    checked={showInternalKnowledge}
+                    onChange={(e) => setShowInternalKnowledge(e.target.checked)}
+                    className="rounded border-zinc-700 bg-zinc-950 text-cyan-500 focus:ring-cyan-500/40"
+                  />
+                  Test/demo kaynakları göster ({hiddenInternalCount})
+                </label>
+              ) : null}
+              {CHAT_DEBUG_ENABLED ? (
+                <label className="inline-flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-100/90">
+                  <input
+                    type="checkbox"
+                    checked={showDebugDetails}
+                    onChange={(e) => setShowDebugDetails(e.target.checked)}
+                    className="rounded border-amber-700 bg-zinc-950 text-amber-500 focus:ring-amber-500/40"
+                  />
+                  Debug göster
+                </label>
+              ) : null}
+            </div>
+          </details>
 
           {selectedCollections.length > 0 ? (
             <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-950/10 px-3 py-2 text-xs leading-relaxed text-emerald-100/90">
@@ -951,62 +962,57 @@ export function ChatScreen() {
               ) : null}
 
               {backendSuggestedCollections.length === 0 ? (
-              <section className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">
-                      İlk öneriler
-                    </p>
-                    <p className="mt-0.5 text-[11px] leading-relaxed text-emerald-100/70">
-                      Soru metni, domain filtresi ve lokal metadata'ya göre hızlı kısa liste.
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] text-emerald-100/80">
-                    {recommendedCollections.length} / {visibleCollections.length}
-                  </span>
-                </div>
-                <ul className="grid gap-2 sm:grid-cols-2">
-                  {recommendedCollections.map((collection) => {
-                    const checked = selectedCollectionIds.includes(collection.id);
-                    const domain = collectionDomain(collection);
-                    const quality = profileQualityLabel(collection);
-                    return (
-                      <li key={collection.id}>
-                        <button
-                          type="button"
-                          onClick={() => selectSuggestedCollection(collection.id)}
-                          className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
-                            checked
-                              ? "border-emerald-500/50 bg-emerald-950/25 text-emerald-50"
-                              : "border-zinc-800 bg-zinc-950/50 text-zinc-300 hover:border-emerald-500/35 hover:text-zinc-100"
-                          }`}
-                        >
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium">{collection.name}</span>
-                            <VisibilityPill visibility={collection.visibility} />
-                          </span>
-                          <span className="mt-1 block text-[11px] text-zinc-500">
-                            {collection.documentCount} doküman · {formatCollectionDate(collection.updatedAt)}
-                            {domain ? ` · ${KNOWLEDGE_DOMAIN_LABELS[domain]}` : ""}
-                            {quality ? ` · ${quality}` : ""}
-                          </span>
-                          {collection.inferredTopic || collection.inferredTags?.length ? (
-                            <span className="mt-1 block text-[10px] text-zinc-500">
-                              {collection.inferredTopic ?? collection.inferredTags?.slice(0, 2).join(", ")}
+              <details className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-3">
+                <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-emerald-100">
+                  Elle kaynak önerilerini göster ({recommendedCollections.length})
+                </summary>
+                <div className="mt-3">
+                  <p className="text-[11px] leading-relaxed text-emerald-100/70">
+                    Bu kısa liste lokal metadata ile hazırlanır. Ana karar backend auto source hattındadır.
+                  </p>
+                  <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {recommendedCollections.map((collection) => {
+                      const checked = selectedCollectionIds.includes(collection.id);
+                      const domain = collectionDomain(collection);
+                      const quality = profileQualityLabel(collection);
+                      return (
+                        <li key={collection.id}>
+                          <button
+                            type="button"
+                            onClick={() => selectSuggestedCollection(collection.id)}
+                            className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
+                              checked
+                                ? "border-emerald-500/50 bg-emerald-950/25 text-emerald-50"
+                                : "border-zinc-800 bg-zinc-950/50 text-zinc-300 hover:border-emerald-500/35 hover:text-zinc-100"
+                            }`}
+                          >
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">{collection.name}</span>
+                              <VisibilityPill visibility={collection.visibility} />
                             </span>
-                          ) : null}
-                          <span className="mt-1 block font-mono text-[10px] text-zinc-600">
-                            {shortId(collection.id)}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <p className="mt-2 text-[11px] leading-relaxed text-emerald-100/65">
-                  Bir öneriye tıklamak chat'i yalnız o kaynakla sınırlar. Hiçbirini seçmezseniz seçili ayara göre public havuz veya base chat çalışır.
-                </p>
-              </section>
+                            <span className="mt-1 block text-[11px] text-zinc-500">
+                              {collection.documentCount} doküman · {formatCollectionDate(collection.updatedAt)}
+                              {domain ? ` · ${KNOWLEDGE_DOMAIN_LABELS[domain]}` : ""}
+                              {quality ? ` · ${quality}` : ""}
+                            </span>
+                            {collection.inferredTopic || collection.inferredTags?.length ? (
+                              <span className="mt-1 block text-[10px] text-zinc-500">
+                                {collection.inferredTopic ?? collection.inferredTags?.slice(0, 2).join(", ")}
+                              </span>
+                            ) : null}
+                            <span className="mt-1 block font-mono text-[10px] text-zinc-600">
+                              {shortId(collection.id)}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="mt-2 text-[11px] leading-relaxed text-emerald-100/65">
+                    Bir öneriye tıklamak chat'i yalnız o kaynakla sınırlar.
+                  </p>
+                </div>
+              </details>
               ) : null}
 
               <details className="rounded-xl border border-zinc-800/80 bg-black/10 p-3">
@@ -1047,7 +1053,7 @@ export function ChatScreen() {
                                   type="checkbox"
                                   checked={checked}
                                   onChange={() => toggleCollection(collection.id)}
-                                  className="mt-0.5 rounded border-zinc-700 bg-zinc-950 text-violet-500 focus:ring-violet-500/40"
+                                  className="mt-0.5 rounded border-zinc-700 bg-zinc-950 text-cyan-500 focus:ring-cyan-500/40"
                                 />
                                 <span className="min-w-0">
                                   <span className="block font-medium text-zinc-100">
@@ -1083,30 +1089,35 @@ export function ChatScreen() {
           )}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="text-xs uppercase text-zinc-500">
-              Behavior LoRA kimliği (isteğe bağlı)
-            </label>
-            <input
-              value={adapterId}
-              onChange={(e) => setAdapterId(e.target.value)}
-              placeholder="Pazaryerinden style/persona seçildiğinde dolar"
-              className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 font-mono text-sm text-zinc-100 focus:border-violet-500/40 focus:outline-none"
-            />
+        <details className="rounded-xl border border-zinc-800/80 bg-r3mes-surface/25 p-3">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            Behavior skill / LoRA opsiyonel
+          </summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-xs uppercase text-zinc-500">
+                Behavior LoRA kimliği
+              </label>
+              <input
+                value={adapterId}
+                onChange={(e) => setAdapterId(e.target.value)}
+                placeholder="Behavior library'den seçildiğinde dolar"
+                className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 font-mono text-sm text-zinc-100 focus:border-cyan-500/40 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs uppercase text-zinc-500">
+                Behavior LoRA IPFS adresi
+              </label>
+              <input
+                value={adapterCid}
+                onChange={(e) => setAdapterCid(e.target.value)}
+                placeholder="bafy…"
+                className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 font-mono text-sm text-zinc-100 focus:border-cyan-500/40 focus:outline-none"
+              />
+            </div>
           </div>
-          <div>
-            <label className="text-xs uppercase text-zinc-500">
-              Behavior LoRA IPFS adresi (alternatif)
-            </label>
-            <input
-              value={adapterCid}
-              onChange={(e) => setAdapterCid(e.target.value)}
-              placeholder="bafy…"
-              className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 font-mono text-sm text-zinc-100 focus:border-violet-500/40 focus:outline-none"
-            />
-          </div>
-        </div>
+        </details>
 
         {adapterDevTest && hasAdapterContext ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -1128,11 +1139,11 @@ export function ChatScreen() {
         </p>
 
         {!hasAdapterContext ? (
-          <p className="rounded-lg border border-violet-500/20 bg-violet-950/20 px-3 py-2 text-xs leading-relaxed text-zinc-300">
+          <p className="rounded-lg border border-cyan-500/20 bg-cyan-950/10 px-3 py-2 text-xs leading-relaxed text-zinc-300">
             <span>{chat.adapterMissingLead} </span>
             <Link
               href="/"
-              className="font-medium text-violet-300 underline-offset-2 hover:underline"
+              className="font-medium text-cyan-300 underline-offset-2 hover:underline"
             >
               {chat.marketplaceLinkLabel}
             </Link>
@@ -1158,7 +1169,7 @@ export function ChatScreen() {
               <div
                 className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${
                   m.role === "user"
-                    ? "bg-violet-600/90 text-white"
+                    ? "bg-cyan-600/90 text-white"
                     : "border border-zinc-800 bg-zinc-900/80 text-zinc-100"
                 }`}
               >
@@ -1217,13 +1228,13 @@ export function ChatScreen() {
               }}
               placeholder="Mesajınızı yazın…"
               disabled={streaming}
-              className="min-h-[44px] min-w-0 flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-4 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-violet-500/40 focus:outline-none disabled:opacity-50"
+              className="min-h-[44px] min-w-0 flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-4 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-cyan-500/40 focus:outline-none disabled:opacity-50"
             />
             <button
               type="button"
               disabled={!canSend}
               onClick={() => void send()}
-              className="rounded-xl bg-violet-600 px-5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Gönder
             </button>

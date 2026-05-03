@@ -6,10 +6,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const links = [
-  { href: "/", label: "Pazaryeri" },
+  { href: "/", label: "Dashboard" },
   { href: "/studio", label: "Studio" },
-  { href: "/stake", label: "Stake" },
   { href: "/chat", label: "Chat" },
+  { href: "/stake", label: "Protocol" },
 ];
 
 export function Navbar() {
@@ -28,7 +28,7 @@ export function Navbar() {
             R3MES
           </span>
           <span className="hidden text-xs text-r3mes-muted sm:inline">
-            AI × Sui
+            Knowledge OS
           </span>
         </Link>
 

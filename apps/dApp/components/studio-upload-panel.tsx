@@ -178,7 +178,7 @@ export function StudioUploadPanel() {
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="Örn. Resmi danışman personası"
-          className="mt-2 w-full max-w-md rounded-lg border border-r3mes-border bg-r3mes-surface px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:border-violet-500/50 focus:outline-none focus:ring-1 focus:ring-violet-500/30"
+          className="mt-2 w-full max-w-md rounded-lg border border-r3mes-border bg-r3mes-surface px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
         />
       </div>
 
@@ -192,7 +192,7 @@ export function StudioUploadPanel() {
         onDrop={onDrop}
         className={`relative rounded-2xl border-2 border-dashed px-6 py-16 text-center transition-colors ${
           dragOver
-            ? "border-violet-400/60 bg-violet-950/20"
+            ? "border-cyan-400/60 bg-cyan-950/20"
             : "border-r3mes-border bg-r3mes-surface/40"
         }`}
       >
@@ -202,7 +202,7 @@ export function StudioUploadPanel() {
         <p className="mt-2 text-xs leading-relaxed text-zinc-500">
           {studioUpload.dropzoneHelp}
         </p>
-        <label className="mt-6 inline-flex cursor-pointer rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+        <label className="mt-6 inline-flex cursor-pointer rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500">
           Dosya seç
           <input
             type="file"
@@ -275,7 +275,7 @@ export function StudioUploadPanel() {
               {state.payload.status === "ACTIVE" ? (
                 <Link
                   href={`/chat?adapter=${encodeURIComponent(state.payload.adapterId)}`}
-                  className="mt-3 inline-flex rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500"
+                  className="mt-3 inline-flex rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500"
                 >
                   {journey.uploadChatCta}
                 </Link>

@@ -19,7 +19,7 @@ export const walletConnectForChatAction =
   "Sohbet için üst menüden cüzdanı bağlayıp imza isteğini onaylayın.";
 
 export const walletConnectForStudio =
-  "Adaptör durumlarını görmek için cüzdanınızı bağlayın.";
+  "Knowledge kaynaklarını ve çalışma alanınızı yönetmek için cüzdanınızı bağlayın.";
 
 export const mutationCompleted = "İşlem sunucuda tamamlandı; özet aşağıda güncellendi.";
 
@@ -53,18 +53,18 @@ export const journey = {
 
 export const pageIntro = {
   home:
-    "Davranış paketleri ve test stilleri listelenir. Bilgiyi knowledge koleksiyonları taşır; sohbet sırasında kaynak seçebilirsiniz.",
+    "Knowledge kaynaklarını, retrieval hattını ve opsiyonel behavior skill katmanını tek yerden izleyin. Ana akış: veri yükle, hazırla, kaynaklı sohbet et.",
   stake:
     "Stake ve ödül özetinizi izleyin. Kesin işlemler zincir ve cüzdan üzerinden yapılır; bu sayfa okuma ve deneme içindir.",
   studio:
-    "Önce knowledge verisini yükleyin ve görünürlüğünü yönetin. Davranış LoRA yükleme yüzeyi ikincil ve yalnız stil/persona içindir.",
+    "Knowledge verisini yükleyin, indeks durumunu izleyin ve private/public görünürlüğü yönetin. Behavior LoRA yüzeyi ikincil ve yalnız stil/persona içindir.",
   chat:
-    "Sohbet Qwen taban model üzerinde çalışır. İsterseniz private/public knowledge kaynakları ve opsiyonel davranış LoRA ekleyebilirsiniz.",
+    "Sohbet Qwen taban model üzerinde çalışır. Auto source modu uygun knowledge kaynaklarını seçer; behavior LoRA yalnız opsiyonel üslup katmanıdır.",
 } as const;
 
 export const marketplace = {
-  emptyLine: "Listede davranış paketi yok.",
-  studioLinkLabel: "Studio’da behavior LoRA yükleyin",
+  emptyLine: "Listede behavior skill yok.",
+  studioLinkLabel: "Studio’da behavior skill yükleyin",
 } as const;
 
 export const walletBalance = {
@@ -78,7 +78,7 @@ export { studioUpload } from "@/lib/ui/r3mes-fe-contract";
 export const chat = {
   adapterMissingLead:
     "Davranış LoRA opsiyoneldir. Doğrudan Qwen ile konuşabilir veya knowledge kaynakları ekleyebilirsiniz.",
-  marketplaceLinkLabel: "Pazaryerinden behavior LoRA seçin",
+  marketplaceLinkLabel: "Behavior library'den skill seçin",
   adapterMissingTail:
     "İsterseniz yukarıya adaptör kimliği ya da IPFS adresi de yazabilirsiniz.",
   adapterOnlyNote:
@@ -98,7 +98,7 @@ export const chat = {
   errorHint: "Sorun sürerse bağlantıyı ve adaptör alanlarını kontrol edin.",
   knowledgeSectionTitle: "Knowledge kaynakları",
   knowledgeSectionHint:
-    "Private koleksiyonlar yalnız size görünür. Public toggle açıkken herkese açık koleksiyonlar da dahil edilir.",
+    "Varsayılan akış auto source modudur. İsterseniz kaynakları elle sınırlandırabilir veya public kaynakları dahil edebilirsiniz.",
   includePublicLabel: "Public knowledge dahil et",
   noKnowledgeSelected:
     "Seçili knowledge kaynağı yok. Bu durumda taban model veya davranış LoRA ile devam edilir.",
@@ -108,6 +108,7 @@ export const chat = {
 
 export const knowledgeStudio = {
   statusBoardTitle: "Knowledge koleksiyonları",
+  uploadBoardTitle: "Knowledge yükleme",
   statusBoardHint:
     "Her yükleme önce private olarak kaydolur. Hazır olduğunda public olarak yayımlayabilirsiniz.",
   emptyState:
@@ -141,7 +142,7 @@ export const knowledgeStudio = {
     "{name} koleksiyonu alındı. İndeksleme tamamlanınca listede durumu görebilirsiniz.",
   behaviorSectionTitle: "Behavior LoRA",
   behaviorSectionDescription:
-    "Bu alan bilgi öğretmek için değil; rol, ton, persona ve cevap stilini ayarlamak için kullanılır.",
+    "Bu alan bilgi öğretmek için değil; rol, ton, persona, cevap stili ve agent davranışını ayarlamak için kullanılır.",
   behaviorListTitle: "Behavior LoRA kayıtları",
   behaviorUploadTitle: "Behavior LoRA yükleme",
 } as const;

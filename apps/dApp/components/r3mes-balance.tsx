@@ -60,9 +60,9 @@ export function R3mesBalanceCard() {
   return (
     <motion.div
       layout
-      className="rounded-2xl border border-violet-500/25 bg-gradient-to-br from-violet-950/40 to-r3mes-surface/80 p-6 shadow-xl shadow-violet-950/30"
+      className="rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-cyan-950/30 to-r3mes-surface/80 p-6 shadow-xl shadow-cyan-950/20"
     >
-      <p className="text-xs uppercase tracking-wider text-violet-300/80">
+      <p className="text-xs uppercase tracking-wider text-cyan-200/80">
         {symbol} (zincir)
       </p>
       <p

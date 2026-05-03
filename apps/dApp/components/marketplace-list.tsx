@@ -17,12 +17,12 @@ function MarketplaceCard({ a }: { a: AdapterListItem }) {
   return (
     <Link
       href={chatHref}
-      className="group block rounded-xl border border-r3mes-border bg-r3mes-surface/50 p-4 transition hover:border-violet-500/40 hover:bg-r3mes-surface"
+      className="group block rounded-xl border border-r3mes-border bg-r3mes-surface/50 p-4 transition hover:border-cyan-500/40 hover:bg-r3mes-surface"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate font-medium text-white group-hover:text-violet-200">
+            <h3 className="truncate font-medium text-white group-hover:text-cyan-100">
               {a.name}
             </h3>
             {dev ? <DevTestPill /> : null}
@@ -37,7 +37,7 @@ function MarketplaceCard({ a }: { a: AdapterListItem }) {
           className={
             dev
               ? "shrink-0 rounded-lg bg-zinc-800/80 px-2 py-1 text-xs font-medium text-zinc-400"
-              : "shrink-0 rounded-lg bg-violet-500/15 px-2 py-1 text-xs font-medium text-violet-200"
+              : "shrink-0 rounded-lg bg-cyan-500/15 px-2 py-1 text-xs font-medium text-cyan-100"
           }
         >
           Stil skoru {score}
@@ -74,7 +74,7 @@ export async function MarketplaceList() {
         {marketplace.emptyLine}{" "}
         <Link
           href="/studio"
-          className="font-medium text-violet-400 underline-offset-2 hover:text-violet-300 hover:underline"
+          className="font-medium text-cyan-300 underline-offset-2 hover:text-cyan-200 hover:underline"
         >
           {marketplace.studioLinkLabel}
         </Link>

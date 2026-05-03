@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 
 import { Navbar } from "@/components/navbar";
 import { WalletProvider } from "@/components/wallet-provider";
@@ -7,21 +7,21 @@ import { WalletProvider } from "@/components/wallet-provider";
 import "./globals.css";
 import "@mysten/dapp-kit/dist/index.css";
 
-const inter = Inter({
+const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
-  variable: "--font-geist-sans",
+  variable: "--font-r3mes-sans",
   display: "swap",
 });
 
 const jetbrains = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  variable: "--font-r3mes-mono",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "R3MES — AI × Sui",
-  description: "R3MES pazaryeri, studio ve çıkarım arayüzü",
+  title: "R3MES — Knowledge OS",
+  description: "R3MES knowledge-first RAG studio ve sohbet arayüzü",
 };
 
 export default function RootLayout({
@@ -32,7 +32,7 @@ export default function RootLayout({
   return (
     <html lang="tr" className="dark">
       <body
-        className={`${inter.variable} ${jetbrains.variable} min-h-screen font-sans`}
+        className={`${spaceGrotesk.variable} ${jetbrains.variable} min-h-screen font-sans`}
       >
         <WalletProvider>
           <Navbar />
