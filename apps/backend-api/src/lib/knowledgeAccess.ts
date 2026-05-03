@@ -1,7 +1,7 @@
 import { prisma } from "./prisma.js";
 import { cosineSimilarity, embedKnowledgeText, getKnowledgeEmbeddingDimensions } from "./knowledgeEmbedding.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
-import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
+import { extractQuerySignals, routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import { getRouterWeights, weightedRouterScore } from "./routerConfig.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 
@@ -255,6 +255,26 @@ function queryConceptTerms(query: string): string[] {
   ]).filter((token) => !GENERIC_QUERY_TERMS.has(token)).slice(0, 32);
 }
 
+function queryProfileSignals(query: string): string[] {
+  const signals = extractQuerySignals(query);
+  return unique([
+    ...signals.phraseHints,
+    ...signals.significantTerms,
+    ...signals.namedEntities,
+  ]).filter((token) => !GENERIC_QUERY_TERMS.has(normalize(token))).slice(0, 32);
+}
+
+function queryProfileSignalText(query: string): string {
+  return unique([query, ...queryProfileSignals(query)]).join(" ");
+}
+
+function queryAdaptiveTerms(query: string): string[] {
+  return unique([
+    ...queryProfileSignals(query),
+    ...queryConceptTerms(query),
+  ]).filter((token) => !GENERIC_QUERY_TERMS.has(normalize(token))).slice(0, 48);
+}
+
 function profileAnswerableTerms(profile: KnowledgeMetadataProfile): string[] {
   return expandSurfaceConceptTerms([
     ...profile.topicPhrases,
@@ -305,7 +325,7 @@ function profileEmbeddingScore(profile: KnowledgeMetadataProfile, routePlan: Dom
 }
 
 function profileQueryEmbeddingScore(profile: KnowledgeMetadataProfile, query: string): number | null {
-  const queryVector = embedKnowledgeText(query);
+  const queryVector = embedKnowledgeText(queryProfileSignalText(query));
   const signals = [
     { vector: profile.profileEmbedding, weight: 0.4 },
     { vector: profile.summaryEmbedding, weight: 0.22 },
@@ -323,7 +343,7 @@ function profileQueryEmbeddingScore(profile: KnowledgeMetadataProfile, query: st
 }
 
 function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: string): number {
-  const concepts = queryConceptTerms(query);
+  const concepts = queryAdaptiveTerms(query);
   const allTerms = queryTokens(query);
   const text = normalize(metadataText(profile));
   const answerableText = normalize(profileAnswerableTerms(profile).join(" "));
@@ -452,7 +472,7 @@ function metadataCandidateForQuery(
   if (!query?.trim()) return null;
   const profiles = collectionMetadataProfiles(collection);
   if (profiles.length === 0) return null;
-  const concepts = queryConceptTerms(query);
+  const concepts = queryAdaptiveTerms(query);
   const scored = profiles
     .map((profile) => {
       const text = normalize(metadataText(profile));
