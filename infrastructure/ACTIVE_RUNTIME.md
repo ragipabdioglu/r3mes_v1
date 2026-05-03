@@ -75,18 +75,26 @@ No-source, source-suggestion, privacy-safe, and alignment-mismatch fallbacks do 
 
 ## Cross-Encoder Reranker Gate
 
-The backend keeps deterministic reranking by default. Enable the ai-engine cross-encoder only after smoke passes:
+The quality profile uses the ai-engine cross-encoder. Deterministic reranking remains available as a fallback/smoke escape hatch:
 
 ```powershell
-pnpm --filter @r3mes/backend-api run smoke:reranker-provider
 $env:R3MES_RERANKER_MODE='model'
+$env:R3MES_REQUIRE_REAL_RERANKER='1'
+pnpm --filter @r3mes/backend-api run smoke:reranker-provider
+```
+
+For the full quality-provider gate, run:
+
+```powershell
+pnpm --filter @r3mes/backend-api run smoke:quality-providers
 ```
 
 Runtime controls:
 
 | Env | Default | Purpose |
 | --- | --- | --- |
-| `R3MES_RERANKER_MODE` | `deterministic` | Set to `model` to call ai-engine `/v1/rerank`. |
+| `R3MES_RERANKER_MODE` | `model` in quality profile | Set to `model` to call ai-engine `/v1/rerank`; deterministic is a fallback/smoke escape hatch. |
+| `R3MES_REQUIRE_REAL_RERANKER` | `1` in quality profile | Makes reranker smoke fail if ai-engine reports fallback. |
 | `R3MES_RERANKER_CANDIDATE_LIMIT` | `5` | Caps cross-encoder work after cheap pruning. |
 | `R3MES_RERANKER_TIMEOUT_MS` | `8000` | Fallback to deterministic reranker if ai-engine is slow. |
 | `R3MES_RERANKER_MODEL_WEIGHT` | `1.75` | Blends model score into deterministic score. |
@@ -100,7 +108,7 @@ Qdrant reindex must not run on silent deterministic fallback when `R3MES_EMBEDDI
 pnpm ai-engine:embedding
 $env:R3MES_REQUIRE_REAL_EMBEDDINGS='1'
 pnpm --filter @r3mes/backend-api run smoke:embedding-provider
-Remove-Item Env:R3MES_REQUIRE_REAL_EMBEDDINGS
+$env:R3MES_QDRANT_REINDEX_REQUIRE_REAL_EMBEDDINGS='1'
 pnpm --filter @r3mes/backend-api run qdrant:reindex
 ```
 
