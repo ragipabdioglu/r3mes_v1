@@ -39,6 +39,24 @@ function Test-JsonHealth([string] $Url) {
   }
 }
 
+function Invoke-DockerPsStatus {
+  $job = Start-Job -ScriptBlock {
+    docker ps --format "table {{.Names}}`t{{.Status}}`t{{.Ports}}"
+  }
+  try {
+    if (Wait-Job $job -Timeout 8) {
+      Receive-Job $job
+    } else {
+      Stop-Job $job -ErrorAction SilentlyContinue
+      "Docker status: unavailable (docker ps timed out)"
+    }
+  } catch {
+    "Docker status: unavailable ($($_.Exception.Message))"
+  } finally {
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Show-Status {
   $rows = @(
     [pscustomobject]@{ Service = "backend-api"; Port = 3000; OK = (Test-JsonHealth "http://127.0.0.1:3000/health") }
@@ -60,7 +78,7 @@ function Show-Status {
   }
 
   "Docker:"
-  docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+  Invoke-DockerPsStatus
 }
 
 function Invoke-AiEngineWarmup {
