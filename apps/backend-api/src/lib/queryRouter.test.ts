@@ -111,9 +111,23 @@ describe("routeQuery", () => {
     expect(signals.intent).toBe("steps");
     expect(signals.possibleDomains).toEqual(["legal"]);
     expect(signals.lexicalTerms).toEqual(expect.arrayContaining(["boşanma", "velayet"]));
+    expect(signals.significantTerms).toEqual(expect.arrayContaining(["boşanma", "davasında", "velayet"]));
+    expect(signals.significantTerms).not.toContain("hangi");
+    expect(signals.phraseHints).toEqual(expect.arrayContaining(["boşanma davasında", "davasında velayet"]));
     expect(signals.routeHints).toMatchObject({
       domain: "legal",
       confidence: "high",
+      authority: "weak",
     });
+  });
+
+  it("keeps route hints weak when generic terms should drive adaptive profiles", () => {
+    const signals = extractQuerySignals("Trafik eğitim atölyesinde öğrenci güvenliği için hangi hazırlıklar yapılmalı?");
+
+    expect(signals.significantTerms).toEqual(
+      expect.arrayContaining(["trafik", "eğitim", "atölyesinde", "öğrenci", "güvenliği"]),
+    );
+    expect(signals.phraseHints).toEqual(expect.arrayContaining(["trafik eğitim", "eğitim atölyesinde"]));
+    expect(signals.routeHints.authority).toBe("weak");
   });
 });

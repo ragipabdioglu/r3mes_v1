@@ -19,12 +19,15 @@ export interface QuerySignals {
   intent: "steps" | "triage" | "explain" | "compare" | "reassure" | "unknown";
   riskLevel: RouteRiskLevel;
   lexicalTerms: string[];
+  significantTerms: string[];
+  phraseHints: string[];
   namedEntities: string[];
   possibleDomains: AnswerDomain[];
   routeHints: {
     domain: AnswerDomain;
     subtopics: string[];
     confidence: RouteConfidence;
+    authority: "weak";
     retrievalHints: string[];
     mustIncludeTerms: string[];
   };
@@ -97,6 +100,59 @@ function extractNamedEntities(text: string): string[] {
     text
       .match(/\b[A-ZÇĞİÖŞÜ][\p{L}\p{N}-]*(?:\s+[A-ZÇĞİÖŞÜ][\p{L}\p{N}-]*){0,3}\b/gu) ?? [],
   ).slice(0, 8);
+}
+
+const SIGNAL_STOPWORDS = new Set([
+  "acaba",
+  "ama",
+  "bana",
+  "beni",
+  "benim",
+  "bir",
+  "bunu",
+  "icin",
+  "için",
+  "ile",
+  "kisa",
+  "kısa",
+  "mi",
+  "mı",
+  "mu",
+  "mü",
+  "ne",
+  "neden",
+  "nasil",
+  "nasıl",
+  "olarak",
+  "once",
+  "önce",
+  "sonra",
+  "ve",
+  "veya",
+  "hangi",
+  "hazırlamalıyım",
+  "hazirlamaliyim",
+  "yapmalıyım",
+  "yapmaliyim",
+]);
+
+function significantTerms(tokens: string[]): string[] {
+  return unique(
+    tokens
+      .filter((token) => token.length >= 3)
+      .filter((token) => !SIGNAL_STOPWORDS.has(token)),
+  ).slice(0, 16);
+}
+
+function phraseHintsFromTerms(terms: string[]): string[] {
+  const phrases: string[] = [];
+  for (let index = 0; index < terms.length - 1; index += 1) {
+    const left = terms[index];
+    const right = terms[index + 1];
+    if (!left || !right) continue;
+    phrases.push(`${left} ${right}`);
+  }
+  return unique(phrases).slice(0, 10);
 }
 
 const ROUTE_RULES: RouteRule[] = [
@@ -357,6 +413,7 @@ export function routeQuery(userQuery: string): DomainRoutePlan {
 export function extractQuerySignals(userQuery: string): QuerySignals {
   const routeHints = routeQuery(userQuery);
   const tokens = unique(tokenize(userQuery)).slice(0, 24);
+  const terms = significantTerms(tokens);
   const possibleDomains = routeHints.confidence === "low" ? [] : [routeHints.domain];
 
   return {
@@ -365,12 +422,15 @@ export function extractQuerySignals(userQuery: string): QuerySignals {
     intent: inferIntent(normalize(userQuery)),
     riskLevel: routeHints.riskLevel,
     lexicalTerms: tokens,
+    significantTerms: terms,
+    phraseHints: phraseHintsFromTerms(terms),
     namedEntities: extractNamedEntities(userQuery),
     possibleDomains,
     routeHints: {
       domain: routeHints.domain,
       subtopics: routeHints.subtopics,
       confidence: routeHints.confidence,
+      authority: "weak",
       retrievalHints: routeHints.retrievalHints,
       mustIncludeTerms: routeHints.mustIncludeTerms,
     },
