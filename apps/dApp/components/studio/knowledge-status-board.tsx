@@ -45,6 +45,58 @@ function VisibilityBadge({ visibility }: { visibility: KnowledgeVisibility }) {
   );
 }
 
+function readinessState(item: KnowledgeCollectionListItem): {
+  label: string;
+  hint: string;
+  className: string;
+} {
+  if (item.documentCount === 0) {
+    return {
+      label: "Boş",
+      hint: "Henüz doküman yok",
+      className: "bg-zinc-800/80 text-zinc-300 ring-zinc-700",
+    };
+  }
+  if (item.sourceQuality === "thin" || item.profileConfidence === "low") {
+    return {
+      label: "Temkinli",
+      hint: "Profil zayıf; auto source geniş davranır",
+      className: "bg-amber-500/10 text-amber-100 ring-amber-500/35",
+    };
+  }
+  if (item.sourceQuality === "structured" || item.profileConfidence === "high") {
+    return {
+      label: "Hazır",
+      hint: "Profil güçlü; chat kaynak seçimi için uygun",
+      className: "bg-emerald-500/15 text-emerald-100 ring-emerald-500/35",
+    };
+  }
+  return {
+    label: "İndeksli",
+    hint: "Profil var; kalite sinyali orta seviyede",
+    className: "bg-cyan-500/10 text-cyan-100 ring-cyan-500/35",
+  };
+}
+
+function ReadinessBadge({ item }: { item: KnowledgeCollectionListItem }) {
+  const state = readinessState(item);
+  return (
+    <span
+      title={state.hint}
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${state.className}`}
+    >
+      {state.label}
+    </span>
+  );
+}
+
+function profileSignal(item: KnowledgeCollectionListItem): string {
+  const quality = item.sourceQuality ?? "profile";
+  const confidence = item.profileConfidence ?? "unknown";
+  const version = item.profileVersion ? `v${item.profileVersion}` : "v-";
+  return `${quality} / ${confidence} / ${version}`;
+}
+
 function isInternalKnowledgeCollection(collection: KnowledgeCollectionListItem): boolean {
   const value = `${collection.name} ${collection.id}`.toLocaleLowerCase("tr-TR");
   return /\b(smoke|demo|test|dev|debug)\b/.test(value) || value.includes("raw legal upload");
@@ -181,6 +233,11 @@ export function KnowledgeStatusBoard() {
       return `${item.name} ${item.id} ${item.visibility}`.toLocaleLowerCase("tr-TR").includes(searchTerm);
     })
     .sort(sortKnowledgeItems);
+  const publicCount = items.filter((item) => item.visibility === "PUBLIC").length;
+  const privateCount = items.filter((item) => item.visibility === "PRIVATE").length;
+  const readyCount = items.filter((item) => readinessState(item).label === "Hazır").length;
+  const cautiousCount = items.filter((item) => readinessState(item).label === "Temkinli").length;
+  const documentCount = items.reduce((sum, item) => sum + item.documentCount, 0);
 
   return (
     <motion.section
@@ -200,10 +257,49 @@ export function KnowledgeStatusBoard() {
         <button
           type="button"
           onClick={() => void load()}
-          className="text-xs text-violet-400 hover:text-violet-300"
+          className="text-xs text-cyan-300 hover:text-cyan-200"
         >
           Yenile
         </button>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-4">
+        <div className="rounded-2xl border border-r3mes-border bg-r3mes-surface/45 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+            Collection
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-white">{items.length}</p>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            {privateCount} private · {publicCount} public
+          </p>
+        </div>
+        <div className="rounded-2xl border border-r3mes-border bg-r3mes-surface/45 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+            Doküman
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-white">{documentCount}</p>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            Chat kaynak havuzuna giren içerik
+          </p>
+        </div>
+        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/10 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-100/70">
+            Hazır profil
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-emerald-50">{readyCount}</p>
+          <p className="mt-1 text-[11px] text-emerald-100/60">
+            Auto source için güçlü sinyal
+          </p>
+        </div>
+        <div className="rounded-2xl border border-amber-500/20 bg-amber-950/10 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-100/70">
+            Temkinli
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-amber-50">{cautiousCount}</p>
+          <p className="mt-1 text-[11px] text-amber-100/60">
+            Thin/low profile, broad fallback
+          </p>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -211,7 +307,7 @@ export function KnowledgeStatusBoard() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Koleksiyon ara…"
-          className="min-h-[36px] min-w-[220px] flex-1 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-violet-500/40 focus:outline-none"
+          className="min-h-[36px] min-w-[220px] flex-1 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-cyan-500/40 focus:outline-none"
         />
         {hiddenInternalCount > 0 ? (
           <label className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-xs text-zinc-400">
@@ -219,7 +315,7 @@ export function KnowledgeStatusBoard() {
               type="checkbox"
               checked={showInternal}
               onChange={(e) => setShowInternal(e.target.checked)}
-              className="rounded border-zinc-700 bg-zinc-950 text-violet-500 focus:ring-violet-500/40"
+              className="rounded border-zinc-700 bg-zinc-950 text-cyan-500 focus:ring-cyan-500/40"
             />
             Test/demo göster ({hiddenInternalCount})
           </label>
@@ -255,35 +351,41 @@ export function KnowledgeStatusBoard() {
                       {item.name}
                     </p>
                     <VisibilityBadge visibility={item.visibility} />
+                    <ReadinessBadge item={item} />
                   </div>
                   <p className="truncate font-mono text-[11px] text-zinc-500">
                     {shortId(item.id)}
                   </p>
+                  <p className="text-[11px] leading-relaxed text-zinc-500">
+                    {readinessState(item).hint}
+                  </p>
                 </div>
 
-                <button
-                  type="button"
-                  disabled={
-                    mutatingId === item.id ||
-                    item.documentCount === 0
-                  }
-                  onClick={() => void togglePublish(item)}
-                  className="rounded-lg border border-violet-500/30 bg-violet-950/30 px-3 py-1.5 text-xs font-medium text-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {item.visibility === "PUBLIC"
-                    ? knowledgeStudio.unpublishAction
-                    : knowledgeStudio.publishAction}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void toggleDetail(item)}
-                  className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-700"
-                >
-                  {expandedId === item.id ? "Detayı kapat" : "Detay"}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={
+                      mutatingId === item.id ||
+                      item.documentCount === 0
+                    }
+                    onClick={() => void togglePublish(item)}
+                    className="rounded-lg border border-cyan-500/30 bg-cyan-950/20 px-3 py-1.5 text-xs font-medium text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {item.visibility === "PUBLIC"
+                      ? knowledgeStudio.unpublishAction
+                      : knowledgeStudio.publishAction}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void toggleDetail(item)}
+                    className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-700"
+                  >
+                    {expandedId === item.id ? "Detayı kapat" : "Detay"}
+                  </button>
+                </div>
               </div>
 
-              <dl className="grid gap-2 text-xs text-zinc-400 sm:grid-cols-2 lg:grid-cols-4">
+              <dl className="grid gap-2 text-xs text-zinc-400 sm:grid-cols-2 lg:grid-cols-5">
                 <div>
                   <dt className="text-zinc-500">
                     {knowledgeStudio.documentsLabel}
@@ -298,6 +400,14 @@ export function KnowledgeStatusBoard() {
                   </dt>
                   <dd className="mt-1 text-zinc-200">
                     {details[item.id]?.documents.reduce((sum, doc) => sum + doc.chunkCount, 0) ?? "Detayda"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">
+                    Profil
+                  </dt>
+                  <dd className="mt-1 text-zinc-200">
+                    {profileSignal(item)}
                   </dd>
                 </div>
                 <div>
@@ -319,6 +429,35 @@ export function KnowledgeStatusBoard() {
                   </dd>
                 </div>
               </dl>
+
+              {item.inferredTopic || item.inferredTags?.length || item.lastProfiledAt ? (
+                <div className="rounded-xl border border-zinc-800/70 bg-black/10 px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
+                  {item.inferredTopic ? (
+                    <p>
+                      <span className="text-zinc-500">Algılanan konu:</span>{" "}
+                      <span className="text-zinc-200">{item.inferredTopic}</span>
+                    </p>
+                  ) : null}
+                  {item.inferredTags?.length ? (
+                    <p className="mt-1">
+                      <span className="text-zinc-500">Tag:</span>{" "}
+                      {item.inferredTags.slice(0, 8).map((tag) => (
+                        <span
+                          key={tag}
+                          className="mr-1 inline-flex rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-200"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </p>
+                  ) : null}
+                  {item.lastProfiledAt ? (
+                    <p className="mt-1 text-zinc-500">
+                      Son profil: {new Date(item.lastProfiledAt).toLocaleString("tr-TR")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               {expandedId === item.id ? (
                 <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-3">

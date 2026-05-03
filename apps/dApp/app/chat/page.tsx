@@ -9,7 +9,7 @@ export default function ChatPage() {
   return (
     <div className="space-y-8">
       <div className="space-y-2">
-        <PageIntro title="Çıkarım sohbeti" description={pageIntro.chat} />
+        <PageIntro title="Chat" description={pageIntro.chat} />
         <InferenceRuntimeHint />
       </div>
       <Suspense

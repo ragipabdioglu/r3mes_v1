@@ -230,39 +230,53 @@ function SourceList({
   const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length);
 
   return (
-    <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 px-3 py-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-          {chat.sourceSectionTitle}
-        </p>
-        <p className="text-[10px] text-zinc-500">
-          {sources.length} kaynak kullanıldı
-        </p>
-      </div>
-      <ul className="mt-2 flex flex-wrap gap-1.5">
+    <details className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 px-3 py-2">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-emerald-500/25 bg-emerald-950/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-100">
+              {sources.length} kaynak
+            </span>
+            <span className="text-[11px] text-zinc-500">
+              Yanıt kaynaklı üretildi
+            </span>
+          </div>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            Detay
+          </span>
+        </div>
+      </summary>
+      <ul className="mt-3 space-y-2">
         {visibleSources.map((source, index) => {
           const collection = collections.find((item) => item.id === source.collectionId);
           return (
             <li
               key={`${source.collectionId}-${source.documentId ?? index}-${source.chunkIndex ?? 0}`}
-              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-zinc-800 bg-black/20 px-2.5 py-1 text-[11px] text-zinc-300"
+              className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2 text-[11px] text-zinc-400"
             >
-              <span className="truncate font-medium text-zinc-200">{source.title}</span>
-              {collection ? <VisibilityPill visibility={collection.visibility} /> : null}
-              <span className="font-mono text-[10px] text-zinc-600">
-                {shortId(source.collectionId)}
-                {source.chunkIndex != null ? `#${source.chunkIndex}` : ""}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-zinc-100">{source.title}</span>
+                {collection ? <VisibilityPill visibility={collection.visibility} /> : null}
+                <span className="font-mono text-[10px] text-zinc-600">
+                  {shortId(source.collectionId)}
+                  {source.chunkIndex != null ? ` · chunk ${source.chunkIndex}` : ""}
+                </span>
+              </div>
+              {source.excerpt ? (
+                <p className="mt-1 line-clamp-3 leading-relaxed text-zinc-500">
+                  {source.excerpt}
+                </p>
+              ) : null}
             </li>
           );
         })}
       </ul>
       {hiddenSourceCount > 0 ? (
         <p className="mt-2 text-[11px] text-zinc-500">
-          {hiddenSourceCount} ek kaynak daha var.
+          {hiddenSourceCount} ek kaynak daha gizlendi.
         </p>
       ) : null}
-    </div>
+    </details>
   );
 }
 
