@@ -7,9 +7,26 @@ import {
 const prisma = new PrismaClient();
 const batchSize = Number.parseInt(process.env.R3MES_KNOWLEDGE_METADATA_BACKFILL_BATCH_SIZE || "50", 10);
 const dryRun = process.argv.includes("--dry-run");
+const forceSourceQuality = process.argv.includes("--force-source-quality");
 
 function toJson(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function readSourceQuality(value) {
+  if (!value || typeof value !== "object") return null;
+  const quality = value.sourceQuality;
+  return quality === "structured" || quality === "inferred" || quality === "thin" ? quality : null;
+}
+
+function preserveExplicitSourceQuality(nextMetadata, previousMetadata) {
+  if (forceSourceQuality) return nextMetadata;
+  const previousQuality = readSourceQuality(previousMetadata);
+  if (previousQuality !== "thin") return nextMetadata;
+  return {
+    ...nextMetadata,
+    sourceQuality: "thin",
+  };
 }
 
 async function backfillChunks() {
@@ -34,10 +51,10 @@ async function backfillChunks() {
 
     for (const chunk of chunks) {
       scanned += 1;
-      const autoMetadata = inferKnowledgeAutoMetadata({
+      const autoMetadata = preserveExplicitSourceQuality(inferKnowledgeAutoMetadata({
         title: chunk.document.title,
         content: chunk.content,
-      });
+      }), chunk.autoMetadata);
       if (!dryRun) {
         await prisma.knowledgeChunk.update({
           where: { id: chunk.id },
