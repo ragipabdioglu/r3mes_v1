@@ -132,6 +132,8 @@ function metadataText(value: unknown): string {
     ...(readArray(record.keywords)),
     ...(readArray(record.tags)),
     ...(readArray(record.entities)),
+    ...(readArray(record.topicPhrases)),
+    ...(readArray(record.answerableConcepts)),
     record.summary,
   ].filter((item): item is string => typeof item === "string").join(" ");
 }

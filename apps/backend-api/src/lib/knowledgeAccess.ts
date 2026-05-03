@@ -3,6 +3,7 @@ import { cosineSimilarity, embedKnowledgeText, getKnowledgeEmbeddingDimensions }
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import { getRouterWeights, weightedRouterScore } from "./routerConfig.js";
+import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 
 interface KnowledgeMetadataProfile {
   domain: string;
@@ -146,7 +147,7 @@ function collectionMetadataProfiles(collection: KnowledgeCollectionAccessItem): 
 }
 
 function normalize(text: string): string {
-  return text.toLocaleLowerCase("tr-TR");
+  return normalizeConceptText(text);
 }
 
 export function readKnowledgeCollectionSourceQuality(
@@ -248,7 +249,19 @@ function queryTokens(query: string): string[] {
 }
 
 function queryConceptTerms(query: string): string[] {
-  return queryTokens(query).filter((token) => !GENERIC_QUERY_TERMS.has(token));
+  return unique([
+    ...queryTokens(query),
+    ...expandSurfaceConceptTerms(query, 32),
+  ]).filter((token) => !GENERIC_QUERY_TERMS.has(token)).slice(0, 32);
+}
+
+function profileAnswerableTerms(profile: KnowledgeMetadataProfile): string[] {
+  return expandSurfaceConceptTerms([
+    ...profile.topicPhrases,
+    ...profile.answerableConcepts,
+    ...profile.entities,
+    ...profile.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+  ], 96);
 }
 
 function metadataProfileMatchesDomain(profile: KnowledgeMetadataProfile, domain: string): boolean {
@@ -308,12 +321,7 @@ function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: 
   const concepts = queryConceptTerms(query);
   const allTerms = queryTokens(query);
   const text = normalize(metadataText(profile));
-  const answerableText = normalize([
-    ...profile.topicPhrases,
-    ...profile.answerableConcepts,
-    ...profile.entities,
-    ...profile.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
-  ].join(" "));
+  const answerableText = normalize(profileAnswerableTerms(profile).join(" "));
   const lexicalMatches = concepts.filter((term) => containsTerm(text, term)).length;
   const answerableMatches = concepts.filter((term) => containsTerm(answerableText, term)).length;
   const genericMatches = allTerms
@@ -347,12 +355,7 @@ function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: 
 function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number {
   const text = normalize(metadataText(profile));
   const profileSubtopics = profile.subtopics.map(normalize);
-  const answerableText = normalize([
-    ...profile.topicPhrases,
-    ...profile.answerableConcepts,
-    ...profile.entities,
-    ...profile.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
-  ].join(" "));
+  const answerableText = normalize(profileAnswerableTerms(profile).join(" "));
   const exactDomain = profile.domains.map(normalize).includes(normalize(routePlan.domain));
   const subtopicMatches = routePlan.subtopics.filter((subtopic) => {
     const normalizedSubtopic = normalize(subtopic);
@@ -363,7 +366,11 @@ function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: Doma
     (exactDomain ? 60 : metadataProfileMatchesDomain(profile, routePlan.domain) ? 45 : 0) +
       percentScore(subtopicMatches, Math.max(1, routePlan.subtopics.length)) * 0.4,
   );
-  const lexicalTerms = unique([...routePlan.mustIncludeTerms, ...routePlan.retrievalHints]);
+  const lexicalTerms = unique([
+    ...routePlan.mustIncludeTerms,
+    ...routePlan.retrievalHints,
+    ...expandSurfaceConceptTerms([...routePlan.mustIncludeTerms, ...routePlan.retrievalHints], 32),
+  ]);
   const lexicalMatches = lexicalTerms.filter((term) => containsTerm(text, term)).length;
   const answerableMatches = lexicalTerms.filter((term) => containsTerm(answerableText, term)).length;
   const lexicalKeyword = percentScore(

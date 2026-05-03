@@ -22,6 +22,9 @@ export interface QdrantKnowledgePayload {
   tags: string[];
   keywords: string[];
   entities: string[];
+  topicPhrases: string[];
+  answerableConcepts: string[];
+  negativeHints: string[];
   documentType: string;
   audience: string;
   riskLevel: "low" | "medium" | "high";
@@ -128,6 +131,9 @@ export function buildQdrantPayloadMetadata(opts: {
   | "tags"
   | "keywords"
   | "entities"
+  | "topicPhrases"
+  | "answerableConcepts"
+  | "negativeHints"
   | "documentType"
   | "audience"
   | "riskLevel"
@@ -187,6 +193,18 @@ export function buildQdrantPayloadMetadata(opts: {
       ...stringArray(collection?.entities),
       ...stringArray(document?.entities),
       ...stringArray(chunk?.entities),
+    ]),
+    topicPhrases: uniqueStrings([
+      ...stringArray(documentProfile?.topicPhrases),
+      ...stringArray(chunkProfile?.topicPhrases),
+    ]),
+    answerableConcepts: uniqueStrings([
+      ...stringArray(documentProfile?.answerableConcepts),
+      ...stringArray(chunkProfile?.answerableConcepts),
+    ]),
+    negativeHints: uniqueStrings([
+      ...stringArray(documentProfile?.negativeHints),
+      ...stringArray(chunkProfile?.negativeHints),
     ]),
     documentType: firstString(chunk?.documentType, document?.documentType, collection?.documentType) ?? "knowledge_note",
     audience: firstString(chunk?.audience, document?.audience, collection?.audience) ?? "general_user",

@@ -25,6 +25,98 @@ export function normalizeConceptText(value: string): string {
     .trim();
 }
 
+const LIGHT_TURKISH_SUFFIXES = [
+  "larimizdan",
+  "lerimizden",
+  "larimiz",
+  "lerimiz",
+  "lariniz",
+  "leriniz",
+  "larindan",
+  "lerinden",
+  "larina",
+  "lerine",
+  "lardan",
+  "lerden",
+  "larin",
+  "lerin",
+  "lari",
+  "leri",
+  "imiz",
+  "iniz",
+  "indan",
+  "inden",
+  "undan",
+  "unden",
+  "lar",
+  "ler",
+  "nin",
+  "nun",
+  "im",
+  "in",
+  "um",
+  "un",
+  "si",
+  "su",
+  "dan",
+  "den",
+  "da",
+  "de",
+  "ya",
+  "ye",
+  "a",
+  "e",
+  "i",
+  "u",
+];
+
+function unique(values: string[], limit: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values.map(normalizeConceptText).filter(Boolean)) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function softenFinalConsonant(value: string): string[] {
+  if (value.length < 4) return [value];
+  const last = value.at(-1);
+  if (last === "g") return [value, `${value.slice(0, -1)}k`];
+  if (last === "b") return [value, `${value.slice(0, -1)}p`];
+  if (last === "d") return [value, `${value.slice(0, -1)}t`];
+  return [value];
+}
+
+function lightTokenVariants(value: string): string[] {
+  const normalized = normalizeConceptText(value);
+  const variants = new Set<string>(softenFinalConsonant(normalized));
+  for (const suffix of LIGHT_TURKISH_SUFFIXES) {
+    if (!normalized.endsWith(suffix)) continue;
+    const stem = normalized.slice(0, -suffix.length);
+    if (stem.length < 3) continue;
+    for (const variant of softenFinalConsonant(stem)) variants.add(variant);
+  }
+  return [...variants];
+}
+
+export function expandSurfaceConceptTerms(values: string | string[], limit = 64): string[] {
+  const inputs = Array.isArray(values) ? values : [values];
+  const terms: string[] = [];
+  for (const input of inputs) {
+    const normalized = normalizeConceptText(input);
+    if (!normalized) continue;
+    terms.push(normalized, ...expandConceptTerms(normalized, 16));
+    const tokens = normalized.split(/\s+/).filter((token) => token.length >= 3);
+    terms.push(...tokens);
+    for (const token of tokens) terms.push(...lightTokenVariants(token));
+  }
+  return unique(terms, limit);
+}
+
 const CONCEPT_RULES: CanonicalConceptRule[] = [
   {
     id: "concept:pelvic_pain",
