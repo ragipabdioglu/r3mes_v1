@@ -476,6 +476,75 @@ function metadataCandidateForQuery(
   };
 }
 
+function adaptiveMetadataCandidate(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan | null,
+  query?: string,
+): KnowledgeMetadataRouteCandidate | null {
+  const routeCandidate =
+    routePlan && routePlan.domain !== "general"
+      ? metadataCandidateForRoute(collection, routePlan, query)
+      : null;
+  const queryCandidate = metadataCandidateForQuery(collection, query);
+
+  if (!queryCandidate) return routeCandidate;
+  if (!routeCandidate) return queryCandidate;
+
+  const querySpecificMatchBonus = Math.min(queryCandidate.matchedTerms.length, 6) * 7;
+  const queryQualityBonus =
+    queryCandidate.sourceQuality === "structured"
+      ? 12
+      : queryCandidate.sourceQuality === "inferred"
+        ? 6
+        : 0;
+  const routeThinPenalty = routeCandidate.sourceQuality === "thin" ? 10 : 0;
+  const boostedQueryCandidate = {
+    ...queryCandidate,
+    score: queryCandidate.score + querySpecificMatchBonus + queryQualityBonus,
+  };
+  const queryBeatsRoute = boostedQueryCandidate.score >= routeCandidate.score + 18 - routeThinPenalty;
+
+  return queryBeatsRoute ? boostedQueryCandidate : routeCandidate;
+}
+
+function bestQueryProfileScore(collection: KnowledgeCollectionAccessItem, query?: string): number {
+  if (!query?.trim()) return 0;
+  return Math.max(
+    0,
+    ...collectionMetadataProfiles(collection).map((profile) => scoreMetadataProfileForQuery(profile, query)),
+  );
+}
+
+function bestRouteProfileScore(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan | null,
+  query?: string,
+): number {
+  if (!routePlan || routePlan.domain === "general") return 0;
+  return Math.max(
+    0,
+    ...collectionMetadataProfiles(collection).map((profile) => scoreMetadataProfile(profile, routePlan, query)),
+  );
+}
+
+function adaptiveProfileRoutingScore(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan | null,
+  query?: string,
+): number {
+  const routeScore = bestRouteProfileScore(collection, routePlan, query);
+  const queryCandidate = metadataCandidateForQuery(collection, query);
+  if (!queryCandidate) return routeScore;
+  const specificMatchBonus = Math.min(queryCandidate.matchedTerms.length, 6) * 7;
+  const qualityBonus =
+    queryCandidate.sourceQuality === "structured"
+      ? 10
+      : queryCandidate.sourceQuality === "inferred"
+        ? 5
+        : 0;
+  return Math.max(routeScore, queryCandidate.score + specificMatchBonus + qualityBonus);
+}
+
 function collectionHasMetadataDomainSupport(
   collection: KnowledgeCollectionAccessItem,
   domain: string,
@@ -520,12 +589,7 @@ export function scoreCollectionForRoute(
   let score = collection.visibility === "PRIVATE" ? 8 : 4;
 
   if (!routePlan || routePlan.domain === "general") {
-    const queryScore = query?.trim()
-      ? Math.max(
-          0,
-          ...collectionMetadataProfiles(collection).map((profile) => scoreMetadataProfileForQuery(profile, query)),
-        )
-      : 0;
+    const queryScore = bestQueryProfileScore(collection, query);
     const fallbackLexicalScore = query?.trim()
       ? percentScore(
           queryConceptTerms(query).filter((term) => containsTerm(text, term)).length,
@@ -535,11 +599,9 @@ export function scoreCollectionForRoute(
     return score + Math.max(queryScore, fallbackLexicalScore) + Math.min(collection.documents?.length ?? 0, 5);
   }
 
-  const metadataScore = Math.max(
-    0,
-    ...collectionMetadataProfiles(collection).map((profile) => scoreMetadataProfile(profile, routePlan, query)),
-  );
-  score += metadataScore;
+  const metadataScore = bestRouteProfileScore(collection, routePlan, query);
+  const adaptiveScore = adaptiveProfileRoutingScore(collection, routePlan, query);
+  score += adaptiveScore;
 
   if (metadataScore === 0 && inferred.domain === routePlan.domain) score += 40;
   if (collectionMatchesRoute(collection, routePlan.domain)) score += 20;
@@ -563,8 +625,15 @@ export function scoreCollectionForRoute(
 export function collectionHasSpecificRouteSupport(
   collection: KnowledgeCollectionAccessItem,
   routePlan: DomainRoutePlan | null,
+  query?: string,
 ): boolean {
   if (!routePlan || routePlan.domain === "general") return true;
+
+  const queryProfileScore = bestQueryProfileScore(collection, query);
+  const routeProfileScore = bestRouteProfileScore(collection, routePlan, query);
+  if (Math.max(queryProfileScore, routeProfileScore) >= 70 && readKnowledgeCollectionSourceQuality(collection) !== "thin") {
+    return true;
+  }
 
   const text = collectionMetadataText(collection);
   const inferred = routeQuery(text);
@@ -691,9 +760,7 @@ export function rankMetadataRouteCandidates(opts: {
   return opts.collections
     .filter((collection) => !excludedIds.has(collection.id))
     .map((collection) =>
-      opts.routePlan && opts.routePlan.domain !== "general"
-        ? metadataCandidateForRoute(collection, opts.routePlan, opts.query)
-        : metadataCandidateForQuery(collection, opts.query),
+      adaptiveMetadataCandidate(collection, opts.routePlan, opts.query),
     )
     .filter((candidate): candidate is KnowledgeMetadataRouteCandidate => Boolean(candidate))
     .filter((candidate) => candidate.score >= 20)

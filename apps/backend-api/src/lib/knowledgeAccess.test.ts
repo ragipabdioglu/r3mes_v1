@@ -432,6 +432,78 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(metadataCandidates[0]?.reason).toContain("Query-profile");
   });
 
+  it("lets strong query-profile metadata override a misleading route hint for suggestions", async () => {
+    const { rankMetadataRouteCandidates, rankSuggestedKnowledgeCollections } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "Trafik eğitim atölyesinde öğrenci güvenliği için hangi hazırlıklar yapılmalı?";
+    const routePlan = routeQuery(query);
+    const collections = [
+      {
+        id: "legal-traffic",
+        name: "Trafik cezası hukuk arşivi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            version: 1,
+            domains: ["legal"],
+            subtopics: ["trafik"],
+            keywords: ["trafik cezası", "itiraz", "tebligat"],
+            entities: [],
+            documentTypes: ["knowledge_note"],
+            audiences: ["client"],
+            sampleQuestions: ["Trafik cezasına nasıl itiraz edilir?"],
+            summary: "Trafik cezası itirazı için süre, tebligat ve belge kontrolü.",
+            riskLevel: "medium",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileEmbedding: embedKnowledgeText("trafik cezası itiraz tebligat belge hukuk"),
+            sampleQuestionsEmbedding: embedKnowledgeText("Trafik cezasına nasıl itiraz edilir?"),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+      {
+        id: "education-traffic-workshop",
+        name: "Trafik eğitim atölyesi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            version: 1,
+            domains: ["education"],
+            subtopics: ["atolye_guvenligi", "trafik_egitimi"],
+            keywords: ["öğrenci", "güvenlik", "atölye", "trafik eğitimi", "hazırlık"],
+            entities: ["trafik eğitim atölyesi"],
+            topicPhrases: ["öğrenci güvenliği", "trafik eğitim atölyesi", "atölye hazırlığı"],
+            answerableConcepts: ["trafik eğitim atölyesi hazırlığı", "öğrenci güvenliği kontrol listesi"],
+            documentTypes: ["runbook"],
+            audiences: ["teacher"],
+            sampleQuestions: ["Trafik eğitim atölyesinde öğrenci güvenliği için hangi hazırlıklar yapılmalı?"],
+            summary: "Trafik eğitim atölyesi öncesinde öğrenci güvenliği, ekipman kontrolü ve öğretmen hazırlık adımları.",
+            riskLevel: "medium",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileEmbedding: embedKnowledgeText("trafik eğitim atölyesi öğrenci güvenliği ekipman hazırlık öğretmen"),
+            sampleQuestionsEmbedding: embedKnowledgeText(query),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+    ];
+
+    expect(routePlan.domain).toBe("legal");
+
+    const ranked = rankSuggestedKnowledgeCollections({ routePlan, query, collections, limit: 2 });
+    const metadataCandidates = rankMetadataRouteCandidates({ routePlan, query, collections, limit: 2 });
+
+    expect(ranked.map((collection) => collection.id)[0]).toBe("education-traffic-workshop");
+    expect(metadataCandidates.map((collection) => collection.id)[0]).toBe("education-traffic-workshop");
+    expect(metadataCandidates[0]?.reason).toContain("Query-profile");
+  });
+
   it("marks thin profile suggestions as cautious instead of strict evidence", async () => {
     const { explainCollectionRouteSuggestion, rankMetadataRouteCandidates } = await import("./knowledgeAccess.js");
     const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");

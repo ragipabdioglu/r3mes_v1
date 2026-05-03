@@ -232,7 +232,7 @@ function buildSourceSelectionSummary(opts: {
     opts.routePlan.domain === "general" ||
     usedCollectionIds.some((id) => {
       const collection = opts.suggestibleCollections.find((item) => item.id === id);
-      return collection ? collectionHasSpecificRouteSupport(collection, opts.routePlan) : false;
+      return collection ? collectionHasSpecificRouteSupport(collection, opts.routePlan, opts.query) : false;
     });
   const warning =
     opts.accessibleCollectionIds.length === 0
