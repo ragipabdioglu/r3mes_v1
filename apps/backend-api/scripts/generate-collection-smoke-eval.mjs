@@ -164,14 +164,23 @@ function forbiddenTermsFor(profile) {
 }
 
 function positiveCase(collection, profile) {
+  const isThin = profile.sourceQuality === "thin";
   return {
     id: `generated-positive-${slug(collection.id || collection.name)}`,
-    bucket: "generated_positive",
+    bucket: isThin ? "generated_thin_positive" : "generated_positive",
     query: questionForCollection(collection, profile),
     collectionIds: [collection.id],
     expectedRetrievalMode: "true_hybrid",
     expectedConfidence: ["medium", "high"],
-    expectedSafetySeverity: ["pass", "warn"],
+    mustPassSafety: false,
+    expectedSafetySeverity: isThin ? ["warn", "rewrite"] : ["pass", "warn", "rewrite"],
+    ...(isThin
+      ? {
+          expectedRouteDecisionMode: "broad",
+          expectedRouteReasonTerms: ["thin profile"],
+          expectedRouteDecisionConfidence: "medium",
+        }
+      : {}),
     forbiddenSafetyRailIds: ["MISSING_SOURCES", "NO_USABLE_FACTS", "SOURCE_METADATA_MISMATCH", "LOW_LANGUAGE_QUALITY"],
     expectedUsedCollectionIds: [collection.id],
     mustHaveSources: true,
@@ -207,12 +216,48 @@ function suggestionCase(source, sourceProfile, wrong) {
   };
 }
 
+function sameDomainWrongTopicCase(source, sourceProfile, wrong) {
+  return {
+    id: `generated-same-domain-wrong-topic-${slug(source.id)}-from-${slug(wrong.id)}`,
+    bucket: "generated_same_domain_wrong_topic",
+    query: questionForCollection(source, sourceProfile),
+    collectionIds: [wrong.id],
+    includePublic: false,
+    expectedRetrievalMode: "true_hybrid",
+    expectedConfidence: ["low", "medium"],
+    mustPassSafety: false,
+    expectedSafetySeverity: ["warn", "rewrite"],
+    expectedSelectionMode: "selected",
+    expectedRouteDecisionMode: "suggest",
+    expectedSuggestedCollectionIds: [source.id],
+    expectedMetadataCandidateIds: [source.id],
+    expectedRejectedCollectionIds: [wrong.id],
+    maxSources: 0,
+    mustHaveSources: false,
+    minEvidenceFacts: 0,
+    mustNotHaveLowLanguageQuality: true,
+    forbiddenTerms: forbiddenTermsFor(readProfile(wrong.autoMetadata) ?? { domain: "general" }),
+    maxLatencyMs: 30000,
+  };
+}
+
 function findWrongCollection(source, sourceProfile, candidates) {
   return candidates.find((candidate) => {
     if (candidate.id === source.id) return false;
     const profile = readProfile(candidate.autoMetadata);
     if (!profile) return false;
     return normalize(profile.domain) !== normalize(sourceProfile.domain);
+  });
+}
+
+function findSameDomainWrongTopicCollection(source, sourceProfile, candidates) {
+  return candidates.find((candidate) => {
+    if (candidate.id === source.id) return false;
+    const profile = readProfile(candidate.autoMetadata);
+    if (!profile) return false;
+    if (profile.sourceQuality === "thin") return false;
+    if (normalize(profile.domain) !== normalize(sourceProfile.domain)) return false;
+    return overlapScore(sourceProfile, profile) === 0;
   });
 }
 
@@ -265,6 +310,8 @@ async function main() {
     if (hasAmbiguousPeer(collection, profile, collections)) continue;
     const wrong = findWrongCollection(collection, profile, collections);
     if (wrong) cases.push(suggestionCase(collection, profile, wrong));
+    const sameDomainWrong = findSameDomainWrongTopicCollection(collection, profile, collections);
+    if (sameDomainWrong) cases.push(sameDomainWrongTopicCase(collection, profile, sameDomainWrong));
   }
 
   await mkdir(dirname(outFile), { recursive: true });
