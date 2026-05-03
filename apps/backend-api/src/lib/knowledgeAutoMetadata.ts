@@ -108,9 +108,7 @@ function hasMeaningfulProfileSignal(item: KnowledgeAutoMetadata): boolean {
 function collectionSourceQualityForItems(items: KnowledgeAutoMetadata[]): KnowledgeAutoMetadata["sourceQuality"] {
   if (items.some((item) => item.sourceQuality === "structured")) return "structured";
   const meaningfulCount = items.filter(hasMeaningfulProfileSignal).length;
-  if (items.length >= 2 && meaningfulCount >= 2 && items.some((item) => item.sourceQuality === "inferred")) {
-    return "inferred";
-  }
+  if (meaningfulCount >= 1 && items.some((item) => item.sourceQuality === "inferred")) return "inferred";
   return "thin";
 }
 
@@ -212,6 +210,7 @@ function normalizeTerm(text: string): string {
     .toLocaleLowerCase("tr-TR")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ı/g, "i")
     .replace(/[^\p{L}\p{N}\s_-]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -220,6 +219,77 @@ function normalizeTerm(text: string): string {
 function isGenericProfileTerm(term: string): boolean {
   const normalized = normalizeTerm(term);
   return normalized.length < 3 || GENERIC_PROFILE_TERMS.has(normalized);
+}
+
+const PROFILE_STOPWORDS = new Set([
+  "acaba",
+  "ama",
+  "bana",
+  "beni",
+  "benim",
+  "bir",
+  "bunu",
+  "icin",
+  "için",
+  "ile",
+  "mi",
+  "mı",
+  "mu",
+  "mü",
+  "ne",
+  "neden",
+  "nasil",
+  "nasıl",
+  "olarak",
+  "once",
+  "önce",
+  "sonra",
+  "ve",
+  "veya",
+  "hangi",
+  "gibi",
+  "olan",
+  "icin",
+  "için",
+  "gereken",
+  "gerekir",
+  "yapilmali",
+  "yapılmalı",
+  "hazirlanmali",
+  "hazırlanmalı",
+]);
+
+function profileTokens(text: string): string[] {
+  return normalizeTerm(text)
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+    .filter((token) => !PROFILE_STOPWORDS.has(token))
+    .filter((token) => !isGenericProfileTerm(token));
+}
+
+function ngrams(tokens: string[], minSize: number, maxSize: number): string[] {
+  const out: string[] = [];
+  for (let size = minSize; size <= maxSize; size += 1) {
+    for (let index = 0; index <= tokens.length - size; index += 1) {
+      out.push(tokens.slice(index, index + size).join(" "));
+    }
+  }
+  return out;
+}
+
+function extractGenericProfilePhrases(opts: { title: string; content: string; limit?: number }): string[] {
+  const titleTokens = profileTokens(opts.title);
+  const contentTokens = profileTokens(compactSummary(opts.content, 1200));
+  return weightedUnique(
+    [
+      ...ngrams(titleTokens, 2, 4),
+      ...titleTokens,
+      ...ngrams(contentTokens.slice(0, 80), 2, 3),
+      ...contentTokens,
+    ],
+    opts.limit ?? 18,
+  );
 }
 
 function buildTopicPhrases(items: KnowledgeAutoMetadata[]): string[] {
@@ -347,36 +417,43 @@ export function inferKnowledgeAutoMetadata(opts: {
   const card = parseKnowledgeCard(opts.content);
   const routePlan = routeQuery(`${opts.title}\n${card.topic}\n${card.tags.join(" ")}\n${opts.content.slice(0, 1600)}`);
   const structured = Boolean(card.topic.trim() && card.tags.length > 0);
+  const genericPhrases = extractGenericProfilePhrases({
+    title: opts.title,
+    content: card.patientSummary || card.clinicalTakeaway || opts.content,
+  });
   const keywords = unique(
     [
       ...card.tags,
       ...routePlan.mustIncludeTerms,
       ...routePlan.retrievalHints,
-      card.topic,
+      structured ? card.topic : "",
       ...routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+      ...genericPhrases,
     ],
-    16,
+    20,
   );
   const summary = compactSummary(card.patientSummary || card.clinicalTakeaway || opts.content, 420);
   const questionsAnswered = unique(
     [
       ...routePlan.retrievalHints.map((hint) => `${hint} hakkında ne bilinmeli?`),
-      card.topic ? `${card.topic} hakkında ne bilinmeli?` : "",
+      structured && card.topic ? `${card.topic} hakkında ne bilinmeli?` : "",
+      ...genericPhrases.slice(0, 4).map((phrase) => `${phrase} hakkında ne bilinmeli?`),
     ],
     6,
   );
+  const hasGenericProfileSignal = genericPhrases.length >= 3;
 
   return {
     domain: routePlan.domain,
     subtopics: routePlan.subtopics,
     keywords,
-    entities: unique([card.topic, ...card.tags.filter((tag) => tag.length > 3)], 10),
+    entities: unique([structured ? card.topic : "", ...card.tags.filter((tag) => tag.length > 3), ...genericPhrases.slice(0, 6)], 12),
     documentType: inferDocumentType(opts.title, opts.content),
     audience: inferAudience(routePlan.domain, opts.content),
     riskLevel: routePlan.riskLevel,
     summary,
     questionsAnswered,
-    sourceQuality: structured ? "structured" : routePlan.confidence === "low" ? "thin" : "inferred",
+    sourceQuality: structured ? "structured" : routePlan.confidence === "low" && !hasGenericProfileSignal ? "thin" : "inferred",
   };
 }
 

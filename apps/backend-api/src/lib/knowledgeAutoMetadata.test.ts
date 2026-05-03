@@ -128,6 +128,27 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(profile?.updatedAt).toBe("2026-04-29T00:00:00.000Z");
   });
 
+  it("builds useful profile signals for unknown-domain uploads without route rules", () => {
+    const metadata = inferKnowledgeAutoMetadata({
+      title: "Yeni personel onboarding hesap açılışı",
+      content:
+        "Yeni personel başladığında e-posta hesabı, depo erişimi, ekipman zimmeti ve güvenlik eğitimi sırayla tamamlanmalıdır.",
+    });
+    const profile = buildKnowledgeCollectionProfile([metadata], {
+      now: new Date("2026-04-29T00:00:00.000Z"),
+    });
+
+    expect(metadata.domain).toBe("general");
+    expect(metadata.sourceQuality).toBe("inferred");
+    expect(metadata.keywords).toEqual(expect.arrayContaining(["yeni personel", "personel onboarding", "hesap acilisi"]));
+    expect(metadata.questionsAnswered).toEqual(expect.arrayContaining(["yeni personel hakkında ne bilinmeli?"]));
+    expect(profile?.sourceQuality).toBe("inferred");
+    expect(profile?.confidence).toBe("medium");
+    expect(profile?.topicPhrases).toEqual(expect.arrayContaining(["yeni personel", "personel onboarding", "hesap acilisi"]));
+    expect(profile?.answerableConcepts).toEqual(expect.arrayContaining(["yeni personel", "personel onboarding"]));
+    expect(profile?.profileText).toContain("personel onboarding");
+  });
+
   it("keeps profile version stable until profile content changes", () => {
     const first = inferKnowledgeAutoMetadata({
       title: "db migration",
