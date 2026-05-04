@@ -5,6 +5,7 @@ import type { GroundingConfidence } from "./answerSchema.js";
 import { buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
+import { normalizeConceptText } from "./conceptNormalizer.js";
 import { rerankKnowledgeCardsWithDiagnostics, type RerankDiagnostics } from "./modelRerank.js";
 import { prisma } from "./prisma.js";
 import {
@@ -17,6 +18,7 @@ import { embedTextForQdrant } from "./qdrantEmbedding.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
 import { runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
+import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 
 export interface HybridKnowledgeChunk {
   id: string;
@@ -160,7 +162,7 @@ function buildRerankCandidateText(candidate: AlignableKnowledgeCandidate, maxWor
 }
 
 function normalize(text: string): string {
-  return text.toLocaleLowerCase("tr-TR");
+  return normalizeConceptText(text);
 }
 
 function tokenize(text: string): string[] {
@@ -274,7 +276,7 @@ export function candidateMatchesRouteScope(card: KnowledgeCard, chunk: HybridKno
 
 function buildPrismaQueryTokens(query: string, routePlan?: DomainRoutePlan | null): string[] {
   return uniqueTokens([
-    ...tokenize(query),
+    ...buildExpandedQueryTokens(query, routePlan, 24),
     ...(routePlan?.mustIncludeTerms ?? []),
     ...(routePlan?.retrievalHints ?? []),
     ...(routePlan?.subtopics ?? []),
@@ -289,7 +291,8 @@ async function collectQdrantCandidates(opts: {
   accessibleCollectionIds: string[];
   routePlan?: DomainRoutePlan | null;
 }): Promise<HybridKnowledgeCandidate[]> {
-  const vector = await embedTextForQdrant(opts.query);
+  const retrievalQuery = buildExpandedQueryText(opts.query, opts.routePlan);
+  const vector = await embedTextForQdrant(retrievalQuery);
   const points = await searchQdrantKnowledge({
     vector,
     accessibleCollectionIds: opts.accessibleCollectionIds,
@@ -340,7 +343,7 @@ async function collectPrismaCandidates(opts: {
     orderBy: [{ createdAt: "desc" }, { chunkIndex: "asc" }],
     take: Math.max(prismaLimit() * 4, 60),
   });
-  const ranked = rankHybridCandidates(opts.query, chunks)
+  const ranked = rankHybridCandidates(buildExpandedQueryText(opts.query, opts.routePlan), chunks)
     .slice(0, prismaLimit())
     .map((candidate) => {
       const chunk: HybridKnowledgeChunk = {
@@ -392,7 +395,7 @@ export function dedupeHybridKnowledgeCandidates(candidates: HybridKnowledgeCandi
 }
 
 function scoreLightweightCandidate(query: string, candidate: HybridKnowledgeCandidate, routePlan?: DomainRoutePlan | null): number {
-  const queryTokens = new Set(tokenize(query));
+  const queryTokens = new Set(buildExpandedQueryTokens(query, routePlan, 32));
   const text = normalize([
     candidate.card.topic,
     candidate.card.tags.join(" "),
