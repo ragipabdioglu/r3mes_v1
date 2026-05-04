@@ -2,6 +2,7 @@
 
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { useCallback, useState } from "react";
 
 import { postKnowledgeMultipart } from "@/lib/api/knowledge";
@@ -114,7 +115,7 @@ export function KnowledgeUploadPanel() {
             value={collectionName}
             onChange={(e) => setCollectionName(e.target.value)}
             placeholder={knowledgeStudio.collectionNamePlaceholder}
-            className="mt-2 w-full rounded-lg border border-r3mes-border bg-r3mes-surface px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:border-violet-500/50 focus:outline-none focus:ring-1 focus:ring-violet-500/30"
+            className="mt-2 w-full rounded-lg border border-r3mes-border bg-r3mes-surface px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
           />
         </div>
         <div>
@@ -125,7 +126,7 @@ export function KnowledgeUploadPanel() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={knowledgeStudio.documentTitlePlaceholder}
-            className="mt-2 w-full rounded-lg border border-r3mes-border bg-r3mes-surface px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:border-violet-500/50 focus:outline-none focus:ring-1 focus:ring-violet-500/30"
+            className="mt-2 w-full rounded-lg border border-r3mes-border bg-r3mes-surface px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
           />
         </div>
       </div>
@@ -140,7 +141,7 @@ export function KnowledgeUploadPanel() {
         onDrop={onDrop}
         className={`relative rounded-2xl border-2 border-dashed px-6 py-16 text-center transition-colors ${
           dragOver
-            ? "border-violet-400/60 bg-violet-950/20"
+            ? "border-cyan-400/60 bg-cyan-950/20"
             : "border-r3mes-border bg-r3mes-surface/40"
         }`}
       >
@@ -150,7 +151,7 @@ export function KnowledgeUploadPanel() {
         <p className="mt-2 text-xs leading-relaxed text-zinc-500">
           {knowledgeStudio.dropzoneHelp}
         </p>
-        <label className="mt-6 inline-flex cursor-pointer rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+        <label className="mt-6 inline-flex cursor-pointer rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500">
           {knowledgeStudio.fileSelectLabel}
           <input
             type="file"
@@ -169,6 +170,27 @@ export function KnowledgeUploadPanel() {
         <li>{knowledgeStudio.privateFirstHint}</li>
       </ul>
 
+      <div className="grid gap-2 text-xs sm:grid-cols-3">
+        <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/10 p-3">
+          <p className="font-semibold uppercase tracking-wider text-cyan-100">
+            1. Private
+          </p>
+          <p className="mt-1 text-zinc-500">Yükleme önce yalnız size ait kalır.</p>
+        </div>
+        <div className="rounded-xl border border-amber-500/20 bg-amber-950/10 p-3">
+          <p className="font-semibold uppercase tracking-wider text-amber-100">
+            2. Index
+          </p>
+          <p className="mt-1 text-zinc-500">Chunk, embedding ve profil durumu listede görünür.</p>
+        </div>
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-3">
+          <p className="font-semibold uppercase tracking-wider text-emerald-100">
+            3. Chat
+          </p>
+          <p className="mt-1 text-zinc-500">Hazır olunca auto source ile kullanılabilir.</p>
+        </div>
+      </div>
+
       <button
         type="button"
         onClick={() => void submit()}
@@ -179,8 +201,23 @@ export function KnowledgeUploadPanel() {
       </button>
 
       {state.kind === "ok" ? (
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-950/30 p-3 text-sm text-emerald-100">
-          {state.summary}
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/25 p-3 text-sm text-emerald-100">
+          <p>{state.summary}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent("r3mes-studio-knowledge-changed"))}
+              className="rounded-lg border border-emerald-500/30 px-3 py-1.5 text-xs font-medium text-emerald-50 hover:bg-emerald-500/10"
+            >
+              Listeyi yenile
+            </button>
+            <Link
+              href="/chat"
+              className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-emerald-950 hover:bg-emerald-400"
+            >
+              Chat'e git
+            </Link>
+          </div>
         </div>
       ) : null}
       {state.kind === "err" ? (

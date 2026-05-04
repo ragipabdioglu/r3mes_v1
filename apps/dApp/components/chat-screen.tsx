@@ -34,6 +34,13 @@ import {
 const TEMPLATE_TOKEN_RE = /<\/?\|im_(?:start|end)\|>/g;
 const CHAT_DEBUG_ENABLED = getChatDebugEnabled();
 
+const SUGGESTED_PROMPTS = [
+  "Seçili kaynaklara göre bu konuyu kısa ve net açıkla.",
+  "Bu kaynakta hangi durumlarda dikkatli olunmalı?",
+  "Production migration öncesi neyi kontrol etmeliyim?",
+  "Smear sonucum temiz ama kasık ağrım var. Ne yapmalıyım?",
+];
+
 type ChatTurn = ChatMessage & {
   sources?: ChatSourceCitation[];
   retrievalDebug?: ChatRetrievalDebug;
@@ -440,6 +447,9 @@ function SourceSelectionActionBadge({
     : selection.hasSources
       ? "Kaynak temkinli"
       : "Kaynak bulunamadı";
+  const emptySourceMessage = !selection.hasSources
+    ? "Seçili veya erişilebilir kaynaklar bu soruyu yeterince desteklemedi. Uygun öneriye tıklayıp aynı soruyu tekrar gönderebilirsiniz."
+    : null;
   return (
     <div
       className={`mt-3 rounded-xl border px-3 py-2 text-[11px] leading-relaxed ${
@@ -458,6 +468,9 @@ function SourceSelectionActionBadge({
       ) : null}
       {selection.warning ? (
         <p className="mt-1">{selection.warning}</p>
+      ) : null}
+      {emptySourceMessage ? (
+        <p className="mt-1 text-zinc-300">{emptySourceMessage}</p>
       ) : null}
       {actionSuggestions.length > 0 ? (
         <div className="mt-2">
@@ -480,7 +493,7 @@ function SourceSelectionActionBadge({
             ))}
           </div>
           <p className="mt-1 text-zinc-500">
-            Öneriye tıklayınca chat bu kaynakla sınırlandırılır.
+            Öneriye tıklayınca chat bu kaynakla sınırlandırılır; ardından aynı soruyu yeniden gönderin.
           </p>
         </div>
       ) : null}
@@ -609,6 +622,10 @@ export function ChatScreen() {
       const collection = collections.find((item) => item.id === id);
       return collection && isInternalKnowledgeCollection(collection) ? true : current;
     });
+  }
+
+  function useSuggestedPrompt(prompt: string) {
+    setInput(prompt);
   }
 
   async function send() {
@@ -794,7 +811,7 @@ export function ChatScreen() {
     .slice(0, 3);
 
   return (
-    <div className="flex min-h-[calc(100vh-8rem)] flex-col gap-6">
+    <div className="flex min-h-[calc(100vh-8rem)] flex-col gap-4 sm:gap-6">
       <motion.header
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -1167,11 +1184,31 @@ export function ChatScreen() {
       </motion.header>
 
       <div className="flex min-h-[420px] flex-1 flex-col rounded-2xl border border-zinc-800 bg-zinc-950/50">
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div className="flex-1 space-y-4 overflow-y-auto p-3 sm:p-4">
           {messages.length === 0 ? (
-            <p className="text-sm leading-relaxed text-zinc-500">
-              {hasAdapterContext ? chat.emptyThread : chat.emptyThreadNoAdapter}
-            </p>
+            <div className="rounded-3xl border border-zinc-800/80 bg-gradient-to-br from-zinc-950/80 to-cyan-950/10 p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/70">
+                Auto source chat
+              </p>
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+                Kaynağı sistem seçsin, sen soruya odaklan.
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
+                {hasAdapterContext ? chat.emptyThread : chat.emptyThreadNoAdapter}
+              </p>
+              <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                {SUGGESTED_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => useSuggestedPrompt(prompt)}
+                    className="rounded-2xl border border-zinc-800 bg-black/20 px-3 py-3 text-left text-sm leading-relaxed text-zinc-300 transition hover:border-cyan-400/35 hover:bg-cyan-400/[0.06] hover:text-cyan-50"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : null}
           {messages.map((m, i) => (
             <motion.div
@@ -1181,7 +1218,7 @@ export function ChatScreen() {
               className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${
+                className={`max-w-[92%] rounded-2xl px-4 py-2 text-sm leading-relaxed sm:max-w-[85%] ${
                   m.role === "user"
                     ? "bg-cyan-600/90 text-white"
                     : "border border-zinc-800 bg-zinc-900/80 text-zinc-100"
@@ -1230,7 +1267,7 @@ export function ChatScreen() {
         ) : null}
 
         <div className="border-t border-zinc-800 p-3">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -1248,7 +1285,7 @@ export function ChatScreen() {
               type="button"
               disabled={!canSend}
               onClick={() => void send()}
-              className="rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-[44px] rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Gönder
             </button>
@@ -1256,7 +1293,7 @@ export function ChatScreen() {
               type="button"
               disabled={!streaming}
               onClick={stopStreaming}
-              className="rounded-xl border border-red-500/50 bg-red-950/40 px-4 text-sm font-medium text-red-100 hover:bg-red-950/60 disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-[44px] rounded-xl border border-red-500/50 bg-red-950/40 px-4 text-sm font-medium text-red-100 hover:bg-red-950/60 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Sohbeti Durdur
             </button>
