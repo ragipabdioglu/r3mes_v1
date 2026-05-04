@@ -74,9 +74,13 @@ export function buildAnswerSpec(opts: {
     ...(opts.evidence?.missingInfo ?? []),
   ]);
   const facts = cleanValues([...directFacts, ...supportingFacts, ...usableFacts]);
+  const contradictionUnknowns = unknowns.filter((item) => /çeliş|celis/u.test(item.toLocaleLowerCase("tr-TR")));
   const assessment = directFacts[0] ?? usableFacts[0] ?? "Kaynaklarda bu soruya doğrudan sınırlı bilgi bulundu.";
   const action = supportingFacts[0] ?? directFacts[1] ?? usableFacts[1] ?? fallbackAction(opts.answerDomain);
-  const caution = (riskFacts.length > 0 ? riskFacts : [fallbackCaution(opts.answerDomain)]).slice(0, 3);
+  const caution = cleanValues([
+    ...contradictionUnknowns,
+    ...(riskFacts.length > 0 ? riskFacts : [fallbackCaution(opts.answerDomain)]),
+  ]).slice(0, 3);
   const summary = directFacts[0] ?? usableFacts[0] ?? assessment;
   const answerIntent = opts.evidence?.answerIntent ?? "unknown";
   const tone = opts.groundingConfidence === "low" ? "cautious" : answerIntent === "reassure" ? "calm" : "direct";

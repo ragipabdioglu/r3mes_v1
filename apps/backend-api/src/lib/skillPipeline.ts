@@ -404,8 +404,11 @@ function compactEvidenceLine(line: string, maxChars = 220): string {
 }
 
 const NEGATION_PATTERNS = [
+  /\bgerek(?:li|ir)\s+degildir\b/u,
+  /\bgerek(?:li|ir)\s+değildir\b/u,
   /\bgerek(?:li|ir)\s+degil\b/u,
   /\bgerek(?:li|ir)\s+değil\b/u,
+  /\bgerek\s+yok\b/u,
   /\byapilma(?:z|mali)\b/u,
   /\byapılma(?:z|malı)\b/u,
   /\bonerilme(?:z|meli)\b/u,
@@ -438,6 +441,7 @@ function evidencePolarity(value: string): "negative" | "positive" | "neutral" {
 }
 
 function evidenceSubjectKey(value: string): string {
+  const withoutSourceLabel = value.includes(":") ? value.slice(value.indexOf(":") + 1) : value;
   const generic = new Set([
     "kaynak",
     "source",
@@ -454,11 +458,25 @@ function evidenceSubjectKey(value: string): string {
     "kisa",
     "sakin",
   ]);
-  return tokenizeForOverlap(value)
+  return tokenizeForOverlap(withoutSourceLabel)
     .filter((token) => !GENERIC_OVERLAP_TOKENS.has(token))
     .filter((token) => !generic.has(token))
     .slice(0, 5)
     .join(" ");
+}
+
+function hasContradictionMarker(value: string): boolean {
+  const normalized = normalizeConceptText(value);
+  return [
+    "celisir",
+    "celiski",
+    "çelişir",
+    "çelişki",
+    "farkli yonlendirme",
+    "farklı yönlendirme",
+    "guvenilmez",
+    "güvenilmez",
+  ].some((term) => normalized.includes(normalizeConceptText(term)));
 }
 
 function findContradictoryEvidence(facts: string[]): { conflicts: string[]; conflictedFacts: Set<string> } {
@@ -748,6 +766,10 @@ export function buildDeterministicEvidenceExtraction(
   const addUsableIfRelevant = (sourceLabel: string, fragment: string, opts: { allowGenericGuidance?: boolean; kind?: "direct" | "supporting" } = {}) => {
     const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
     if (!sanitized.trim()) return;
+    if (hasContradictionMarker(sanitized)) {
+      uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
+      return;
+    }
     const overlap = queryOverlapScore(queryTokens, sanitized);
     const coreOverlap = queryCoreOverlapScore(queryTokens, sanitized);
     const strongOverlap = hasStrongQueryOverlap(queryTokens, sanitized);

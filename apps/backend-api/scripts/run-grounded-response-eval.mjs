@@ -71,6 +71,28 @@ function includesForbiddenAny(text, terms) {
   });
 }
 
+function readEvidenceText(evidence, fields) {
+  return fields
+    .flatMap((field) => {
+      const value = evidence?.[field];
+      return Array.isArray(value) ? value : [];
+    })
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        return [
+          item.text,
+          item.claim,
+          item.reason,
+          item.sourceTitle,
+          item.sourceId,
+        ].filter(Boolean).join(" ");
+      }
+      return "";
+    })
+    .join(" ");
+}
+
 const CONCEPT_SYNONYMS = new Map([
   ["muayene", ["muayene", "değerlendirme", "degerlendirme", "kontrol", "doktor"]],
   ["kontrol", ["kontrol", "takip", "değerlendirme", "degerlendirme", "doktor"]],
@@ -395,6 +417,30 @@ function scoreCase(testCase, response) {
     failures.push(`missing_concepts:${missing.join(",")}`);
   }
 
+  if (Array.isArray(testCase.requiredEvidenceTerms) && testCase.requiredEvidenceTerms.length > 0) {
+    const evidenceText = readEvidenceText(evidence, ["usableFacts", "supportingFacts", "directFacts", "redFlags"]);
+    const missingEvidenceTerms = testCase.requiredEvidenceTerms.filter((term) => !normalize(evidenceText).includes(normalize(term)));
+    if (missingEvidenceTerms.length > 0) {
+      failures.push(`missing_evidence_terms:${missingEvidenceTerms.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(testCase.forbiddenEvidenceTerms) && testCase.forbiddenEvidenceTerms.length > 0) {
+    const evidenceText = readEvidenceText(evidence, ["usableFacts", "supportingFacts", "directFacts", "redFlags"]);
+    const forbiddenEvidenceTerms = includesForbiddenAny(evidenceText, testCase.forbiddenEvidenceTerms);
+    if (forbiddenEvidenceTerms.length > 0) {
+      failures.push(`forbidden_evidence_terms:${forbiddenEvidenceTerms.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(testCase.requiredNotSupportedTerms) && testCase.requiredNotSupportedTerms.length > 0) {
+    const notSupportedText = readEvidenceText(evidence, ["notSupported", "missingInfo"]);
+    const missingNotSupportedTerms = testCase.requiredNotSupportedTerms.filter((term) => !normalize(notSupportedText).includes(normalize(term)));
+    if (missingNotSupportedTerms.length > 0) {
+      failures.push(`missing_not_supported_terms:${missingNotSupportedTerms.join(",")}`);
+    }
+  }
+
   return {
     id: testCase.id,
     bucket: testCase.bucket ?? "default",
@@ -408,6 +454,7 @@ function scoreCase(testCase, response) {
     fallbackMode: safetyGate?.fallbackMode ?? null,
     factCount,
     redFlagCount: Array.isArray(evidence?.redFlags) ? evidence.redFlags.length : 0,
+    notSupportedCount: Array.isArray(evidence?.notSupported) ? evidence.notSupported.length : 0,
     alignmentFastFailed: alignment?.fastFailed ?? null,
     alignmentDroppedCandidateCount: alignment?.droppedCandidateCount ?? null,
     rerankerMode: reranker?.mode ?? null,
@@ -487,6 +534,38 @@ async function runCase(opts, testCase) {
     if (!response.ok) {
       const text = await response.text();
       lastError = `http:${response.status}`;
+      const expectedHttpStatus = Number(testCase.expectedHttpStatus ?? 0);
+      if (expectedHttpStatus === response.status) {
+        let errorCode = "";
+        try {
+          const parsedError = JSON.parse(text);
+          errorCode = typeof parsedError?.error === "string" ? parsedError.error : "";
+        } catch {
+          errorCode = "";
+        }
+        const expectedErrorCode = typeof testCase.expectedErrorCode === "string" ? testCase.expectedErrorCode : "";
+        const failures = expectedErrorCode && errorCode !== expectedErrorCode
+          ? [`error_code:${errorCode || "missing"}`]
+          : [];
+        return {
+          id: testCase.id,
+          bucket: testCase.bucket ?? "default",
+          ok: failures.length === 0,
+          failures,
+          confidence: null,
+          sourceCount: 0,
+          safetyPass: null,
+          safetySeverity: null,
+          safetyRailIds: [],
+          fallbackMode: null,
+          factCount: 0,
+          redFlagCount: 0,
+          alignmentFastFailed: null,
+          alignmentDroppedCandidateCount: null,
+          latencyMs: Date.now() - started,
+          content: text.slice(0, 500),
+        };
+      }
       if (response.status >= 500 && attempt < attempts) continue;
       return {
         id: testCase.id,

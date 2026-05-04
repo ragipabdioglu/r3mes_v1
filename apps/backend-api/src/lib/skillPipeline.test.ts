@@ -274,6 +274,27 @@ Rollback planı production migration öncesi gerekli değil, doğrudan migration
     );
   });
 
+  it("flags contradiction wording from retrieved cards instead of smoothing it over", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Production migration için rollback planı gerekli mi?",
+      cards: [
+        {
+          sourceId: "safe",
+          title: "safe-runbook",
+          rawContent: `Key Takeaway: Rollback planı olmadan production migration çalıştırılmamalıdır.`,
+        },
+        {
+          sourceId: "unsafe",
+          title: "unsafe-runbook",
+          rawContent: `Key Takeaway: Rollback planı production migration için gerekli değildir iddiası diğer kaynakla çelişir.`,
+        },
+      ],
+    });
+
+    expect(extraction.notSupported.join(" ")).toContain("çeliş");
+    expect(extraction.usableFacts.join(" ")).not.toContain("gerekli değildir");
+  });
+
   it("extracts markdown table rows as readable evidence fragments", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Migration öncesi yedek ve rollback için ne kontrol edilmeli?",

@@ -1281,9 +1281,14 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const retrievalWasUsed = retrieval.contextText.length > 0;
       if (
         !stream &&
-        requestedCollectionIds.length > 0 &&
+        retrievalQuery &&
         retrieval.sources.length === 0 &&
-        retrieval.groundingConfidence === "low"
+        retrieval.groundingConfidence === "low" &&
+        (
+          requestedCollectionIds.length > 0 ||
+          sourceSelection.routeDecision.mode === "suggest" ||
+          sourceSelection.routeDecision.mode === "no_source"
+        )
       ) {
         const deterministicAnswer = buildDeterministicGroundedAnswer({
           answerDomain,
