@@ -111,9 +111,9 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(profile?.version).toBe(2);
     expect(profile?.profileVersion).toBe(1);
     expect(profile?.domains[0]).toBe("legal");
-    expect(profile?.keywords).toEqual(expect.arrayContaining(["boşanma", "velayet", "nafaka"]));
-    expect(profile?.topicPhrases).toEqual(expect.arrayContaining(["boşanma", "velayet", "nafaka"]));
-    expect(profile?.answerableConcepts).toEqual(expect.arrayContaining(["boşanma", "velayet", "nafaka"]));
+    expect(profile?.keywords).toEqual(expect.arrayContaining(["bosanma", "velayet", "nafaka"]));
+    expect(profile?.topicPhrases).toEqual(expect.arrayContaining(["bosanma", "velayet", "nafaka"]));
+    expect(profile?.answerableConcepts).toEqual(expect.arrayContaining(["bosanma", "velayet", "nafaka"]));
     expect(profile?.confidence).toBe("high");
     expect(profile?.profileText).toContain("Subtopics:");
     expect(profile?.profileText).toContain("Topic phrases:");
@@ -147,6 +147,41 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(profile?.topicPhrases).toEqual(expect.arrayContaining(["yeni personel", "personel onboarding", "hesap acilisi"]));
     expect(profile?.answerableConcepts).toEqual(expect.arrayContaining(["yeni personel", "personel onboarding"]));
     expect(profile?.profileText).toContain("personel onboarding");
+  });
+
+  it("adds normalized Turkish concept aliases to inferred profile signals", () => {
+    const metadata = inferKnowledgeAutoMetadata({
+      title: "kasiklarim agriyo notu",
+      content:
+        "Kullanıcı kasıklarım ağrıyor dediğinde ateş, kanama ve şiddetli ağrı gibi alarm bulguları kontrol edilmelidir.",
+    });
+    const profile = buildKnowledgeCollectionProfile([metadata], {
+      now: new Date("2026-04-29T00:00:00.000Z"),
+    });
+
+    expect(metadata.domain).toBe("medical");
+    expect(metadata.subtopics).toContain("kasik_agrisi");
+    expect(metadata.keywords).toEqual(expect.arrayContaining(["kasik agrisi"]));
+    expect(profile?.topicPhrases).toEqual(expect.arrayContaining(["kasik agrisi", "pelvik agri"]));
+    expect(profile?.answerableConcepts).toEqual(expect.arrayContaining(["kasik agrisi", "pelvik agri"]));
+    expect(profile?.profileText).toContain("pelvik agri");
+  });
+
+  it("keeps unknown-domain profiles useful with ASCII Turkish variants", () => {
+    const metadata = inferKnowledgeAutoMetadata({
+      title: "personel erisim acilisi",
+      content:
+        "Yeni calisan icin eposta hesabi, depo erisimi ve ekipman zimmeti sirayla tamamlanir.",
+    });
+    const profile = buildKnowledgeCollectionProfile([metadata], {
+      now: new Date("2026-04-29T00:00:00.000Z"),
+    });
+
+    expect(metadata.domain).toBe("general");
+    expect(metadata.sourceQuality).toBe("inferred");
+    expect(metadata.keywords).toEqual(expect.arrayContaining(["personel erisim", "eposta hesabi"]));
+    expect(profile?.topicPhrases).toEqual(expect.arrayContaining(["personel erisim", "eposta hesabi"]));
+    expect(profile?.confidence).toBe("medium");
   });
 
   it("keeps profile version stable until profile content changes", () => {

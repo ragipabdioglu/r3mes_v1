@@ -4,6 +4,7 @@ import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { embedKnowledgeText } from "./knowledgeEmbedding.js";
 import type { KnowledgeChunkDraft } from "./knowledgeText.js";
 import { routeQuery } from "./queryRouter.js";
+import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 
 export type KnowledgeRiskLevel = "low" | "medium" | "high";
 
@@ -206,14 +207,7 @@ const GENERIC_PROFILE_TERMS = new Set([
 ]);
 
 function normalizeTerm(text: string): string {
-  return text
-    .toLocaleLowerCase("tr-TR")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/ı/g, "i")
-    .replace(/[^\p{L}\p{N}\s_-]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeConceptText(text);
 }
 
 function isGenericProfileTerm(term: string): boolean {
@@ -292,14 +286,27 @@ function extractGenericProfilePhrases(opts: { title: string; content: string; li
   );
 }
 
+function expandProfileTerms(values: string[], limit: number): string[] {
+  return unique(
+    expandSurfaceConceptTerms(values, limit * 3)
+      .filter((term) => !isGenericProfileTerm(term))
+      .filter((term) => !term.startsWith("concept ")),
+    limit,
+  );
+}
+
 function buildTopicPhrases(items: KnowledgeAutoMetadata[]): string[] {
+  const baseTerms = items.flatMap((item) => [
+    ...item.subtopics.map(phraseFromSubtopic),
+    ...item.keywords.filter((keyword) => !isGenericProfileTerm(keyword)),
+    ...item.entities.filter((entity) => !isGenericProfileTerm(entity)),
+    ...item.questionsAnswered.map(questionToTopicPhrase).filter((phrase) => !isGenericProfileTerm(phrase)),
+  ]);
   return weightedUnique(
-    items.flatMap((item) => [
-      ...item.subtopics.map(phraseFromSubtopic),
-      ...item.keywords.filter((keyword) => !isGenericProfileTerm(keyword)),
-      ...item.entities.filter((entity) => !isGenericProfileTerm(entity)),
-      ...item.questionsAnswered.map(questionToTopicPhrase).filter((phrase) => !isGenericProfileTerm(phrase)),
-    ]),
+    [
+      ...baseTerms,
+      ...expandProfileTerms(baseTerms, 36),
+    ],
     28,
   );
 }
@@ -313,9 +320,11 @@ function buildAnswerableConcepts(opts: {
   return weightedUnique(
     [
       ...opts.topicPhrases,
+      ...expandProfileTerms(opts.topicPhrases, 48),
       ...opts.subtopics.map(phraseFromSubtopic),
       ...opts.entities,
       ...opts.keywords.filter((keyword) => !isGenericProfileTerm(keyword)),
+      ...expandProfileTerms([...opts.subtopics.map(phraseFromSubtopic), ...opts.entities, ...opts.keywords], 48),
     ],
     36,
   );
@@ -421,14 +430,27 @@ export function inferKnowledgeAutoMetadata(opts: {
     title: opts.title,
     content: card.patientSummary || card.clinicalTakeaway || opts.content,
   });
+  const normalizedProfileTerms = expandProfileTerms(
+    [
+      opts.title,
+      card.topic,
+      ...card.tags,
+      ...routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+      ...routePlan.mustIncludeTerms,
+      ...routePlan.retrievalHints,
+      ...genericPhrases,
+    ],
+    28,
+  );
   const keywords = unique(
     [
       ...card.tags,
-      ...routePlan.mustIncludeTerms,
-      ...routePlan.retrievalHints,
       structured ? card.topic : "",
       ...routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
       ...genericPhrases,
+      ...normalizedProfileTerms,
+      ...routePlan.mustIncludeTerms,
+      ...routePlan.retrievalHints,
     ],
     20,
   );
@@ -447,7 +469,15 @@ export function inferKnowledgeAutoMetadata(opts: {
     domain: routePlan.domain,
     subtopics: routePlan.subtopics,
     keywords,
-    entities: unique([structured ? card.topic : "", ...card.tags.filter((tag) => tag.length > 3), ...genericPhrases.slice(0, 6)], 12),
+    entities: unique(
+      [
+        structured ? card.topic : "",
+        ...card.tags.filter((tag) => tag.length > 3),
+        ...genericPhrases.slice(0, 6),
+        ...normalizedProfileTerms.slice(0, 8),
+      ],
+      12,
+    ),
     documentType: inferDocumentType(opts.title, opts.content),
     audience: inferAudience(routePlan.domain, opts.content),
     riskLevel: routePlan.riskLevel,
