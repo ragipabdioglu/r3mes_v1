@@ -4,6 +4,7 @@ import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { extractQuerySignals, routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import { getRouterWeights, weightedRouterScore } from "./routerConfig.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
+import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 
 interface KnowledgeMetadataProfile {
   domain: string;
@@ -239,12 +240,10 @@ const GENERIC_QUERY_TERMS = new Set([
 
 function queryTokens(query: string): string[] {
   return unique(
-    normalize(query)
-      .replace(/[_-]+/g, " ")
-      .split(/[^\p{L}\p{N}]+/u)
-      .map((token) => token.trim())
+    buildExpandedQueryTokens(query, null, 64)
       .filter((token) => token.length >= 3)
-      .filter((token) => !QUERY_STOPWORDS.has(token)),
+      .filter((token) => !token.includes(" "))
+      .filter((token) => !QUERY_STOPWORDS.has(normalize(token))),
   ).slice(0, 24);
 }
 
@@ -265,7 +264,7 @@ function queryProfileSignals(query: string): string[] {
 }
 
 function queryProfileSignalText(query: string): string {
-  return unique([query, ...queryProfileSignals(query)]).join(" ");
+  return unique([buildExpandedQueryText(query, null, 48), ...queryProfileSignals(query)]).join(" ");
 }
 
 function queryAdaptiveTerms(query: string): string[] {

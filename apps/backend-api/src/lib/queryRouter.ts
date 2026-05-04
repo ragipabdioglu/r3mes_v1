@@ -1,4 +1,5 @@
 import type { AnswerDomain } from "./answerSchema.js";
+import { normalizeConceptText } from "./conceptNormalizer.js";
 
 export type RouteRiskLevel = "low" | "medium" | "high";
 export type RouteConfidence = "low" | "medium" | "high";
@@ -43,14 +44,16 @@ interface RouteRule {
 }
 
 function normalize(text: string): string {
-  return text.toLocaleLowerCase("tr-TR");
+  return normalizeConceptText(text);
 }
 
 function tokenize(text: string): string[] {
-  return normalize(text)
-    .split(/[^\p{L}\p{N}-]+/u)
-    .map((token) => token.trim())
-    .filter(Boolean);
+  return unique(
+    normalize(text)
+      .split(/[^\p{L}\p{N}-]+/u)
+      .map((token) => token.trim())
+      .filter(Boolean),
+  );
 }
 
 function unique(values: string[]): string[] {
@@ -69,6 +72,10 @@ function containsTerm(query: string, tokens: string[], term: string): boolean {
   const normalizedTerm = normalize(term);
   if (normalizedTerm.includes(" ")) return query.includes(normalizedTerm);
   if (tokens.includes(normalizedTerm)) return true;
+  if (normalizedTerm.endsWith("k")) {
+    const softened = `${normalizedTerm.slice(0, -1)}g`;
+    if (tokens.some((token) => token.startsWith(softened))) return true;
+  }
   if (normalizedTerm.length < 4) return false;
   return tokens.some((token) => token.startsWith(normalizedTerm));
 }

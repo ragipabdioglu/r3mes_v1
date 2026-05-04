@@ -502,7 +502,7 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(ranked.map((collection) => collection.id)[0]).toBe("education-traffic-workshop");
     expect(metadataCandidates.map((collection) => collection.id)[0]).toBe("education-traffic-workshop");
     expect(metadataCandidates[0]?.reason).toContain("Query-profile");
-    expect(metadataCandidates[0]?.matchedTerms).toEqual(expect.arrayContaining(["trafik eğitim", "öğrenci güvenliği"]));
+    expect(metadataCandidates[0]?.matchedTerms).toEqual(expect.arrayContaining(["trafik egitim", "ogrenci guvenligi"]));
   });
 
   it("marks thin profile suggestions as cautious instead of strict evidence", async () => {

@@ -104,16 +104,28 @@ describe("routeQuery", () => {
     });
   });
 
+  it("uses Turkish normalization signals for route hints without over-routing wrong topics", () => {
+    expect(routeQuery("kasiklarim agriyo, kisa ve sakin ne yapmaliyim?")).toMatchObject({
+      domain: "medical",
+      subtopics: ["kasik_agrisi"],
+    });
+    expect(routeQuery("basim agriyo, kisa ve sakin ne yapmaliyim?")).toMatchObject({
+      domain: "general",
+      confidence: "low",
+      subtopics: [],
+    });
+  });
+
   it("extracts weak query signals without making them the final route authority", () => {
     const signals = extractQuerySignals("Boşanma davasında velayet için hangi belgeleri hazırlamalıyım?");
 
     expect(signals.language).toBe("tr");
     expect(signals.intent).toBe("steps");
     expect(signals.possibleDomains).toEqual(["legal"]);
-    expect(signals.lexicalTerms).toEqual(expect.arrayContaining(["boşanma", "velayet"]));
-    expect(signals.significantTerms).toEqual(expect.arrayContaining(["boşanma", "davasında", "velayet"]));
+    expect(signals.lexicalTerms).toEqual(expect.arrayContaining(["bosanma", "velayet"]));
+    expect(signals.significantTerms).toEqual(expect.arrayContaining(["bosanma", "davasinda", "velayet"]));
     expect(signals.significantTerms).not.toContain("hangi");
-    expect(signals.phraseHints).toEqual(expect.arrayContaining(["boşanma davasında", "davasında velayet"]));
+    expect(signals.phraseHints).toEqual(expect.arrayContaining(["bosanma davasinda", "davasinda velayet"]));
     expect(signals.routeHints).toMatchObject({
       domain: "legal",
       confidence: "high",
@@ -125,9 +137,9 @@ describe("routeQuery", () => {
     const signals = extractQuerySignals("Trafik eğitim atölyesinde öğrenci güvenliği için hangi hazırlıklar yapılmalı?");
 
     expect(signals.significantTerms).toEqual(
-      expect.arrayContaining(["trafik", "eğitim", "atölyesinde", "öğrenci", "güvenliği"]),
+      expect.arrayContaining(["trafik", "egitim", "atolyesinde", "ogrenci", "guvenligi"]),
     );
-    expect(signals.phraseHints).toEqual(expect.arrayContaining(["trafik eğitim", "eğitim atölyesinde"]));
+    expect(signals.phraseHints).toEqual(expect.arrayContaining(["trafik egitim", "egitim atolyesinde"]));
     expect(signals.routeHints.authority).toBe("weak");
   });
 });
