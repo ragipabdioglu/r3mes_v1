@@ -248,6 +248,53 @@ Limitations:
     expect(extraction.missingInfo).toEqual([]);
   });
 
+  it("does not promote contradictory evidence as usable facts", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Production migration öncesi rollback planı gerekli mi?",
+      cards: [
+        {
+          sourceId: "runbook-a",
+          title: "runbook-a",
+          rawContent: `Checklist:
+Rollback planı production migration öncesi gerekli ve hazır olmalıdır.`,
+        },
+        {
+          sourceId: "runbook-b",
+          title: "runbook-b",
+          rawContent: `Checklist:
+Rollback planı production migration öncesi gerekli değil, doğrudan migration yapılabilir.`,
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts).toEqual([]);
+    expect(extraction.notSupported).toEqual(expect.arrayContaining([expect.stringContaining("Çelişen kaynak bilgisi")]));
+    expect(extraction.missingInfo).toEqual(
+      expect.arrayContaining(["Kaynaklar arasında çelişki olduğu için doğrudan öneri çıkarılmadı."]),
+    );
+  });
+
+  it("extracts markdown table rows as readable evidence fragments", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Migration öncesi yedek ve rollback için ne kontrol edilmeli?",
+      cards: [
+        {
+          sourceId: "table-runbook",
+          title: "table-runbook",
+          rawContent: `Checklist:
+| Kontrol | Yapılacak |
+| --- | --- |
+| Yedek | Migration öncesi yedek alınmalı |
+| Rollback | Rollback planı hazır olmalı |`,
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("Yedek - Migration öncesi yedek")]));
+    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("Rollback - Rollback planı")]));
+    expect(extraction.missingInfo).toEqual([]);
+  });
+
   it("extracts evidence from education markdown headings without card-specific labels", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "RAM raporu sonrası BEP planını okulda nasıl konuşmalıyım?",

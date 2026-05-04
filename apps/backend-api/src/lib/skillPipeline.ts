@@ -266,9 +266,27 @@ export function resolveAnswerIntent(opts: {
   };
 }
 
+function normalizeTableLine(line: string): string {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|")) return trimmed;
+  const cells = trimmed
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter(Boolean);
+  if (cells.length === 0 || cells.every((cell) => /^:?-{2,}:?$/.test(cell))) return "";
+  return cells.join(" - ");
+}
+
 function sentenceFragments(text: string, limit = 2): string[] {
-  return text
+  const normalized = text
     .replace(/^\s*[-*]\s+/gm, "")
+    .split(/\n+/)
+    .map(normalizeTableLine)
+    .filter(Boolean)
+    .join("\n");
+  return normalized
     .split(/(?<=[.!?])\s+|\n+/)
     .map((part) => part.trim())
     .filter(Boolean)
@@ -383,6 +401,85 @@ function compactEvidenceLine(line: string, maxChars = 220): string {
   const normalized = line.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, maxChars - 1).trim()}…`;
+}
+
+const NEGATION_PATTERNS = [
+  /\bgerek(?:li|ir)\s+degil\b/u,
+  /\bgerek(?:li|ir)\s+değil\b/u,
+  /\byapilma(?:z|mali)\b/u,
+  /\byapılma(?:z|malı)\b/u,
+  /\bonerilme(?:z|meli)\b/u,
+  /\bönerilme(?:z|meli)\b/u,
+  /\bzorunlu\s+degil\b/u,
+  /\bzorunlu\s+değil\b/u,
+  /\bkontrendike\b/u,
+  /\bkullanma\b/u,
+  /\bkullanilmamali\b/u,
+  /\bkullanılmamalı\b/u,
+];
+
+const AFFIRMATION_PATTERNS = [
+  /\bgerek(?:li|ir)\b/u,
+  /\byapilmali\b/u,
+  /\byapılmalı\b/u,
+  /\bonerilir\b/u,
+  /\bönerilir\b/u,
+  /\bzorunlu\b/u,
+  /\bkullanilmali\b/u,
+  /\bkullanılmalı\b/u,
+  /\bkontrol\s+edilmeli\b/u,
+];
+
+function evidencePolarity(value: string): "negative" | "positive" | "neutral" {
+  const text = normalizeConceptText(value);
+  if (NEGATION_PATTERNS.some((pattern) => pattern.test(text))) return "negative";
+  if (AFFIRMATION_PATTERNS.some((pattern) => pattern.test(text))) return "positive";
+  return "neutral";
+}
+
+function evidenceSubjectKey(value: string): string {
+  const generic = new Set([
+    "kaynak",
+    "source",
+    "gerekli",
+    "gerekir",
+    "degil",
+    "değil",
+    "yapilmali",
+    "yapılmalı",
+    "onerilir",
+    "önerilir",
+    "kontrol",
+    "edilmeli",
+    "kisa",
+    "sakin",
+  ]);
+  return tokenizeForOverlap(value)
+    .filter((token) => !GENERIC_OVERLAP_TOKENS.has(token))
+    .filter((token) => !generic.has(token))
+    .slice(0, 5)
+    .join(" ");
+}
+
+function findContradictoryEvidence(facts: string[]): { conflicts: string[]; conflictedFacts: Set<string> } {
+  const bySubject = new Map<string, { positive: string[]; negative: string[] }>();
+  for (const fact of facts) {
+    const polarity = evidencePolarity(fact);
+    if (polarity === "neutral") continue;
+    const subject = evidenceSubjectKey(fact);
+    if (!subject) continue;
+    const bucket = bySubject.get(subject) ?? { positive: [], negative: [] };
+    bucket[polarity].push(fact);
+    bySubject.set(subject, bucket);
+  }
+  const conflicts: string[] = [];
+  const conflictedFacts = new Set<string>();
+  for (const [subject, bucket] of bySubject.entries()) {
+    if (bucket.positive.length === 0 || bucket.negative.length === 0) continue;
+    for (const fact of [...bucket.positive, ...bucket.negative]) conflictedFacts.add(fact);
+    conflicts.push(`Çelişen kaynak bilgisi: ${subject} için kaynaklar farklı yönlendirme veriyor.`);
+  }
+  return { conflicts: unique(conflicts).slice(0, 3), conflictedFacts };
 }
 
 type EvidenceSectionKind = "direct" | "supporting" | "risk" | "limit";
@@ -676,7 +773,8 @@ export function buildDeterministicEvidenceExtraction(
     sourceIds.push(card.sourceId);
 
     for (const section of cardSections(card)) {
-      for (const fragment of sentenceFragments(section.text, 2)) {
+      const fragmentLimit = section.text.includes("|") ? 6 : 2;
+      for (const fragment of sentenceFragments(section.text, fragmentLimit)) {
         if (section.kind === "direct") {
           addUsableIfRelevant(sourceLabel, fragment, { allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment) });
         } else if (section.kind === "supporting") {
@@ -701,6 +799,22 @@ export function buildDeterministicEvidenceExtraction(
     usableFacts.length === 0
       ? ["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]
       : [];
+  const contradiction = findContradictoryEvidence(unique([...directAnswerFacts, ...supportingContext]));
+  if (contradiction.conflicts.length > 0) {
+    for (let index = directAnswerFacts.length - 1; index >= 0; index -= 1) {
+      if (contradiction.conflictedFacts.has(directAnswerFacts[index] ?? "")) directAnswerFacts.splice(index, 1);
+    }
+    for (let index = supportingContext.length - 1; index >= 0; index -= 1) {
+      if (contradiction.conflictedFacts.has(supportingContext[index] ?? "")) supportingContext.splice(index, 1);
+    }
+    for (let index = usableFacts.length - 1; index >= 0; index -= 1) {
+      if (contradiction.conflictedFacts.has(usableFacts[index] ?? "")) usableFacts.splice(index, 1);
+    }
+    uncertainOrUnusable.push(...contradiction.conflicts);
+    if (usableFacts.length === 0) {
+      missingInfo.push("Kaynaklar arasında çelişki olduğu için doğrudan öneri çıkarılmadı.");
+    }
+  }
   const intentResolution = resolveAnswerIntent({
     userQuery: input.userQuery,
     weakIntent,
