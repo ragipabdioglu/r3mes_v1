@@ -24,9 +24,8 @@ export function getOptionalChatModel(): string | undefined {
 }
 
 /**
- * Resmi varsayılan çıkarım hattı (BitNet / QVAC vb.) ORTAK kararı sonrası tek cümle ürün dili.
- * Boş bırakılırsa hiçbir ekranda runtime satırı gösterilmez — erken taahhüt yok.
- * Flip günü için hazır metin: `BITNET_DEFAULT_RUNTIME_PUBLIC_LINE` (`@/lib/ui/product-copy`).
+ * Resmi varsayılan çıkarım hattı için tek cümle ürün dili.
+ * Boş bırakılırsa hiçbir ekranda runtime satırı gösterilmez.
  */
 export function getOptionalInferenceRuntimePublicLine(): string | undefined {
   const s = process.env.NEXT_PUBLIC_INFERENCE_RUNTIME_CONTEXT?.trim();
