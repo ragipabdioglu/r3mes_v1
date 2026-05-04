@@ -20,6 +20,7 @@ const outFile = resolve(
 const wallet = process.env.R3MES_DEV_WALLET || "0x0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d";
 const maxCollections = Number(argValue("--max-collections", "12"));
 const includeThin = process.argv.includes("--include-thin");
+const maxNormalizationCases = Number(argValue("--max-normalization-cases", "8"));
 
 function asStringArray(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()) : [];
@@ -61,6 +62,16 @@ function normalize(value) {
     .trim();
 }
 
+function asciiFold(value) {
+  return normalize(value)
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c");
+}
+
 function slug(value) {
   return normalize(value)
     .replace(/\s+/g, "-")
@@ -74,6 +85,9 @@ const GENERIC_TERMS = new Set([
   "belge",
   "bilgi",
   "durum",
+  "adaptive",
+  "adaptive router",
+  "demo",
   "education",
   "genel",
   "hakkinda",
@@ -81,9 +95,13 @@ const GENERIC_TERMS = new Set([
   "kaynak",
   "kontrol",
   "legal",
+  "raw",
+  "router",
+  "smoke",
   "risk",
   "sure",
   "takip",
+  "upload",
 ]);
 
 function conceptTerms(profile, limit = 3) {
@@ -158,6 +176,21 @@ function questionForCollection(collection, profile) {
   return `${collection.name} kaynağına göre kısa ve güvenli bir özet verir misin?`;
 }
 
+function normalizedQuestionForCollection(collection, profile) {
+  const terms = conceptTerms(profile, 3);
+  const docSignal = primaryDocumentSignal(collection);
+  const docSubject = docSignal?.topic || docSignal?.terms.find((term) => !GENERIC_TERMS.has(normalize(term)));
+  const subject = docSubject || terms[0] || collection.name;
+  const foldedSubject = asciiFold(subject);
+  if (!foldedSubject || foldedSubject.length < 3) return null;
+  if (profile.domain === "medical") return `${foldedSubject} icin kisa sakin ne yapmaliyim?`;
+  if (profile.domain === "legal") return `${foldedSubject} icin hangi belge ve surelere bakmaliyim?`;
+  if (profile.domain === "education") return `${foldedSubject} icin okul basvuru adimlarinda neyi kontrol etmeliyim?`;
+  if (profile.domain === "finance") return `${foldedSubject} icin risk ve kayip ihtimalini nasil degerlendirmeliyim?`;
+  if (profile.domain === "technical") return `${foldedSubject} icin once hangi guvenli adimlari kontrol etmeliyim?`;
+  return `${foldedSubject} icin kisa maddeli neyi kontrol etmeliyim?`;
+}
+
 function forbiddenTermsFor(profile) {
   const terms = conceptTerms(profile, 4);
   return terms.length > 0 ? terms : [profile.domain].filter(Boolean);
@@ -169,6 +202,36 @@ function positiveCase(collection, profile) {
     id: `generated-positive-${slug(collection.id || collection.name)}`,
     bucket: isThin ? "generated_thin_positive" : "generated_positive",
     query: questionForCollection(collection, profile),
+    collectionIds: [collection.id],
+    expectedRetrievalMode: "true_hybrid",
+    expectedConfidence: ["medium", "high"],
+    mustPassSafety: false,
+    expectedSafetySeverity: isThin ? ["warn", "rewrite"] : ["pass", "warn", "rewrite"],
+    ...(isThin
+      ? {
+          expectedRouteDecisionMode: "broad",
+          expectedRouteReasonTerms: ["thin profile"],
+          expectedRouteDecisionConfidence: "medium",
+        }
+      : {}),
+    forbiddenSafetyRailIds: ["MISSING_SOURCES", "NO_USABLE_FACTS", "SOURCE_METADATA_MISMATCH", "LOW_LANGUAGE_QUALITY"],
+    expectedUsedCollectionIds: [collection.id],
+    mustHaveSources: true,
+    minEvidenceFacts: 1,
+    maxSources: 3,
+    mustNotHaveLowLanguageQuality: true,
+    maxLatencyMs: 30000,
+  };
+}
+
+function normalizedPositiveCase(collection, profile) {
+  const query = normalizedQuestionForCollection(collection, profile);
+  if (!query) return null;
+  const isThin = profile.sourceQuality === "thin";
+  return {
+    id: `generated-normalized-positive-${slug(collection.id || collection.name)}`,
+    bucket: isThin ? "generated_thin_normalized_positive" : "generated_normalized_positive",
+    query,
     collectionIds: [collection.id],
     expectedRetrievalMode: "true_hybrid",
     expectedConfidence: ["medium", "high"],
@@ -206,6 +269,7 @@ function suggestionCase(source, sourceProfile, wrong) {
     expectedRouteDecisionMode: "suggest",
     expectedSuggestedCollectionIds: [source.id],
     expectedMetadataCandidateIds: [source.id],
+    expectedMetadataCandidateSourceQualities: [sourceProfile.sourceQuality],
     expectedRejectedCollectionIds: [wrong.id],
     maxSources: 0,
     mustHaveSources: false,
@@ -231,6 +295,7 @@ function sameDomainWrongTopicCase(source, sourceProfile, wrong) {
     expectedRouteDecisionMode: "suggest",
     expectedSuggestedCollectionIds: [source.id],
     expectedMetadataCandidateIds: [source.id],
+    expectedMetadataCandidateSourceQualities: [sourceProfile.sourceQuality],
     expectedRejectedCollectionIds: [wrong.id],
     maxSources: 0,
     mustHaveSources: false,
@@ -306,6 +371,14 @@ async function main() {
   for (const { collection, profile } of eligible) {
     cases.push(positiveCase(collection, profile));
   }
+  let normalizationCases = 0;
+  for (const { collection, profile } of eligible) {
+    if (normalizationCases >= maxNormalizationCases) break;
+    const testCase = normalizedPositiveCase(collection, profile);
+    if (!testCase) continue;
+    cases.push(testCase);
+    normalizationCases += 1;
+  }
   for (const { collection, profile } of eligible) {
     if (hasAmbiguousPeer(collection, profile, collections)) continue;
     const wrong = findWrongCollection(collection, profile, collections);
@@ -320,6 +393,7 @@ async function main() {
     outFile,
     collections: collections.length,
     eligibleCollections: eligible.length,
+    normalizationCases,
     cases: cases.length,
   }, null, 2));
 }
