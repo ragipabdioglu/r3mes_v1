@@ -106,7 +106,7 @@ const SAFETY_POLICIES: Record<AnswerDomain, DomainSafetyPolicy> = {
     requiredGuidanceTerms: ["risk", "vade", "maliyet", "danışman", "danisman", "kişisel", "kisisel"],
     fallbackGuidance: {
       action:
-        "Kişisel yatırım tavsiyesi vermek doğru olmaz; karar öncesi risk, vade ve kişisel koşullar değerlendirilmelidir.",
+        "Kişisel yatırım tavsiyesi vermek doğru olmaz; karar öncesi risk, vade, kişisel koşullar ve lisanslı danışman desteği değerlendirilmelidir.",
       caution: "Getiri garantisi veya kesin piyasa tahmini yapılamaz.",
       summary: "Finansal karar için kaynak ve risk analizi birlikte ele alınmalıdır.",
     },

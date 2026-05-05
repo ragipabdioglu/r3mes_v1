@@ -479,6 +479,22 @@ function hasContradictionMarker(value: string): boolean {
   ].some((term) => normalized.includes(normalizeConceptText(term)));
 }
 
+function hasSourceScopeExclusion(value: string): boolean {
+  const normalized = normalizeConceptText(value);
+  return [
+    "kaynak degildir",
+    "kaynak değildir",
+    "dogrudan kaynak degildir",
+    "doğrudan kaynak değildir",
+    "icin kaynak degildir",
+    "için kaynak değildir",
+    "konular icin kaynak degildir",
+    "konular için kaynak değildir",
+    "hakkinda kesin yonlendirme yapma",
+    "hakkında kesin yönlendirme yapma",
+  ].some((term) => normalized.includes(normalizeConceptText(term)));
+}
+
 function findContradictoryEvidence(facts: string[]): { conflicts: string[]; conflictedFacts: Set<string> } {
   const bySubject = new Map<string, { positive: string[]; negative: string[] }>();
   for (const fact of facts) {
@@ -623,6 +639,15 @@ function cardSections(card: EvidenceExtractorCardInput): EvidenceSection[] {
   return [...explicitSections, ...extractRawEvidenceSections(card.rawContent)].filter((section) => section.text.trim());
 }
 
+function cardHasQueryScopedExclusion(card: EvidenceExtractorCardInput, queryTokens: Set<string>): boolean {
+  return cardSections(card).some((section) =>
+    sentenceFragments(section.text, section.text.includes("|") ? 6 : 3).some((fragment) => {
+      if (!hasSourceScopeExclusion(fragment)) return false;
+      return queryCoreOverlapScore(queryTokens, fragment) > 0 || queryOverlapScore(queryTokens, fragment) >= 2;
+    }),
+  );
+}
+
 export function buildDeterministicQueryPlan(input: QueryPlannerInput): QueryPlannerOutput {
   const userQuery = input.userQuery.trim();
   const routePlan = routeQuery(userQuery);
@@ -671,14 +696,14 @@ export function buildDeterministicQueryPlan(input: QueryPlannerInput): QueryPlan
     mustIncludeTerms.push("akıntı", "koku", "kaşıntı", "yanma", "ağrı");
   }
 
-  if (hasAny(userQuery, ["hukuk", "dava", "avukat", "sözleşme", "sozlesme", "kira", "tüketici", "tuketici", "ayıplı", "ayipli", "trafik cezası", "itiraz"])) {
+  if (hasAny(userQuery, ["hukuk", "dava", "avukat", "sözleşme", "sozlesme", "kira", "tüketici", "tuketici", "ayıplı", "ayipli", "bozuk ürün", "bozuk urun", "fatura", "satıcı", "satici", "iade", "trafik cezası", "itiraz"])) {
     expectedEvidenceType = "guideline";
     searchQueries.push(
       `${userQuery} hukuki bilgi`,
       `${userQuery} süre belge başvuru`,
       `${userQuery} avukat yetkili kurum`,
     );
-    mustIncludeTerms.push("hukuk", "süre", "belge", "başvuru", "avukat", "sözleşme");
+    mustIncludeTerms.push("hukuk", "süre", "belge", "başvuru", "avukat", "sözleşme", "fatura", "iade");
   }
 
   if (hasAny(userQuery, ["yatırım", "yatirim", "hisse", "borsa", "kripto", "faiz", "kredi", "portföy", "portfoy", "finans"])) {
@@ -766,7 +791,7 @@ export function buildDeterministicEvidenceExtraction(
   const addUsableIfRelevant = (sourceLabel: string, fragment: string, opts: { allowGenericGuidance?: boolean; kind?: "direct" | "supporting" } = {}) => {
     const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
     if (!sanitized.trim()) return;
-    if (hasContradictionMarker(sanitized)) {
+    if (hasContradictionMarker(sanitized) || hasSourceScopeExclusion(sanitized)) {
       uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
       return;
     }
@@ -793,6 +818,12 @@ export function buildDeterministicEvidenceExtraction(
   for (const card of input.cards) {
     const sourceLabel = card.title || card.sourceId;
     sourceIds.push(card.sourceId);
+    if (cardHasQueryScopedExclusion(card, queryTokens)) {
+      uncertainOrUnusable.push(
+        compactEvidenceLine(evidenceLine(sourceLabel, "Kaynak kendi kapsamına göre bu soruya doğrudan dayanak olmadığını belirtiyor.")),
+      );
+      continue;
+    }
 
     for (const section of cardSections(card)) {
       const fragmentLimit = section.text.includes("|") ? 6 : 2;
@@ -806,6 +837,10 @@ export function buildDeterministicEvidenceExtraction(
           });
         } else if (section.kind === "risk") {
           const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
+          if (hasSourceScopeExclusion(sanitized)) {
+            uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
+            continue;
+          }
           const overlap = queryOverlapScore(queryTokens, sanitized);
           if (sanitized && (overlap > 0 || !hasOffQuerySymptom(input.userQuery, sanitized))) {
             redFlags.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));

@@ -299,9 +299,9 @@ const ROUTE_RULES: RouteRule[] = [
   {
     domain: "legal",
     subtopic: "tuketici",
-    terms: ["tüketici", "tuketici", "ayıplı", "ayipli", "iade", "satıcı", "satici"],
+    terms: ["tüketici", "tuketici", "ayıplı", "ayipli", "bozuk ürün", "bozuk urun", "iade", "satıcı", "satici", "fatura", "fotoğraf", "fotograf"],
     hints: ["tüketici başvurusu", "ayıplı ürün", "belge ve başvuru"],
-    include: ["tüketici", "iade", "belge", "başvuru"],
+    include: ["tüketici", "iade", "belge", "başvuru", "fatura"],
   },
   {
     domain: "legal",

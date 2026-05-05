@@ -108,6 +108,23 @@ function relativeScoreFloor(): number {
   return parseNonNegativeFloat(process.env.R3MES_RAG_RELATIVE_SCORE_FLOOR, 0.45);
 }
 
+function evidenceHasOnlyScopeExclusion(evidence: EvidenceExtractorOutput): boolean {
+  if (evidence.usableFacts.length > 0 || evidence.directAnswerFacts.length > 0 || evidence.supportingContext.length > 0) {
+    return false;
+  }
+  const notSupported = normalizeConceptText([
+    ...evidence.notSupported,
+    ...evidence.uncertainOrUnusable,
+    ...evidence.missingInfo,
+  ].join(" "));
+  return [
+    "dogrudan dayanak olmadigini belirtiyor",
+    "kaynak degildir",
+    "dogrudan kaynak degildir",
+    "icin kaynak degildir",
+  ].some((term) => notSupported.includes(normalizeConceptText(term)));
+}
+
 function emptyAlignmentDiagnostics(overrides: Partial<AlignmentDiagnostics> = {}): AlignmentDiagnostics {
   const config = getAlignmentConfig();
   return {
@@ -738,6 +755,31 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       doNotInfer: card.doNotInfer,
     })),
   });
+  if (evidenceHasOnlyScopeExclusion(evidenceRun.output)) {
+    const scopedOutAlignmentDiagnostics = {
+      ...finalAlignmentDiagnostics,
+      droppedCandidateCount: finalAlignmentDiagnostics.droppedCandidateCount + finalCandidates.length,
+      fastFailed: true,
+    };
+    return {
+      contextText: "",
+      sources: [],
+      lowGroundingConfidence: true,
+      groundingConfidence: "low",
+      evidence: evidenceRun.output,
+      diagnostics: {
+        qdrantCandidateCount: qdrantCandidates.length,
+        prismaCandidateCount: prismaCandidates.length,
+        dedupedCandidateCount: deduped.length,
+        preRankedCandidateCount: preRanked.length,
+        rerankedCandidateCount: reranked.length,
+        finalCandidateCount: 0,
+        alignment: scopedOutAlignmentDiagnostics,
+        reranker: rerankRun.diagnostics,
+        retrievalMode: "true_hybrid",
+      },
+    };
+  }
   const brief =
     getRagContextMode() === "detailed"
       ? renderDetailedEvidenceBrief(evidenceRun.output, { groundingConfidence, lowGroundingConfidence })

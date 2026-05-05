@@ -368,4 +368,34 @@ Dikkat: Süre kaçarsa hak kaybı olabilir.`,
       expect.arrayContaining(["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]),
     );
   });
+
+  it("does not promote source scope exclusions as usable evidence", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Başım ağrıyor, kısa ve sakin ne yapmalıyım?",
+      cards: [
+        {
+          sourceId: "near-miss",
+          title: "near-miss-abdominal",
+          rawContent: `Source Summary: Bu kart baş ağrısı veya smear sonucu için kaynak değildir.
+
+Safe Guidance: Ağrı şiddetliyse sağlık kuruluşuna başvurulmalıdır.
+
+Do Not Infer: Kaynakta açık dayanak yoksa baş ağrısı nedeni çıkarma.`,
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts).toEqual([]);
+    expect(extraction.notSupported.join(" ")).toContain("doğrudan dayanak");
+  });
+
+  it("plans consumer defect wording as legal retrieval", () => {
+    const plan = buildDeterministicQueryPlan({
+      userQuery: "Aldığım ürün bozuk çıktı, satıcı iade almıyor. Fatura ile ne yapmalıyım?",
+    });
+
+    expect(plan.routePlan.domain).toBe("legal");
+    expect(plan.expectedEvidenceType).toBe("guideline");
+    expect(plan.mustIncludeTerms).toEqual(expect.arrayContaining(["fatura", "iade"]));
+  });
 });

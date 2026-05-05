@@ -184,6 +184,29 @@ const CONCEPT_RULES: CanonicalConceptRule[] = [
     patterns: [/\btrafik\s+ceza\w*\b/, /\bteblig\w*\b/],
   },
   {
+    id: "concept:consumer_defect",
+    terms: ["ayipli urun", "bozuk urun", "iade", "fatura", "fotograf", "tuketici"],
+    patterns: [
+      /\bayipli\s+urun\w*\b/,
+      /\bbozuk\s+urun\w*\b/,
+      /\biade\w*\b/,
+      /\bfatura\w*\b/,
+      /\bfotograf\w*\b/,
+      /\btuketici\w*\b/,
+    ],
+  },
+  {
+    id: "concept:rent_deposit",
+    terms: ["depozito", "kira depozitosu", "teslim tutanagi", "dekont", "hasar"],
+    patterns: [
+      /\bdepozito\w*\b/,
+      /\bkira\s+depozito\w*\b/,
+      /\bteslim\s+tutanag\w*\b/,
+      /\bdekont\w*\b/,
+      /\bhasar\w*\b/,
+    ],
+  },
+  {
     id: "concept:db_migration",
     terms: ["migration", "yedek", "rollback", "staging"],
     patterns: [/\bmigration\b/, /\byedek\w*\b/, /\brollback\b/, /\bstaging\b/],

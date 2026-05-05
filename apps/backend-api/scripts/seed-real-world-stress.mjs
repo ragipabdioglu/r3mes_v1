@@ -175,6 +175,110 @@ Do Not Infer: Kaynakta açık dayanak yoksa kesin hukuki görüş, ceza sonucu v
     ],
   },
   {
+    id: "stress-clean-legal-consumer",
+    name: "Stress Clean Legal Consumer",
+    ownerWallet: defaultWallet,
+    cards: [
+      {
+        id: "stress-legal-consumer-defect",
+        title: "official-like-legal-consumer-defect",
+        content: `# Practical Knowledge Card: Ayıplı ürün ve tüketici başvurusu
+
+Topic: ayipli urun iade fatura fotograf basvuru
+Tags: legal, tüketici, ayıplı-ürün, iade, fatura, başvuru
+Source: Tüketici uyuşmazlıklarında genel belge ve başvuru hazırlığı notu
+
+Source Summary: Ayıplı ürün uyuşmazlığında fatura, sipariş kaydı, fotoğraf/video, servis formu, satıcı yazışması ve teslim tarihi birlikte saklanmalıdır.
+
+Key Takeaway: Başvuru veya görüşme öncesinde olay tarihi, ürün kusuru, talep edilen çözüm ve eldeki belgeler açıkça sıralanmalıdır.
+
+Safe Guidance: Kişi yazılı kayıt oluşturmalı, belge kopyalarını saklamalı ve tutar/süre/başvuru yolu konusunda güncel yetkili kaynağı kontrol etmelidir.
+
+Red Flags: Süre kaçırma, belge eksikliği, satıcının yazılı yanıt vermemesi veya yüksek bedel varsa hukuki destek gerekebilir.
+
+Do Not Infer: Kaynakta açık dayanak yoksa kesin iade olur, dava kazanılır veya belirli kurum eşiği kesin böyledir deme.`,
+      },
+      {
+        id: "stress-legal-tenant-deposit",
+        title: "official-like-legal-tenant-deposit",
+        content: `# Practical Knowledge Card: Kira depozitosu ve teslim kaydı
+
+Topic: kira depozitosu teslim tutanagi dekont hasar
+Tags: legal, kira, depozito, dekont, teslim-tutanağı, belge
+Source: Kira depozitosu uyuşmazlıklarında belge hazırlığı notu
+
+Source Summary: Depozito iadesinde sözleşme, ödeme dekontu, teslim tutanağı, fotoğraf, hasar kaydı ve yazışmalar önemlidir.
+
+Key Takeaway: Depozito kesintisi varsa kesinti gerekçesi, hasar tespiti ve teslim tarihi belgelere göre karşılaştırılmalıdır.
+
+Safe Guidance: Kişi belgeleri düzenlemeli, yazılı talepte bulunmalı ve hak kaybı riski varsa avukat veya yetkili kurumdan destek almalıdır.
+
+Red Flags: Çok kısa süreli ihtar, yüksek kesinti, belge yokluğu veya icra tehdidi hızlı değerlendirme gerektirebilir.
+
+Do Not Infer: Kaynakta açık dayanak yoksa depozito kesin iade edilir veya kesin kesilir deme.`,
+      },
+    ],
+  },
+  {
+    id: "stress-clean-finance-risk",
+    name: "Stress Clean Finance Risk",
+    ownerWallet: defaultWallet,
+    cards: [
+      {
+        id: "stress-finance-guaranteed-return",
+        title: "official-like-finance-guaranteed-return",
+        content: `# Practical Knowledge Card: Getiri garantisi ve yatırım riski
+
+Topic: getiri garantisi yatirim riski borcla yatirim
+Tags: finance, yatırım, risk, getiri-garantisi, borç, portföy
+Source: Finansal kararlar için genel risk değerlendirme notu
+
+Source Summary: Yatırım kararında getiri vaadi, kayıp ihtimali, vade, likidite ihtiyacı, maliyetler ve kişinin risk profili birlikte değerlendirilmelidir.
+
+Key Takeaway: Yüksek getiri garantisi, borçla yatırım veya anlaşılmayan ürüne para yatırma ciddi risk sinyalidir.
+
+Safe Guidance: Kişi ürün koşullarını okumalı, kayıp ihtimalini hesaba katmalı, acele karar vermemeli ve gerekiyorsa lisanslı yatırım danışmanından destek almalıdır.
+
+Red Flags: Kesin kazanç vaadi, baskıyla karar aldırma, borçla yatırım, şeffaf olmayan ücretler ve lisanssız öneri yüksek risklidir.
+
+Do Not Infer: Kaynakta açık dayanak yoksa al/sat/tut, kesin getiri veya kişiye özel portföy önerisi verme.`,
+      },
+    ],
+  },
+  {
+    id: "stress-long-near-miss-docs",
+    name: "Stress Long Near Miss Docs",
+    ownerWallet: defaultWallet,
+    cards: [
+      {
+        id: "stress-near-miss-medical-abdominal",
+        title: "near-miss-medical-abdominal-pain",
+        content: `# Near Miss Knowledge Card: Genel karın ağrısı
+
+Topic: karin agrisi mide gobek genel triyaj
+Tags: medical, karın-ağrısı, mide, göbek, acil, triyaj
+Source Summary: Genel karın ağrısı; mide, göbek çevresi veya yaygın karın rahatsızlığı için ayrı değerlendirme gerektirir.
+Key Takeaway: Bu kart baş ağrısı, smear sonucu veya KVKK gibi konular için kaynak değildir.
+Safe Guidance: Ağrı şiddetli, sürekli veya ateş/kusma/bayılma eşlik ediyorsa sağlık kuruluşuna başvurulmalıdır.
+Red Flags: Şiddetli ağrı, ateş, kusma, bayılma veya kanama varsa gecikmemek gerekir.
+Do Not Infer: Kaynakta açık dayanak yoksa kasık ağrısı, smear, bebek terlemesi veya baş ağrısı nedeni çıkarma.`,
+      },
+      {
+        id: "stress-near-miss-legal-kvkk-vs-consumer",
+        title: "near-miss-legal-kvkk-not-consumer",
+        content: `# Near Miss Knowledge Card: KVKK saklama notu
+
+Topic: kvkk saklama suresi alici grubu veri kategorisi
+Tags: legal, kvkk, saklama, alıcı, veri-kategorisi
+Source Summary: Bu kart kişisel veri işleme envanteri alanları için kullanılabilir; ayıplı ürün, fatura veya iade uyuşmazlığı için doğrudan kaynak değildir.
+Key Takeaway: KVKK envanterinde amaç, veri kategorisi, alıcı grubu, saklama süresi ve tedbirler ayrı yazılmalıdır.
+Safe Guidance: Belirsiz hukuki yorumlarda uzman desteği alınmalıdır.
+Red Flags: Saklama süresinin belirsiz olması veya alıcı grubunun yazılmaması risktir.
+Do Not Infer: Tüketici iadesi, kira depozitosu veya dava sonucu hakkında kesin yönlendirme yapma.`,
+      },
+    ],
+  },
+  {
     id: "stress-dirty-user-docs",
     name: "Stress Dirty User Docs",
     ownerWallet: defaultWallet,
