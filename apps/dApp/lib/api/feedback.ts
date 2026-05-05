@@ -215,6 +215,26 @@ export type KnowledgeFeedbackRouterScoringSimulationResponse = {
   generatedAt: string;
 };
 
+export type KnowledgeFeedbackPromotionGateItem = {
+  collectionId: string | null;
+  queryHash: string | null;
+  activeAdjustmentCount: number;
+  gatePassedCount: number;
+  totalScoreDelta: number;
+  promotionCandidate: boolean;
+  blockedReasons: string[];
+  recommendation: "eligible_for_shadow_runtime" | "keep_passive" | "review_only";
+  adjustmentIds: string[];
+};
+
+export type KnowledgeFeedbackPromotionGateResponse = {
+  data: KnowledgeFeedbackPromotionGateItem[];
+  total: number;
+  runtimeAffected: false;
+  promotionApplied: false;
+  generatedAt: string;
+};
+
 export type KnowledgeFeedbackPassiveApplyResponse = {
   record: KnowledgeFeedbackApplyRecordItem;
   adjustments: KnowledgeFeedbackRouterAdjustmentItem[];
@@ -381,6 +401,21 @@ export async function fetchKnowledgeFeedbackRouterScoringSimulation(
   });
   if (!res.ok) throw new Error(`Feedback scoring simulation ${res.status}`);
   return (await res.json()) as KnowledgeFeedbackRouterScoringSimulationResponse;
+}
+
+export async function fetchKnowledgeFeedbackPromotionGate(
+  auth: R3mesWalletAuthHeaders,
+  options: { queryHash?: string | null; collectionIds?: string[] } = {},
+): Promise<KnowledgeFeedbackPromotionGateResponse> {
+  const url = new URL("/v1/feedback/knowledge/router-adjustments/promotion-gate", getBackendUrl());
+  if (options.queryHash) url.searchParams.set("queryHash", options.queryHash);
+  if (options.collectionIds?.length) url.searchParams.set("collectionIds", options.collectionIds.join(","));
+  const res = await fetch(url.toString(), {
+    headers: authHeaders(auth),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Feedback promotion gate ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackPromotionGateResponse;
 }
 
 export async function passiveApplyKnowledgeFeedbackRecord(

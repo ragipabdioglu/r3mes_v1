@@ -1034,6 +1034,105 @@ describe("knowledge feedback routes", () => {
     await app.close();
   });
 
+  it("reports promotion gate candidates without promoting runtime scoring", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.findMany).mockResolvedValue([
+      {
+        id: "adjustment_1",
+        proposalId: "proposal_record_1",
+        applyRecordId: "apply_record_1",
+        status: "ACTIVE",
+        stepId: "proposal_record_1:boost:kc_good",
+        kind: "BOOST_COLLECTION_SCORE",
+        mutationPath: "query_scoped_collection_adjustment",
+        collectionId: "kc_good",
+        expectedCollectionId: null,
+        queryHash: "abc123def4567890",
+        scoreDelta: 0.16,
+        simulatedBefore: 0,
+        simulatedAfter: 0.16,
+        rollbackReason: null,
+        createdAt: new Date("2026-05-05T12:08:00.000Z"),
+        rolledBackAt: null,
+        updatedAt: new Date("2026-05-05T12:08:00.000Z"),
+        applyRecord: {
+          status: "APPLIED",
+          gateReport: { ok: true, checks: [{ name: "rag_quality_gates", ok: true }] },
+        },
+      },
+      {
+        id: "adjustment_2",
+        proposalId: "proposal_record_2",
+        applyRecordId: "apply_record_2",
+        status: "ACTIVE",
+        stepId: "proposal_record_2:review:missing",
+        kind: "CREATE_MISSING_SOURCE_REVIEW",
+        mutationPath: "missing_source_review",
+        collectionId: null,
+        expectedCollectionId: null,
+        queryHash: "abc123def4567890",
+        scoreDelta: 0,
+        simulatedBefore: null,
+        simulatedAfter: null,
+        rollbackReason: null,
+        createdAt: new Date("2026-05-05T12:09:00.000Z"),
+        rolledBackAt: null,
+        updatedAt: new Date("2026-05-05T12:09:00.000Z"),
+        applyRecord: {
+          status: "APPLIED",
+          gateReport: { ok: true, checks: [{ name: "rag_quality_gates", ok: true }] },
+        },
+      },
+    ] as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/feedback/knowledge/router-adjustments/promotion-gate?queryHash=abc123def4567890",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      runtimeAffected?: boolean;
+      promotionApplied?: boolean;
+      data?: Array<{
+        collectionId?: string | null;
+        promotionCandidate?: boolean;
+        recommendation?: string;
+        blockedReasons?: string[];
+      }>;
+    };
+    expect(body.runtimeAffected).toBe(false);
+    expect(body.promotionApplied).toBe(false);
+    expect(body.data?.[0]).toMatchObject({
+      collectionId: "kc_good",
+      promotionCandidate: true,
+      recommendation: "eligible_for_shadow_runtime",
+    });
+    expect(body.data?.[1]).toMatchObject({
+      collectionId: null,
+      promotionCandidate: false,
+      recommendation: "review_only",
+    });
+    expect(body.data?.[1]?.blockedReasons?.join(" ")).toContain("missing target collection");
+    expect(prisma.knowledgeFeedbackRouterAdjustment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user_1",
+          status: "ACTIVE",
+          queryHash: "abc123def4567890",
+        }),
+        include: expect.objectContaining({
+          applyRecord: expect.any(Object),
+        }),
+      }),
+    );
+    expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("marks a planned apply record as gate passed without applying mutations", async () => {
     const { prisma } = await import("./lib/prisma.js");
     vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);

@@ -20,6 +20,8 @@ import type {
   KnowledgeFeedbackApplyRecordListResponse,
   KnowledgeFeedbackGateResultRequest,
   KnowledgeFeedbackGateResultResponse,
+  KnowledgeFeedbackPromotionGateItem,
+  KnowledgeFeedbackPromotionGateResponse,
   KnowledgeFeedbackAdjustmentRollbackResponse,
   KnowledgeFeedbackPassiveApplyResponse,
   KnowledgeFeedbackRouterAdjustmentItem,
@@ -420,6 +422,26 @@ export const KnowledgeFeedbackRouterScoringSimulationResponseSchema: z.ZodType<K
     generatedAt: z.string(),
   });
 
+export const KnowledgeFeedbackPromotionGateItemSchema: z.ZodType<KnowledgeFeedbackPromotionGateItem> = z.object({
+  collectionId: z.string().nullable(),
+  queryHash: z.string().nullable(),
+  activeAdjustmentCount: z.number().int().nonnegative(),
+  gatePassedCount: z.number().int().nonnegative(),
+  totalScoreDelta: z.number().min(-1).max(1),
+  promotionCandidate: z.boolean(),
+  blockedReasons: z.array(z.string().min(1)),
+  recommendation: z.enum(["eligible_for_shadow_runtime", "keep_passive", "review_only"]),
+  adjustmentIds: z.array(z.string().min(1)),
+});
+
+export const KnowledgeFeedbackPromotionGateResponseSchema: z.ZodType<KnowledgeFeedbackPromotionGateResponse> = z.object({
+  data: z.array(KnowledgeFeedbackPromotionGateItemSchema),
+  total: z.number().int().nonnegative(),
+  runtimeAffected: z.literal(false),
+  promotionApplied: z.literal(false),
+  generatedAt: z.string(),
+});
+
 export const KnowledgeFeedbackGateResultRequestSchema: z.ZodType<KnowledgeFeedbackGateResultRequest> = z.object({
   ok: z.boolean(),
   report: z.record(z.unknown()).nullable().optional(),
@@ -623,6 +645,12 @@ export function safeParseKnowledgeFeedbackRouterScoringSimulationResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackRouterScoringSimulationResponse> {
   return KnowledgeFeedbackRouterScoringSimulationResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackPromotionGateResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackPromotionGateResponse> {
+  return KnowledgeFeedbackPromotionGateResponseSchema.safeParse(input);
 }
 
 export function safeParseKnowledgeFeedbackGateResultRequest(

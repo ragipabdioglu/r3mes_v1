@@ -13,6 +13,7 @@ import {
   safeParseKnowledgeFeedbackGateResultRequest,
   safeParseKnowledgeFeedbackGateResultResponse,
   safeParseKnowledgeFeedbackPassiveApplyResponse,
+  safeParseKnowledgeFeedbackPromotionGateResponse,
   safeParseKnowledgeFeedbackProposalGenerateResponse,
   safeParseKnowledgeFeedbackProposalImpactResponse,
   safeParseKnowledgeFeedbackProposalListResponse,
@@ -32,6 +33,8 @@ import {
   type KnowledgeFeedbackAdjustmentRollbackResponse,
   type KnowledgeFeedbackGateResultResponse,
   type KnowledgeFeedbackPassiveApplyResponse,
+  type KnowledgeFeedbackPromotionGateItem,
+  type KnowledgeFeedbackPromotionGateResponse,
   type KnowledgeFeedbackProposalAction,
   type KnowledgeFeedbackProposalGenerateResponse,
   type KnowledgeFeedbackProposalImpactItem,
@@ -53,6 +56,7 @@ import { walletAuthPreHandler } from "../lib/walletAuth.js";
 const HASH_RE = /^[a-f0-9]{8,64}$/i;
 const DEFAULT_FEEDBACK_LIMIT = 200;
 const DEFAULT_PROPOSAL_MIN_SIGNALS = 2;
+const PROMOTION_MAX_ABS_DELTA = 0.35;
 
 function hashQuery(query: string): string {
   return createHash("sha256").update(query.trim(), "utf8").digest("hex").slice(0, 16);
@@ -527,6 +531,68 @@ function groupRouterScoringSimulation(
     const impactDiff = Math.abs(b.totalScoreDelta) - Math.abs(a.totalScoreDelta);
     if (impactDiff !== 0) return impactDiff;
     return b.activeAdjustmentCount - a.activeAdjustmentCount;
+  });
+}
+
+function buildPromotionGateReport(
+  adjustments: Array<{
+    id: string;
+    collectionId: string | null;
+    queryHash: string | null;
+    scoreDelta: number;
+    applyRecord: {
+      status: string;
+      gateReport: unknown;
+    };
+  }>,
+): KnowledgeFeedbackPromotionGateItem[] {
+  const grouped = new Map<string, KnowledgeFeedbackPromotionGateItem>();
+  for (const adjustment of adjustments) {
+    const key = `${adjustment.collectionId ?? "-"}|${adjustment.queryHash ?? "-"}`;
+    const gateSummary = summarizeGateReport(adjustment.applyRecord.gateReport);
+    const existing = grouped.get(key) ?? {
+      collectionId: adjustment.collectionId,
+      queryHash: adjustment.queryHash,
+      activeAdjustmentCount: 0,
+      gatePassedCount: 0,
+      totalScoreDelta: 0,
+      promotionCandidate: false,
+      blockedReasons: [],
+      recommendation: "keep_passive" as const,
+      adjustmentIds: [],
+    };
+    existing.activeAdjustmentCount += 1;
+    existing.gatePassedCount += adjustment.applyRecord.status === "APPLIED" && gateSummary?.ok === true ? 1 : 0;
+    existing.totalScoreDelta = clampPreviewScore(existing.totalScoreDelta + adjustment.scoreDelta);
+    existing.adjustmentIds.push(adjustment.id);
+    grouped.set(key, existing);
+  }
+
+  return Array.from(grouped.values()).map((item) => {
+    const blockedReasons = new Set<string>();
+    if (!item.collectionId) blockedReasons.add("missing target collection");
+    if (!item.queryHash) blockedReasons.add("missing query hash");
+    if (item.gatePassedCount !== item.activeAdjustmentCount) blockedReasons.add("not all source apply records passed eval gate");
+    if (item.totalScoreDelta === 0) blockedReasons.add("review-only adjustment has no runtime score effect");
+    if (Math.abs(item.totalScoreDelta) > PROMOTION_MAX_ABS_DELTA) {
+      blockedReasons.add(`score delta exceeds promotion cap ${PROMOTION_MAX_ABS_DELTA}`);
+    }
+    const blocked = Array.from(blockedReasons);
+    const promotionCandidate = blocked.length === 0;
+    const recommendation: KnowledgeFeedbackPromotionGateItem["recommendation"] = promotionCandidate
+      ? "eligible_for_shadow_runtime"
+      : item.totalScoreDelta === 0
+        ? "review_only"
+        : "keep_passive";
+    return {
+      ...item,
+      promotionCandidate,
+      blockedReasons: blocked,
+      recommendation,
+    };
+  }).sort((a, b) => {
+    if (a.promotionCandidate !== b.promotionCandidate) return a.promotionCandidate ? -1 : 1;
+    return Math.abs(b.totalScoreDelta) - Math.abs(a.totalScoreDelta);
   });
 }
 
@@ -1060,6 +1126,52 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback router scoring simulation contract failed");
       return sendApiError(reply, 500, "FEEDBACK_SCORING_SIMULATION_CONTRACT_FAILED", "Feedback scoring simulation doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.get("/v1/feedback/knowledge/router-adjustments/promotion-gate", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const query = asObject(req.query) ?? {};
+    const queryHash = normalizeOptionalString(typeof query.queryHash === "string" ? query.queryHash : null);
+    if (queryHash && !HASH_RE.test(queryHash)) {
+      return sendApiError(reply, 400, "INVALID_QUERY_HASH", "queryHash 8-64 karakter hex olmalı");
+    }
+    const collectionIds = parseCollectionIds(query.collectionIds);
+    const user = await ensureUser(wallet);
+    const rows = await prisma.knowledgeFeedbackRouterAdjustment.findMany({
+      where: {
+        userId: user.id,
+        status: "ACTIVE",
+        ...(queryHash ? { queryHash } : {}),
+        ...(collectionIds.length > 0 ? { collectionId: { in: collectionIds } } : {}),
+      },
+      include: {
+        applyRecord: {
+          select: {
+            status: true,
+            gateReport: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+    const data = buildPromotionGateReport(rows);
+    const response: KnowledgeFeedbackPromotionGateResponse = {
+      data,
+      total: data.length,
+      runtimeAffected: false,
+      promotionApplied: false,
+      generatedAt: new Date().toISOString(),
+    };
+    const checked = safeParseKnowledgeFeedbackPromotionGateResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback promotion gate contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_PROMOTION_GATE_CONTRACT_FAILED", "Feedback promotion gate doğrulanamadı");
     }
     return reply.send(checked.data);
   });

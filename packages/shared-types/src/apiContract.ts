@@ -347,6 +347,26 @@ export interface KnowledgeFeedbackRouterScoringSimulationResponse {
   generatedAt: string;
 }
 
+export interface KnowledgeFeedbackPromotionGateItem {
+  collectionId: string | null;
+  queryHash: string | null;
+  activeAdjustmentCount: number;
+  gatePassedCount: number;
+  totalScoreDelta: number;
+  promotionCandidate: boolean;
+  blockedReasons: string[];
+  recommendation: "eligible_for_shadow_runtime" | "keep_passive" | "review_only";
+  adjustmentIds: string[];
+}
+
+export interface KnowledgeFeedbackPromotionGateResponse {
+  data: KnowledgeFeedbackPromotionGateItem[];
+  total: number;
+  runtimeAffected: false;
+  promotionApplied: false;
+  generatedAt: string;
+}
+
 export interface KnowledgeFeedbackGateResultRequest {
   ok: boolean;
   report?: Record<string, unknown> | null;

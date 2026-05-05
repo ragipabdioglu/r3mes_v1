@@ -10,6 +10,7 @@ import {
   fetchKnowledgeFeedbackMutationPreview,
   fetchKnowledgeFeedbackProposalImpact,
   fetchKnowledgeFeedbackProposals,
+  fetchKnowledgeFeedbackPromotionGate,
   fetchKnowledgeFeedbackRouterAdjustments,
   fetchKnowledgeFeedbackRouterScoringSimulation,
   fetchKnowledgeFeedbackSummary,
@@ -23,6 +24,7 @@ import {
   type KnowledgeFeedbackApplyPlanResponse,
   type KnowledgeFeedbackProposalImpactResponse,
   type KnowledgeFeedbackProposalItem,
+  type KnowledgeFeedbackPromotionGateResponse,
   type KnowledgeFeedbackRouterAdjustmentListResponse,
   type KnowledgeFeedbackRouterScoringSimulationResponse,
   type KnowledgeFeedbackSummaryResponse,
@@ -83,6 +85,7 @@ export function FeedbackLearningBoard() {
   const [applyRecords, setApplyRecords] = useState<KnowledgeFeedbackApplyRecordListResponse | null>(null);
   const [routerAdjustments, setRouterAdjustments] = useState<KnowledgeFeedbackRouterAdjustmentListResponse | null>(null);
   const [scoringSimulation, setScoringSimulation] = useState<KnowledgeFeedbackRouterScoringSimulationResponse | null>(null);
+  const [promotionGate, setPromotionGate] = useState<KnowledgeFeedbackPromotionGateResponse | null>(null);
   const [mutationPreview, setMutationPreview] = useState<Record<string, KnowledgeFeedbackApplyMutationPreviewResponse>>({});
   const [impact, setImpact] = useState<Record<string, KnowledgeFeedbackProposalImpactResponse>>({});
   const [applyPlan, setApplyPlan] = useState<Record<string, KnowledgeFeedbackApplyPlanResponse>>({});
@@ -98,24 +101,27 @@ export function FeedbackLearningBoard() {
       setApplyRecords(null);
       setRouterAdjustments(null);
       setScoringSimulation(null);
+      setPromotionGate(null);
       return;
     }
     setLoading(true);
     setErr(null);
     try {
       const auth = await ensureAuthHeaders();
-      const [nextSummary, nextProposals, nextApplyRecords, nextAdjustments, nextSimulation] = await Promise.all([
+      const [nextSummary, nextProposals, nextApplyRecords, nextAdjustments, nextSimulation, nextPromotionGate] = await Promise.all([
         fetchKnowledgeFeedbackSummary(auth),
         fetchKnowledgeFeedbackProposals(auth, "all"),
         fetchKnowledgeFeedbackApplyRecords(auth, "all"),
         fetchKnowledgeFeedbackRouterAdjustments(auth, "all"),
         fetchKnowledgeFeedbackRouterScoringSimulation(auth),
+        fetchKnowledgeFeedbackPromotionGate(auth),
       ]);
       setSummary(nextSummary);
       setProposals(nextProposals);
       setApplyRecords(nextApplyRecords);
       setRouterAdjustments(nextAdjustments);
       setScoringSimulation(nextSimulation);
+      setPromotionGate(nextPromotionGate);
     } catch (e) {
       setErr(
         isLikelyWalletAuthFailure(e)
@@ -268,6 +274,7 @@ export function FeedbackLearningBoard() {
   const pendingCount = proposals.filter((item) => item.status === "PENDING").length;
   const activeAdjustmentCount = routerAdjustments?.data.filter((item) => item.status === "ACTIVE").length ?? 0;
   const simulatedImpactCount = scoringSimulation?.results.length ?? 0;
+  const promotionCandidateCount = promotionGate?.data.filter((item) => item.promotionCandidate).length ?? 0;
   const topSummary = summary?.data.slice(0, 3) ?? [];
 
   return (
@@ -304,7 +311,7 @@ export function FeedbackLearningBoard() {
         </div>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-5">
+      <div className="grid gap-2 sm:grid-cols-6">
         <div className="rounded-xl border border-zinc-800 bg-black/20 p-3">
           <p className="text-[10px] uppercase tracking-wider text-zinc-500">Feedback</p>
           <p className="mt-1 text-2xl font-semibold text-white">{summary?.totalFeedback ?? 0}</p>
@@ -324,6 +331,10 @@ export function FeedbackLearningBoard() {
         <div className="rounded-xl border border-zinc-800 bg-black/20 p-3">
           <p className="text-[10px] uppercase tracking-wider text-zinc-500">Simulated</p>
           <p className="mt-1 text-2xl font-semibold text-sky-100">{simulatedImpactCount}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-black/20 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Promote</p>
+          <p className="mt-1 text-2xl font-semibold text-emerald-100">{promotionCandidateCount}</p>
         </div>
       </div>
 
@@ -487,6 +498,35 @@ export function FeedbackLearningBoard() {
                 <p className="mt-1 text-sky-100/60">
                   adjustments={item.activeAdjustmentCount} · delta={item.totalScoreDelta} · simulated={item.simulatedBefore}→{item.simulatedAfter}
                 </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {promotionGate && promotionGate.data.length > 0 ? (
+        <div className="rounded-xl border border-emerald-500/15 bg-emerald-950/10 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100/80">Promotion gate</p>
+            <p className="text-[11px] text-emerald-100/45">
+              promotionApplied={String(promotionGate.promotionApplied)} · runtimeAffected={String(promotionGate.runtimeAffected)}
+            </p>
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-emerald-100/55">
+            Passive adjustment’ların shadow runtime adaylığı. Bu panel yalnız karar raporu üretir; canlı router hâlâ değişmez.
+          </p>
+          <ul className="mt-3 space-y-2 text-xs text-emerald-100/70">
+            {promotionGate.data.slice(0, 5).map((item) => (
+              <li key={`${item.collectionId ?? "-"}:${item.queryHash ?? "-"}`} className="rounded-lg border border-emerald-500/15 bg-black/20 p-2">
+                <p className="font-mono text-[11px] text-emerald-100">
+                  {item.recommendation} · collection={shortId(item.collectionId)} · query={shortId(item.queryHash)}
+                </p>
+                <p className="mt-1 text-emerald-100/60">
+                  candidate={String(item.promotionCandidate)} · gate={item.gatePassedCount}/{item.activeAdjustmentCount} · delta={item.totalScoreDelta}
+                </p>
+                {item.blockedReasons.length > 0 ? (
+                  <p className="mt-1 text-amber-100/70">blocked={item.blockedReasons.join(" · ")}</p>
+                ) : null}
               </li>
             ))}
           </ul>
