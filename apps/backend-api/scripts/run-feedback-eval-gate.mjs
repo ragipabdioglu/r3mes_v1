@@ -25,6 +25,7 @@ const baseUrl = argValue("--base-url", process.env.R3MES_BACKEND_URL || "http://
 const requireApproved = hasArg("--require-approved");
 const quick = hasArg("--quick");
 const commandTimeoutMs = Number(argValue("--timeout-ms", process.env.R3MES_FEEDBACK_GATE_TIMEOUT_MS || "240000"));
+const applyRecordId = argValue("--apply-record-id", process.env.R3MES_FEEDBACK_APPLY_RECORD_ID || "");
 
 function commandToString(command, args) {
   return [command, ...args].join(" ");
@@ -107,6 +108,37 @@ async function writeReport(report) {
   await writeFile(outFile, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 }
 
+async function postGateResult(report) {
+  if (!applyRecordId) return null;
+  const url = new URL(`/v1/feedback/knowledge/apply-records/${encodeURIComponent(applyRecordId)}/gate-result`, baseUrl);
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      ok: report.ok === true,
+      report,
+      reason: report.ok === true ? "feedback eval gate passed" : report.reason ?? "feedback eval gate failed",
+    }),
+  });
+  const raw = await response.text();
+  let body = null;
+  try {
+    body = raw ? JSON.parse(raw) : null;
+  } catch {
+    body = { raw };
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to record feedback gate result (${response.status}): ${raw.slice(0, 1000)}`);
+  }
+  return {
+    applyRecordId,
+    status: response.status,
+    body,
+  };
+}
+
 function evalArgs(file, out, limit = 0) {
   const args = [
     "scripts/run-grounded-response-eval.mjs",
@@ -171,6 +203,10 @@ async function main() {
       generatedAt: new Date().toISOString(),
     };
     await writeReport(report);
+    const gateResult = await postGateResult(report);
+    if (gateResult) {
+      console.log(JSON.stringify({ recordedGateResult: gateResult }, null, 2));
+    }
     console.log(JSON.stringify(report, null, 2));
     process.exitCode = 1;
     return;
@@ -233,12 +269,21 @@ async function main() {
   };
 
   await writeReport(report);
+  const gateResult = await postGateResult(report);
   console.log(`wrote ${outFile}`);
   console.log(JSON.stringify({
     ok: report.ok,
     applyAllowed: report.applyAllowed,
     approvedProposalCount: report.approvedProposalCount,
     feedbackCaseCount: report.feedbackCaseCount,
+    recordedGateResult: gateResult
+      ? {
+          applyRecordId: gateResult.applyRecordId,
+          status: gateResult.status,
+          gatePassed: gateResult.body?.gatePassed === true,
+          nextSafeAction: gateResult.body?.nextSafeAction ?? null,
+        }
+      : null,
     checks: report.checks.map((check) => ({
       name: check.name,
       ok: check.ok,
