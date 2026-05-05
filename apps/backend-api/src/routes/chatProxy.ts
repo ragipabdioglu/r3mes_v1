@@ -167,6 +167,7 @@ function buildSourceSelectionSummary(opts: {
   includePublic: boolean;
   routePlan: DomainRoutePlan | null;
   retrievalSuggestedCollectionIds?: string[];
+  skipSuggestions?: boolean;
 }): ChatRetrievalDebug["sourceSelection"] {
   const usedCollectionIds = uniqueStrings(opts.sources.map((source) => source.collectionId));
   const unusedSelectedCollectionIds = opts.requestedCollectionIds.filter(
@@ -181,21 +182,25 @@ function buildSourceSelectionSummary(opts: {
         ? "public"
         : "none";
   const excluded = new Set([...usedCollectionIds, ...opts.requestedCollectionIds]);
-  const rankedSuggestedCollections = rankSuggestedKnowledgeCollections({
-    collections: opts.suggestibleCollections,
-    routePlan: opts.routePlan,
-    query: opts.query,
-    excludedIds: excluded,
-    limit: 8,
-  });
+  const rankedSuggestedCollections = opts.skipSuggestions
+    ? []
+    : rankSuggestedKnowledgeCollections({
+        collections: opts.suggestibleCollections,
+        routePlan: opts.routePlan,
+        query: opts.query,
+        excludedIds: excluded,
+        limit: 8,
+      });
   const retrievalSuggestedIds = opts.retrievalSuggestedCollectionIds ?? [];
-  const metadataRouteCandidates = rankMetadataRouteCandidates({
-    collections: opts.suggestibleCollections,
-    routePlan: opts.routePlan,
-    query: opts.query,
-    excludedIds: new Set(opts.requestedCollectionIds),
-    limit: 5,
-  });
+  const metadataRouteCandidates = opts.skipSuggestions
+    ? []
+    : rankMetadataRouteCandidates({
+        collections: opts.suggestibleCollections,
+        routePlan: opts.routePlan,
+        query: opts.query,
+        excludedIds: new Set(opts.requestedCollectionIds),
+        limit: 5,
+      });
   const thinProfileCollectionIds = uniqueStrings([
     ...metadataRouteCandidates
       .filter((candidate) => candidate.sourceQuality === "thin")
@@ -294,6 +299,18 @@ async function resolveRetrievalBackedSuggestionIds(opts: {
   } catch {
     return [];
   }
+}
+
+function shouldSkipSourceSuggestions(opts: {
+  requestedCollectionIds: string[];
+  retrievalSources: ChatSourceCitation[];
+  groundingConfidence: "high" | "medium" | "low";
+}): boolean {
+  return (
+    opts.requestedCollectionIds.length > 0 &&
+    opts.retrievalSources.length > 0 &&
+    opts.groundingConfidence === "high"
+  );
 }
 
 function shouldUseMiniValidator(stream: boolean, hasRetrieval: boolean): boolean {
@@ -1352,8 +1369,13 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const domainPolicy = getDomainPolicy(answerDomain);
       const groundedComposerMode = getGroundedComposerMode();
       const responseMode = getChatResponseMode();
+      const skipSourceSuggestions = shouldSkipSourceSuggestions({
+        requestedCollectionIds,
+        retrievalSources: retrieval.sources,
+        groundingConfidence: retrieval.groundingConfidence,
+      });
       const suggestionProbeTrace = chatTrace.start("suggestion_probe");
-      const retrievalSuggestedCollectionIds = retrievalQuery
+      const retrievalSuggestedCollectionIds = retrievalQuery && !skipSourceSuggestions
         ? await resolveRetrievalBackedSuggestionIds({
             query: plannedRetrievalQuery,
             evidenceQuery: retrievalQuery,
@@ -1365,8 +1387,9 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             ]),
           })
         : [];
-      chatTrace.finish(suggestionProbeTrace, retrievalQuery ? "ok" : "skipped", {
+      chatTrace.finish(suggestionProbeTrace, retrievalQuery && !skipSourceSuggestions ? "ok" : "skipped", {
         suggestedCollectionCount: retrievalSuggestedCollectionIds.length,
+        reason: skipSourceSuggestions ? "selected source already returned high-confidence evidence" : undefined,
       });
       const sourceSelection = buildSourceSelectionSummary({
         query: plannedRetrievalQuery,
@@ -1377,6 +1400,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         includePublic,
         routePlan,
         retrievalSuggestedCollectionIds,
+        skipSuggestions: skipSourceSuggestions,
       });
       chatTrace.recordNow("source_selection", "ok", summarizeSourceSelectionForTrace(sourceSelection));
       const routeDecisionQuality = {
