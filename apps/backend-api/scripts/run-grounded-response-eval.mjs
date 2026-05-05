@@ -379,6 +379,8 @@ function scoreCase(testCase, response) {
   }
 
   const routeDecision = retrievalDebug?.sourceSelection?.routeDecision;
+  const shadowRuntime = retrievalDebug?.sourceSelection?.shadowRuntime;
+  const shadowImpacts = Array.isArray(shadowRuntime?.impacts) ? shadowRuntime.impacts : [];
   if (testCase.expectedRouteDecisionMode && routeDecision?.mode !== testCase.expectedRouteDecisionMode) {
     failures.push(`route_decision_mode:${routeDecision?.mode ?? "missing"}`);
   }
@@ -404,6 +406,35 @@ function scoreCase(testCase, response) {
     const missingRejected = testCase.expectedRejectedCollectionIds.filter((id) => !rejectedIds.includes(id));
     if (missingRejected.length > 0) {
       failures.push(`rejected_collection_missing:${missingRejected.join(",")}`);
+    }
+  }
+
+  if (typeof testCase.expectedShadowRuntimeAffected === "boolean") {
+    const actual = shadowRuntime?.runtimeAffected;
+    if (actual !== testCase.expectedShadowRuntimeAffected) {
+      failures.push(`shadow_runtime_affected:${actual ?? "missing"}`);
+    }
+  }
+
+  if (typeof testCase.expectedShadowWouldChangeTopCandidate === "boolean") {
+    const actual = shadowRuntime?.wouldChangeTopCandidate;
+    if (actual !== testCase.expectedShadowWouldChangeTopCandidate) {
+      failures.push(`shadow_top_change:${actual ?? "missing"}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.minShadowPromotedCandidates))) {
+    const actual = Number(shadowRuntime?.promotedCandidateCount ?? 0);
+    if (actual < Number(testCase.minShadowPromotedCandidates)) {
+      failures.push(`shadow_promoted:${actual}<${Number(testCase.minShadowPromotedCandidates)}`);
+    }
+  }
+
+  if (Array.isArray(testCase.expectedShadowImpactCollectionIds) && testCase.expectedShadowImpactCollectionIds.length > 0) {
+    const impactIds = shadowImpacts.map((impact) => impact.collectionId).filter(Boolean);
+    const missingImpactIds = testCase.expectedShadowImpactCollectionIds.filter((id) => !impactIds.includes(id));
+    if (missingImpactIds.length > 0) {
+      failures.push(`shadow_impact_missing:${missingImpactIds.join(",")}`);
     }
   }
 
@@ -479,6 +510,22 @@ function scoreCase(testCase, response) {
     routeDecisionReasons: routeDecision?.reasons ?? [],
     metadataRouteCandidateIds: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.id) ?? [],
     metadataRouteCandidateQualities: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.sourceQuality) ?? [],
+    shadowRuntime: shadowRuntime
+      ? {
+          runtimeAffected: shadowRuntime.runtimeAffected,
+          activeAdjustmentCount: shadowRuntime.activeAdjustmentCount ?? 0,
+          promotedCandidateCount: shadowRuntime.promotedCandidateCount ?? 0,
+          currentTopCandidateId: shadowRuntime.currentTopCandidateId ?? null,
+          shadowTopCandidateId: shadowRuntime.shadowTopCandidateId ?? null,
+          wouldChangeTopCandidate: shadowRuntime.wouldChangeTopCandidate === true,
+          impactCollectionIds: shadowImpacts.map((impact) => impact.collectionId).filter(Boolean),
+          recommendations: shadowImpacts.reduce((acc, impact) => {
+            const key = impact.recommendation ?? "missing";
+            acc[key] = (acc[key] ?? 0) + 1;
+            return acc;
+          }, {}),
+        }
+      : null,
     latencyMs: response?._latencyMs ?? null,
     content,
   };
@@ -632,7 +679,7 @@ async function main() {
     results.push(result);
     const mark = result.ok ? "PASS" : "FAIL";
     console.log(
-      `${mark} ${result.id} bucket=${result.bucket ?? "default"} route=${result.routeDecisionMode ?? "-"} selection=${result.selectionMode ?? "-"} confidence=${result.confidence ?? "-"} sources=${result.sourceCount} facts=${result.factCount} safety=${result.safetyPass} severity=${result.safetySeverity ?? "-"} latency=${result.latencyMs ?? "-"}ms`,
+      `${mark} ${result.id} bucket=${result.bucket ?? "default"} route=${result.routeDecisionMode ?? "-"} selection=${result.selectionMode ?? "-"} confidence=${result.confidence ?? "-"} sources=${result.sourceCount} facts=${result.factCount} safety=${result.safetyPass} severity=${result.safetySeverity ?? "-"} shadow=${result.shadowRuntime?.promotedCandidateCount ?? 0}/${result.shadowRuntime?.activeAdjustmentCount ?? 0} topChange=${result.shadowRuntime?.wouldChangeTopCandidate === true} latency=${result.latencyMs ?? "-"}ms`,
     );
     if (!result.ok) {
       console.log(`  ${result.failures.join("; ")}`);
@@ -651,6 +698,20 @@ async function main() {
       acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     }, {}),
+    shadowRuntime: {
+      observed: results.filter((result) => result.shadowRuntime).length,
+      activeAdjustmentCases: results.filter((result) => (result.shadowRuntime?.activeAdjustmentCount ?? 0) > 0).length,
+      promotedCandidateCases: results.filter((result) => (result.shadowRuntime?.promotedCandidateCount ?? 0) > 0).length,
+      topChangeCases: results.filter((result) => result.shadowRuntime?.wouldChangeTopCandidate === true).length,
+      runtimeAffectedCases: results.filter((result) => result.shadowRuntime?.runtimeAffected === true).length,
+      recommendations: results.reduce((acc, result) => {
+        const recommendations = result.shadowRuntime?.recommendations ?? {};
+        for (const [key, value] of Object.entries(recommendations)) {
+          acc[key] = (acc[key] ?? 0) + Number(value);
+        }
+        return acc;
+      }, {}),
+    },
     selectionModes: results.reduce((acc, result) => {
       const key = result.selectionMode ?? "missing";
       acc[key] = (acc[key] ?? 0) + 1;

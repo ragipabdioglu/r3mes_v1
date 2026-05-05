@@ -54,6 +54,7 @@ async function runCase(opts, testCase) {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "x-r3mes-debug": "1",
         "x-wallet-address": opts.wallet,
         "x-message": JSON.stringify({
           iat: Math.floor(Date.now() / 1000),
@@ -79,6 +80,7 @@ async function runCase(opts, testCase) {
     }
     const sources = Array.isArray(json?.sources) ? json.sources : [];
     const safetyPass = json?.safety_gate?.pass ?? null;
+    const shadowRuntime = json?.retrieval_debug?.sourceSelection?.shadowRuntime ?? null;
     const mustHaveSources = testCase.mustHaveSources === true;
     const ok = response.ok && (!mustHaveSources || sources.length > 0) && safetyPass !== false;
     return {
@@ -91,6 +93,9 @@ async function runCase(opts, testCase) {
       safetyPass,
       confidence: json?.retrieval_debug?.groundingConfidence ?? null,
       domain: json?.retrieval_debug?.domain ?? null,
+      shadowActiveAdjustmentCount: Number(shadowRuntime?.activeAdjustmentCount ?? 0),
+      shadowPromotedCandidateCount: Number(shadowRuntime?.promotedCandidateCount ?? 0),
+      shadowWouldChangeTopCandidate: shadowRuntime?.wouldChangeTopCandidate === true,
       error: ok ? null : text.slice(0, 240),
     };
   } catch (error) {
@@ -145,6 +150,11 @@ async function main() {
       p50: percentile(latencies, 0.5),
       p95: percentile(latencies, 0.95),
       max: latencies.at(-1) ?? null,
+    },
+    shadowRuntime: {
+      activeAdjustmentCases: results.filter((result) => result.shadowActiveAdjustmentCount > 0).length,
+      promotedCandidateCases: results.filter((result) => result.shadowPromotedCandidateCount > 0).length,
+      topChangeCases: results.filter((result) => result.shadowWouldChangeTopCandidate === true).length,
     },
   };
   await mkdir(dirname(opts.out), { recursive: true });
