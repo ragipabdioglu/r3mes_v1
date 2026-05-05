@@ -422,6 +422,26 @@ export interface ChatRetrievalDebug {
       rejectedCollectionIds: string[];
       reasons: string[];
     };
+    shadowRuntime?: {
+      enabled: boolean;
+      runtimeAffected: false;
+      queryHash: string | null;
+      candidateCollectionIds: string[];
+      activeAdjustmentCount: number;
+      promotedCandidateCount: number;
+      currentTopCandidateId: string | null;
+      shadowTopCandidateId: string | null;
+      wouldChangeTopCandidate: boolean;
+      impacts: Array<{
+        collectionId: string;
+        totalScoreDelta: number;
+        activeAdjustmentCount: number;
+        gatePassedCount: number;
+        recommendation: "eligible_for_shadow_runtime" | "keep_passive" | "review_only";
+        blockedReasons: string[];
+        adjustmentIds: string[];
+      }>;
+    };
   };
   queryPlan: {
     routePlan?: {

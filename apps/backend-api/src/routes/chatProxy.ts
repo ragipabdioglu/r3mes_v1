@@ -11,6 +11,7 @@ import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
+import { evaluateFeedbackShadowRuntime, type FeedbackShadowRuntimeReport } from "../lib/feedbackShadowRuntime.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
 import { retrieveKnowledgeContextTrueHybrid } from "../lib/hybridKnowledgeRetrieval.js";
 import {
@@ -87,6 +88,7 @@ interface ChatRetrievalDebug {
         rejectedCollectionIds: string[];
         reasons: string[];
       };
+      shadowRuntime?: FeedbackShadowRuntimeReport;
   };
   quality: {
     sourceCount: number;
@@ -604,6 +606,21 @@ function summarizeSourceSelectionForTrace(
       rejectedCollectionCount: sourceSelection.routeDecision.rejectedCollectionIds.length,
       reasons: sourceSelection.routeDecision.reasons,
     },
+    shadowRuntime: sourceSelection.shadowRuntime
+      ? {
+          activeAdjustmentCount: sourceSelection.shadowRuntime.activeAdjustmentCount,
+          promotedCandidateCount: sourceSelection.shadowRuntime.promotedCandidateCount,
+          wouldChangeTopCandidate: sourceSelection.shadowRuntime.wouldChangeTopCandidate,
+          currentTopCandidateId: sourceSelection.shadowRuntime.currentTopCandidateId,
+          shadowTopCandidateId: sourceSelection.shadowRuntime.shadowTopCandidateId,
+          topImpacts: sourceSelection.shadowRuntime.impacts.slice(0, 3).map((impact) => ({
+            collectionId: impact.collectionId,
+            totalScoreDelta: impact.totalScoreDelta,
+            recommendation: impact.recommendation,
+            blockedReasonCount: impact.blockedReasons.length,
+          })),
+        }
+      : undefined,
   };
 }
 
@@ -1391,7 +1408,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         suggestedCollectionCount: retrievalSuggestedCollectionIds.length,
         reason: skipSourceSuggestions ? "selected source already returned high-confidence evidence" : undefined,
       });
-      const sourceSelection = buildSourceSelectionSummary({
+      let sourceSelection = buildSourceSelectionSummary({
         query: plannedRetrievalQuery,
         requestedCollectionIds,
         accessibleCollectionIds,
@@ -1401,6 +1418,29 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         routePlan,
         retrievalSuggestedCollectionIds,
         skipSuggestions: skipSourceSuggestions,
+      });
+      const shadowCandidateCollectionIds = uniqueStrings([
+        ...sourceSelection.usedCollectionIds,
+        ...sourceSelection.suggestedCollections.map((collection) => collection.id),
+        ...sourceSelection.metadataRouteCandidates.map((collection) => collection.id),
+        ...accessibleCollectionIds,
+      ]);
+      const shadowRuntimeTrace = chatTrace.start("source_selection");
+      const shadowRuntime = await evaluateFeedbackShadowRuntime({
+        walletAddress: wallet,
+        query: retrievalQuery,
+        candidateCollectionIds: shadowCandidateCollectionIds,
+      });
+      sourceSelection = {
+        ...sourceSelection,
+        shadowRuntime,
+      };
+      chatTrace.finish(shadowRuntimeTrace, "ok", {
+        name: "feedback_shadow_runtime",
+        activeAdjustmentCount: shadowRuntime.activeAdjustmentCount,
+        promotedCandidateCount: shadowRuntime.promotedCandidateCount,
+        wouldChangeTopCandidate: shadowRuntime.wouldChangeTopCandidate,
+        runtimeAffected: shadowRuntime.runtimeAffected,
       });
       chatTrace.recordNow("source_selection", "ok", summarizeSourceSelectionForTrace(sourceSelection));
       const routeDecisionQuality = {
