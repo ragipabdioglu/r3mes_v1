@@ -4,6 +4,12 @@ import type { ChatRetrievalDebug, ChatSourceCitation } from "@/lib/types/knowled
 import { userFacingHttpMessage } from "@/lib/ui/http-messages";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+export type ChatTraceSummary = {
+  traceId: string;
+  query?: {
+    hash?: string;
+  };
+};
 
 function readAssistantContent(response: unknown): string {
   const parsed = response as {
@@ -22,6 +28,14 @@ function readRetrievalDebug(response: unknown): ChatRetrievalDebug | null {
   const parsed = response as { retrieval_debug?: unknown };
   return parsed.retrieval_debug && typeof parsed.retrieval_debug === "object"
     ? (parsed.retrieval_debug as ChatRetrievalDebug)
+    : null;
+}
+
+function readChatTrace(response: unknown): ChatTraceSummary | null {
+  const parsed = response as { chat_trace?: unknown };
+  const trace = parsed.chat_trace as ChatTraceSummary | undefined;
+  return trace && typeof trace === "object" && typeof trace.traceId === "string"
+    ? trace
     : null;
 }
 
@@ -133,6 +147,7 @@ export async function* streamChatCompletions(params: {
   auth: R3mesWalletAuthHeaders;
   onSources?: (sources: ChatSourceCitation[]) => void;
   onRetrievalDebug?: (debug: ChatRetrievalDebug) => void;
+  onChatTrace?: (trace: ChatTraceSummary) => void;
   signal?: AbortSignal;
 }): AsyncGenerator<string, void, unknown> {
   const base = getBackendUrl();
@@ -185,6 +200,8 @@ export async function* streamChatCompletions(params: {
     if (sources.length > 0) params.onSources?.(sources);
     const debug = readRetrievalDebug(parsed);
     if (debug) params.onRetrievalDebug?.(debug);
+    const trace = readChatTrace(parsed);
+    if (trace) params.onChatTrace?.(trace);
     const content = readAssistantContent(parsed);
     if (content) {
       yield* yieldTypewriterText(content, params.signal);

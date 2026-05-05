@@ -9,6 +9,10 @@ import { useEffect, useRef, useState } from "react";
 import { DevTestPill } from "@/components/dev-test-pill";
 import { fetchAdapterChatMetadata } from "@/lib/api/adapter-detail";
 import {
+  postKnowledgeFeedback,
+  type KnowledgeFeedbackKind,
+} from "@/lib/api/feedback";
+import {
   streamChatCompletions,
   type ChatMessage,
 } from "@/lib/api/chat-stream";
@@ -21,7 +25,7 @@ import type {
   KnowledgeCollectionListItem,
 } from "@/lib/types/knowledge";
 import { useR3mesWalletAuth } from "@/lib/hooks/use-r3mes-wallet-auth";
-import { getChatDebugEnabled } from "@/lib/env";
+import { getChatDebugEnabled, getFeedbackEvalQueryEnabled } from "@/lib/env";
 import {
   chat,
   walletConnectForChatAction,
@@ -44,6 +48,8 @@ const SUGGESTED_PROMPTS = [
 type ChatTurn = ChatMessage & {
   sources?: ChatSourceCitation[];
   retrievalDebug?: ChatRetrievalDebug;
+  traceId?: string;
+  queryHash?: string;
 };
 
 type KnowledgeDomainFilter = "auto" | "all" | "medical" | "legal" | "technical" | "education" | "finance";
@@ -501,6 +507,60 @@ function SourceSelectionActionBadge({
   );
 }
 
+function FeedbackActions({
+  disabled,
+  status,
+  turn,
+  onSubmit,
+}: {
+  disabled: boolean;
+  status?: "sending" | "sent" | "error";
+  turn: ChatTurn;
+  onSubmit: (kind: KnowledgeFeedbackKind) => void;
+}) {
+  const hasSources = Boolean(turn.sources?.length);
+  const actions: Array<{ kind: KnowledgeFeedbackKind; label: string; tone: "good" | "bad" | "neutral" }> = [
+    { kind: "GOOD_ANSWER", label: "Cevap iyi", tone: "good" },
+    { kind: "BAD_ANSWER", label: "Cevap sorunlu", tone: "bad" },
+    hasSources
+      ? { kind: "GOOD_SOURCE", label: "Kaynak doğru", tone: "good" }
+      : { kind: "MISSING_SOURCE", label: "Kaynak eksik", tone: "neutral" },
+    ...(hasSources ? [{ kind: "WRONG_SOURCE" as const, label: "Kaynak yanlış", tone: "bad" as const }] : []),
+  ];
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-zinc-800/80 pt-2">
+      <span className="mr-1 text-[10px] uppercase tracking-wider text-zinc-600">
+        Feedback
+      </span>
+      {actions.map((action) => (
+        <button
+          key={action.kind}
+          type="button"
+          disabled={disabled || status === "sending"}
+          onClick={() => onSubmit(action.kind)}
+          className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+            action.tone === "good"
+              ? "border-emerald-500/25 bg-emerald-950/10 text-emerald-100 hover:border-emerald-400/45"
+              : action.tone === "bad"
+                ? "border-amber-500/25 bg-amber-950/10 text-amber-100 hover:border-amber-400/45"
+                : "border-sky-500/25 bg-sky-950/10 text-sky-100 hover:border-sky-400/45"
+          }`}
+        >
+          {action.label}
+        </button>
+      ))}
+      {status === "sent" ? (
+        <span className="text-[10px] text-emerald-300/80">Kaydedildi</span>
+      ) : status === "error" ? (
+        <span className="text-[10px] text-amber-200/90">Kaydedilemedi</span>
+      ) : status === "sending" ? (
+        <span className="text-[10px] text-zinc-500">Gönderiliyor…</span>
+      ) : null}
+    </div>
+  );
+}
+
 export function ChatScreen() {
   const account = useCurrentAccount();
   const { ensureAuthHeaders } = useR3mesWalletAuth();
@@ -524,6 +584,7 @@ export function ChatScreen() {
   const [knowledgeDomainFilter, setKnowledgeDomainFilter] = useState<KnowledgeDomainFilter>("auto");
   const [showInternalKnowledge, setShowInternalKnowledge] = useState(false);
   const [showDebugDetails, setShowDebugDetails] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<Record<string, "sending" | "sent" | "error">>({});
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -628,6 +689,61 @@ export function ChatScreen() {
     setInput(prompt);
   }
 
+  async function submitFeedback(
+    messageIndex: number,
+    turn: ChatTurn,
+    question: string,
+    kind: KnowledgeFeedbackKind,
+  ) {
+    if (!account?.address) {
+      setError(walletConnectForChatAction);
+      return;
+    }
+
+    const key = `${messageIndex}:${kind}`;
+    setFeedbackStatus((current) => ({ ...current, [key]: "sending" }));
+    try {
+      const auth = await ensureAuthHeaders();
+      const firstSource = turn.sources?.[0];
+      const metadata: Record<string, unknown> = {
+        sourceCount: turn.sources?.length ?? 0,
+        selectedCollectionIds,
+        includePublic,
+        routeDecisionMode: turn.retrievalDebug?.sourceSelection?.routeDecision?.mode ?? null,
+        routeDecisionConfidence: turn.retrievalDebug?.sourceSelection?.routeDecision?.confidence ?? null,
+        sourceTitles: turn.sources?.slice(0, 3).map((source) => source.title) ?? [],
+      };
+      if (getFeedbackEvalQueryEnabled()) {
+        metadata.redactedQuery = question.slice(0, 500);
+      }
+
+      await postKnowledgeFeedback(
+        {
+          kind,
+          traceId: turn.traceId ?? null,
+          query: question,
+          queryHash: turn.queryHash ?? null,
+          collectionId:
+            kind === "GOOD_SOURCE" || kind === "WRONG_SOURCE"
+              ? firstSource?.collectionId ?? null
+              : selectedCollectionIds[0] ?? firstSource?.collectionId ?? null,
+          documentId:
+            kind === "GOOD_SOURCE" || kind === "WRONG_SOURCE"
+              ? firstSource?.documentId ?? null
+              : null,
+          expectedCollectionId:
+            turn.retrievalDebug?.sourceSelection?.suggestedCollections?.[0]?.id ?? null,
+          reason: kind.toLocaleLowerCase("tr-TR").replace(/_/g, " "),
+          metadata,
+        },
+        auth,
+      );
+      setFeedbackStatus((current) => ({ ...current, [key]: "sent" }));
+    } catch {
+      setFeedbackStatus((current) => ({ ...current, [key]: "error" }));
+    }
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || streaming) return;
@@ -670,19 +786,11 @@ export function ChatScreen() {
         auth,
         signal: ac.signal,
         onSources: (sources) => {
-          setMessages([
-            ...history,
-            {
-              role: "assistant",
-              content: assistant,
-              sources,
-            },
-          ]);
-        },
-        onRetrievalDebug: (retrievalDebug) => {
           setMessages((current) => {
             const last = current[current.length - 1];
-            const sources = last?.role === "assistant" ? last.sources : [];
+            const retrievalDebug = last?.role === "assistant" ? last.retrievalDebug : undefined;
+            const traceId = last?.role === "assistant" ? last.traceId : undefined;
+            const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
             return [
               ...history,
               {
@@ -690,6 +798,45 @@ export function ChatScreen() {
                 content: assistant,
                 sources,
                 retrievalDebug,
+                traceId,
+                queryHash,
+              },
+            ];
+          });
+        },
+        onRetrievalDebug: (retrievalDebug) => {
+          setMessages((current) => {
+            const last = current[current.length - 1];
+            const sources = last?.role === "assistant" ? last.sources : [];
+            const traceId = last?.role === "assistant" ? last.traceId : undefined;
+            const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
+            return [
+              ...history,
+              {
+                role: "assistant",
+                content: assistant,
+                sources,
+                retrievalDebug,
+                traceId,
+                queryHash,
+              },
+            ];
+          });
+        },
+        onChatTrace: (trace) => {
+          setMessages((current) => {
+            const last = current[current.length - 1];
+            const sources = last?.role === "assistant" ? last.sources : [];
+            const retrievalDebug = last?.role === "assistant" ? last.retrievalDebug : undefined;
+            return [
+              ...history,
+              {
+                role: "assistant",
+                content: assistant,
+                sources,
+                retrievalDebug,
+                traceId: trace.traceId,
+                queryHash: trace.query?.hash,
               },
             ];
           });
@@ -700,9 +847,11 @@ export function ChatScreen() {
           const last = current[current.length - 1];
           const sources = last?.role === "assistant" ? last.sources : [];
           const retrievalDebug = last?.role === "assistant" ? last.retrievalDebug : undefined;
+          const traceId = last?.role === "assistant" ? last.traceId : undefined;
+          const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
           return [
             ...history,
-            { role: "assistant", content: assistant, sources, retrievalDebug },
+            { role: "assistant", content: assistant, sources, retrievalDebug, traceId, queryHash },
           ];
         });
       }
@@ -1250,6 +1399,21 @@ export function ChatScreen() {
                   <RetrievalDebugPanel
                     debug={m.retrievalDebug}
                     visible={showDebugDetails}
+                  />
+                ) : null}
+                {m.role === "assistant" && m.content.trim().length > 0 ? (
+                  <FeedbackActions
+                    disabled={streaming}
+                    status={feedbackStatus[`${i}:GOOD_ANSWER`] ?? feedbackStatus[`${i}:BAD_ANSWER`] ?? feedbackStatus[`${i}:GOOD_SOURCE`] ?? feedbackStatus[`${i}:WRONG_SOURCE`] ?? feedbackStatus[`${i}:MISSING_SOURCE`]}
+                    turn={m}
+                    onSubmit={(kind) => {
+                      const question =
+                        messages
+                          .slice(0, i)
+                          .reverse()
+                          .find((message) => message.role === "user")?.content ?? "";
+                      void submitFeedback(i, m, question, kind);
+                    }}
                   />
                 ) : null}
               </div>

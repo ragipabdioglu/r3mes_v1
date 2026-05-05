@@ -106,3 +106,11 @@ export function getWalletAuthRequireJti(): boolean {
 export function getChatDebugEnabled(): boolean {
   return process.env.NEXT_PUBLIC_R3MES_CHAT_DEBUG === "1";
 }
+
+/**
+ * Feedback regression eval için ham sorgu saklama opt-in kalsın.
+ * Kapalıyken feedback yalnız query hash + kaynak sinyali taşır.
+ */
+export function getFeedbackEvalQueryEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_R3MES_FEEDBACK_EVAL_QUERY === "1";
+}
