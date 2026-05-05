@@ -7,6 +7,8 @@ import {
   safeParseKnowledgeFeedbackApplyPlanResponse,
   safeParseKnowledgeFeedbackCreateRequest,
   safeParseKnowledgeFeedbackCreateResponse,
+  safeParseKnowledgeFeedbackGateResultRequest,
+  safeParseKnowledgeFeedbackGateResultResponse,
   safeParseKnowledgeFeedbackProposalGenerateResponse,
   safeParseKnowledgeFeedbackProposalImpactResponse,
   safeParseKnowledgeFeedbackProposalListResponse,
@@ -18,6 +20,7 @@ import {
   type KnowledgeFeedbackApplyRecordCreateResponse,
   type KnowledgeFeedbackApplyRecordItem,
   type KnowledgeFeedbackApplyPlanStep,
+  type KnowledgeFeedbackGateResultResponse,
   type KnowledgeFeedbackProposalAction,
   type KnowledgeFeedbackProposalGenerateResponse,
   type KnowledgeFeedbackProposalImpactItem,
@@ -730,5 +733,55 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
       return sendApiError(reply, 500, "FEEDBACK_APPLY_RECORD_CONTRACT_FAILED", "Feedback apply record doğrulanamadı");
     }
     return reply.code(201).send(checked.data);
+  });
+
+  app.post("/v1/feedback/knowledge/apply-records/:recordId/gate-result", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const params = req.params as { recordId?: string };
+    if (!params.recordId) {
+      return sendApiError(reply, 400, "INVALID_FEEDBACK_APPLY_RECORD_ID", "Apply record id gerekli");
+    }
+    const parsed = safeParseKnowledgeFeedbackGateResultRequest(req.body);
+    if (!parsed.success) {
+      return sendApiError(reply, 400, "INVALID_FEEDBACK_GATE_RESULT", parsed.error.message);
+    }
+    const user = await ensureUser(wallet);
+    const existing = await prisma.knowledgeFeedbackApplyRecord.findFirst({
+      where: { id: params.recordId, userId: user.id },
+      select: { id: true, status: true },
+    });
+    if (!existing) {
+      return sendApiError(reply, 404, "FEEDBACK_APPLY_RECORD_NOT_FOUND", "Feedback apply record bulunamadı");
+    }
+    if (existing.status === "APPLIED" || existing.status === "ROLLED_BACK") {
+      return sendApiError(reply, 409, "FEEDBACK_APPLY_RECORD_FINALIZED", "Final durumdaki apply record güncellenemez");
+    }
+    const nextStatus = parsed.data.ok ? "GATE_PASSED" : "BLOCKED";
+    const record = await prisma.knowledgeFeedbackApplyRecord.update({
+      where: { id: existing.id },
+      data: {
+        status: nextStatus,
+        gateReport: (parsed.data.report ?? { ok: parsed.data.ok }) as Prisma.InputJsonValue,
+        gateCheckedAt: new Date(),
+        reason: normalizeOptionalString(parsed.data.reason) ?? (parsed.data.ok
+          ? "feedback eval gate passed; awaiting manual apply review"
+          : "feedback eval gate failed; inspect gate report before retry"),
+      },
+    });
+    const response: KnowledgeFeedbackGateResultResponse = {
+      record: toApplyRecordItem(record),
+      gatePassed: parsed.data.ok,
+      mutationApplied: false,
+      nextSafeAction: parsed.data.ok ? "manual_apply_review" : "inspect_gate_failures",
+    };
+    const checked = safeParseKnowledgeFeedbackGateResultResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback gate result contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_GATE_RESULT_CONTRACT_FAILED", "Feedback gate sonucu doğrulanamadı");
+    }
+    return reply.send(checked.data);
   });
 }

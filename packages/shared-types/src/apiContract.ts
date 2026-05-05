@@ -247,6 +247,19 @@ export interface KnowledgeFeedbackApplyRecordCreateResponse {
   nextSafeAction: "run_feedback_eval_gate";
 }
 
+export interface KnowledgeFeedbackGateResultRequest {
+  ok: boolean;
+  report?: Record<string, unknown> | null;
+  reason?: string | null;
+}
+
+export interface KnowledgeFeedbackGateResultResponse {
+  record: KnowledgeFeedbackApplyRecordItem;
+  gatePassed: boolean;
+  mutationApplied: false;
+  nextSafeAction: "manual_apply_review" | "inspect_gate_failures";
+}
+
 export interface ChatRetrievalDebug {
   groundingConfidence: "high" | "medium" | "low";
   domain: "medical" | "legal" | "finance" | "technical" | "education" | "general";

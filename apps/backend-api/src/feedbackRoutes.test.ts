@@ -27,7 +27,9 @@ vi.mock("./lib/prisma.js", () => ({
     },
     knowledgeFeedbackApplyRecord: {
       create: vi.fn(),
+      findFirst: vi.fn(),
       findMany: vi.fn(),
+      update: vi.fn(),
     },
     stakePosition: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -493,6 +495,98 @@ describe("knowledge feedback routes", () => {
           userId: "user_1",
           proposalId: "proposal_record",
           status: "PLANNED",
+        }),
+      }),
+    );
+    expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("marks a planned apply record as gate passed without applying mutations", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackApplyRecord.findFirst).mockResolvedValue({
+      id: "apply_record_1",
+      status: "PLANNED",
+    } as never);
+    vi.mocked(prisma.knowledgeFeedbackApplyRecord.update).mockResolvedValue({
+      id: "apply_record_1",
+      proposalId: "proposal_record",
+      status: "GATE_PASSED",
+      plan: {
+        proposal: {
+          id: "proposal_record",
+          action: "BOOST_SOURCE",
+          status: "APPROVED",
+          collectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          confidence: 1,
+          reason: "reviewed good source cluster",
+          evidence: { goodSourceCount: 2, total: 2 },
+          reviewedAt: "2026-05-05T12:05:00.000Z",
+          createdAt: "2026-05-05T12:00:00.000Z",
+          updatedAt: "2026-05-05T12:05:00.000Z",
+        },
+        impact: {
+          proposalId: "proposal_record",
+          action: "BOOST_SOURCE",
+          targetCollectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          estimatedScoreDelta: 0.16,
+          riskLevel: "low",
+          wouldAutoApply: false,
+          rationale: ["dry-run only: router/profile state is not mutated"],
+        },
+        steps: [],
+        mutationEnabled: false,
+        applyAllowed: false,
+        requiredGate: "feedback_eval_gate",
+        blockedReasons: ["mutation disabled: controlled apply preview only"],
+      },
+      reason: "gate passed in test",
+      plannedAt: new Date("2026-05-05T12:06:00.000Z"),
+      gateCheckedAt: new Date("2026-05-05T12:07:00.000Z"),
+      appliedAt: null,
+      rolledBackAt: null,
+      createdAt: new Date("2026-05-05T12:06:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:07:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge/apply-records/apply_record_1/gate-result",
+      headers: { "content-type": "application/json" },
+      payload: {
+        ok: true,
+        report: {
+          ok: true,
+          checks: [{ name: "rag_quality_gates", ok: true }],
+        },
+        reason: "gate passed in test",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      gatePassed?: boolean;
+      mutationApplied?: boolean;
+      nextSafeAction?: string;
+      record?: { status?: string };
+    };
+    expect(body.gatePassed).toBe(true);
+    expect(body.mutationApplied).toBe(false);
+    expect(body.nextSafeAction).toBe("manual_apply_review");
+    expect(body.record).toMatchObject({ status: "GATE_PASSED" });
+    expect(prisma.knowledgeFeedbackApplyRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "GATE_PASSED",
+          gateReport: expect.objectContaining({ ok: true }),
+          reason: "gate passed in test",
         }),
       }),
     );

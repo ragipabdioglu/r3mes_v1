@@ -15,6 +15,8 @@ import type {
   KnowledgeFeedbackApplyPlanStep,
   KnowledgeFeedbackApplyRecordCreateResponse,
   KnowledgeFeedbackApplyRecordItem,
+  KnowledgeFeedbackGateResultRequest,
+  KnowledgeFeedbackGateResultResponse,
   KnowledgeFeedbackCreateRequest,
   KnowledgeFeedbackCreateResponse,
   KnowledgeFeedbackProposalGenerateResponse,
@@ -298,6 +300,19 @@ export const KnowledgeFeedbackApplyRecordCreateResponseSchema: z.ZodType<Knowled
     nextSafeAction: z.literal("run_feedback_eval_gate"),
   });
 
+export const KnowledgeFeedbackGateResultRequestSchema: z.ZodType<KnowledgeFeedbackGateResultRequest> = z.object({
+  ok: z.boolean(),
+  report: z.record(z.unknown()).nullable().optional(),
+  reason: z.string().nullable().optional(),
+});
+
+export const KnowledgeFeedbackGateResultResponseSchema: z.ZodType<KnowledgeFeedbackGateResultResponse> = z.object({
+  record: KnowledgeFeedbackApplyRecordItemSchema,
+  gatePassed: z.boolean(),
+  mutationApplied: z.literal(false),
+  nextSafeAction: z.enum(["manual_apply_review", "inspect_gate_failures"]),
+});
+
 /** §3.6 — 501 stake / claim (kasıtlı yüzey; runtime çıkış doğrulaması) */
 export const NotImplementedOnChainRestResponseSchema: z.ZodType<NotImplementedOnChainRestResponse> =
   z.object({
@@ -452,6 +467,18 @@ export function safeParseKnowledgeFeedbackApplyRecordCreateResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyRecordCreateResponse> {
   return KnowledgeFeedbackApplyRecordCreateResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackGateResultRequest(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackGateResultRequest> {
+  return KnowledgeFeedbackGateResultRequestSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackGateResultResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackGateResultResponse> {
+  return KnowledgeFeedbackGateResultResponseSchema.safeParse(input);
 }
 
 export function parseNotImplementedOnChainRestResponse(
