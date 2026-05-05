@@ -48,6 +48,14 @@ export interface RouteDecisionLogEvent {
       domain: string | null;
       sourceQuality: KnowledgeMetadataRouteCandidate["sourceQuality"];
       matchedTerms: string[];
+      scoreBreakdown?: {
+        scoringMode?: string;
+        finalScore: number;
+        signals: Record<string, number>;
+        contributions: Record<string, number>;
+        missingSignals: string[];
+        adaptiveBonus?: number;
+      };
     }>;
     hasSources: boolean;
     warning: string | null;
@@ -104,6 +112,27 @@ export function buildRouteDecisionLogEvent(opts: {
         domain: candidate.domain,
         sourceQuality: candidate.sourceQuality,
         matchedTerms: candidate.matchedTerms,
+        ...(candidate.scoreBreakdown
+          ? {
+              scoreBreakdown: {
+                scoringMode: candidate.scoreBreakdown.scoringMode,
+                finalScore: roundedScore(candidate.scoreBreakdown.finalScore),
+                signals: Object.fromEntries(
+                  Object.entries(candidate.scoreBreakdown.signals).map(([key, value]) => [key, roundedScore(value)]),
+                ),
+                contributions: Object.fromEntries(
+                  Object.entries(candidate.scoreBreakdown.contributions).map(([key, value]) => [
+                    key,
+                    roundedScore(value),
+                  ]),
+                ),
+                missingSignals: candidate.scoreBreakdown.missingSignals,
+                ...(typeof candidate.scoreBreakdown.adaptiveBonus === "number"
+                  ? { adaptiveBonus: roundedScore(candidate.scoreBreakdown.adaptiveBonus) }
+                  : {}),
+              },
+            }
+          : {}),
       })),
       hasSources: opts.sourceSelection.hasSources,
       warning: opts.sourceSelection.warning,

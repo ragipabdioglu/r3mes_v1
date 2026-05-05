@@ -6,6 +6,14 @@ export interface RouterWeights {
   sourceQuality: number;
 }
 
+export interface RouterScoreBreakdown {
+  signals: Partial<Record<keyof RouterWeights, number>>;
+  weights: RouterWeights;
+  contributions: Partial<Record<keyof RouterWeights, number>>;
+  missingSignals: Array<keyof RouterWeights>;
+  finalScore: number;
+}
+
 export const DEFAULT_ROUTER_WEIGHTS: RouterWeights = {
   profileEmbedding: 0.45,
   lexicalKeyword: 0.25,
@@ -69,15 +77,36 @@ export function weightedRouterScore(
   signals: Partial<Record<keyof RouterWeights, number | null | undefined>>,
   weights: RouterWeights = getRouterWeights(),
 ): number {
+  return explainWeightedRouterScore(signals, weights).finalScore;
+}
+
+export function explainWeightedRouterScore(
+  signals: Partial<Record<keyof RouterWeights, number | null | undefined>>,
+  weights: RouterWeights = getRouterWeights(),
+): RouterScoreBreakdown {
   let totalWeight = 0;
   let totalScore = 0;
+  const normalizedSignals: Partial<Record<keyof RouterWeights, number>> = {};
+  const contributions: Partial<Record<keyof RouterWeights, number>> = {};
+  const missingSignals: Array<keyof RouterWeights> = [];
   for (const key of Object.keys(weights) as Array<keyof RouterWeights>) {
     const value = signals[key];
-    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      missingSignals.push(key);
+      continue;
+    }
     const clamped = Math.max(0, Math.min(100, value));
+    normalizedSignals[key] = Number(clamped.toFixed(3));
+    contributions[key] = Number((clamped * weights[key]).toFixed(3));
     totalWeight += weights[key];
     totalScore += clamped * weights[key];
   }
-  if (totalWeight <= 0) return 0;
-  return Number((totalScore / totalWeight).toFixed(3));
+  const finalScore = totalWeight <= 0 ? 0 : Number((totalScore / totalWeight).toFixed(3));
+  return {
+    signals: normalizedSignals,
+    weights,
+    contributions,
+    missingSignals,
+    finalScore,
+  };
 }

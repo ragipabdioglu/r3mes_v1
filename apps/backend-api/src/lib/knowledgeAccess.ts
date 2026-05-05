@@ -2,7 +2,7 @@ import { prisma } from "./prisma.js";
 import { cosineSimilarity, embedKnowledgeText, getKnowledgeEmbeddingDimensions } from "./knowledgeEmbedding.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { extractQuerySignals, routeQuery, type DomainRoutePlan } from "./queryRouter.js";
-import { getRouterWeights, weightedRouterScore } from "./routerConfig.js";
+import { explainWeightedRouterScore, getRouterWeights, type RouterScoreBreakdown } from "./routerConfig.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 
@@ -45,6 +45,10 @@ export interface KnowledgeMetadataRouteCandidate {
   id: string;
   name: string;
   score: number;
+  scoreBreakdown?: RouterScoreBreakdown & {
+    scoringMode: "route_profile" | "query_profile";
+    adaptiveBonus?: number;
+  };
   domain: string | null;
   subtopics: string[];
   matchedTerms: string[];
@@ -342,6 +346,10 @@ function profileQueryEmbeddingScore(profile: KnowledgeMetadataProfile, query: st
 }
 
 function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: string): number {
+  return explainMetadataProfileForQuery(profile, query).finalScore;
+}
+
+function explainMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: string): RouterScoreBreakdown {
   const concepts = queryAdaptiveTerms(query);
   const allTerms = queryTokens(query);
   const text = normalize(metadataText(profile));
@@ -364,7 +372,7 @@ function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: 
   );
   const domainHint = profile.domains.some((domain) => containsTerm(query, domain)) ? 40 : 0;
 
-  return weightedRouterScore(
+  return explainWeightedRouterScore(
     {
       profileEmbedding: profileQueryEmbeddingScore(profile, query),
       lexicalKeyword,
@@ -377,6 +385,14 @@ function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: 
 }
 
 function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number {
+  return explainMetadataProfile(profile, routePlan, query).finalScore;
+}
+
+function explainMetadataProfile(
+  profile: KnowledgeMetadataProfile,
+  routePlan: DomainRoutePlan,
+  query?: string,
+): RouterScoreBreakdown {
   const text = normalize(metadataText(profile));
   const profileSubtopics = profile.subtopics.map(normalize);
   const answerableText = normalize(profileAnswerableTerms(profile).join(" "));
@@ -409,7 +425,7 @@ function scoreMetadataProfile(profile: KnowledgeMetadataProfile, routePlan: Doma
     Math.min(Math.max(lexicalTerms.length, 1), 8),
   );
 
-  return weightedRouterScore(
+  return explainWeightedRouterScore(
     {
       profileEmbedding: profileEmbeddingScore(profile, routePlan, query),
       lexicalKeyword,
@@ -432,6 +448,7 @@ function metadataCandidateForRoute(
   const scored = profiles
     .map((profile) => {
       const text = normalize(metadataText(profile));
+      const scoreBreakdown = explainMetadataProfile(profile, routePlan, query);
       const matchedTerms = [
         ...routePlan.subtopics.filter((subtopic) => profile.subtopics.map(normalize).includes(normalize(subtopic))),
         ...routePlan.subtopics
@@ -442,7 +459,8 @@ function metadataCandidateForRoute(
       ];
       return {
         profile,
-        score: scoreMetadataProfile(profile, routePlan, query),
+        score: scoreBreakdown.finalScore,
+        scoreBreakdown,
         matchedTerms: [...new Set(matchedTerms)].slice(0, 8),
       };
     })
@@ -453,6 +471,7 @@ function metadataCandidateForRoute(
     id: collection.id,
     name: collection.name,
     score: best.score,
+    scoreBreakdown: { ...best.scoreBreakdown, scoringMode: "route_profile" },
     domain: best.profile.domain,
     subtopics: best.profile.subtopics.slice(0, 6),
     matchedTerms: best.matchedTerms,
@@ -475,10 +494,12 @@ function metadataCandidateForQuery(
   const scored = profiles
     .map((profile) => {
       const text = normalize(metadataText(profile));
+      const scoreBreakdown = explainMetadataProfileForQuery(profile, query);
       const matchedTerms = concepts.filter((term) => containsTerm(text, term));
       return {
         profile,
-        score: scoreMetadataProfileForQuery(profile, query),
+        score: scoreBreakdown.finalScore,
+        scoreBreakdown,
         matchedTerms: [...new Set(matchedTerms)].slice(0, 8),
       };
     })
@@ -489,6 +510,7 @@ function metadataCandidateForQuery(
     id: collection.id,
     name: collection.name,
     score: best.score,
+    scoreBreakdown: { ...best.scoreBreakdown, scoringMode: "query_profile" },
     domain: best.profile.domain,
     subtopics: best.profile.subtopics.slice(0, 6),
     matchedTerms: best.matchedTerms,
@@ -525,6 +547,13 @@ function adaptiveMetadataCandidate(
   const boostedQueryCandidate = {
     ...queryCandidate,
     score: queryCandidate.score + querySpecificMatchBonus + queryQualityBonus,
+    scoreBreakdown: queryCandidate.scoreBreakdown
+      ? {
+          ...queryCandidate.scoreBreakdown,
+          adaptiveBonus: querySpecificMatchBonus + queryQualityBonus,
+          finalScore: queryCandidate.score + querySpecificMatchBonus + queryQualityBonus,
+        }
+      : undefined,
   };
   const queryBeatsRoute = boostedQueryCandidate.score >= routeCandidate.score + 18 - routeThinPenalty;
 

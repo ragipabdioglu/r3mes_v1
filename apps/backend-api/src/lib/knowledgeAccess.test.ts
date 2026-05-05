@@ -321,6 +321,14 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(ranked.map((collection) => collection.id)[0]).toBe("education-bep");
     expect(metadataCandidates.map((collection) => collection.id)[0]).toBe("education-bep");
     expect(metadataCandidates[0]?.score ?? 0).toBeGreaterThan(metadataCandidates[1]?.score ?? 0);
+    expect(metadataCandidates[0]?.scoreBreakdown).toMatchObject({
+      scoringMode: expect.any(String),
+      finalScore: expect.any(Number),
+      signals: expect.any(Object),
+      contributions: expect.any(Object),
+      missingSignals: expect.any(Array),
+    });
+    expect(metadataCandidates[0]?.scoreBreakdown?.signals.sourceQuality).toBe(100);
   });
 
   it("explains profile-backed suggestions with quality and score", async () => {
@@ -503,6 +511,8 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(metadataCandidates.map((collection) => collection.id)[0]).toBe("education-traffic-workshop");
     expect(metadataCandidates[0]?.reason).toContain("Query-profile");
     expect(metadataCandidates[0]?.matchedTerms).toEqual(expect.arrayContaining(["trafik egitim", "ogrenci guvenligi"]));
+    expect(metadataCandidates[0]?.scoreBreakdown?.scoringMode).toBe("query_profile");
+    expect(metadataCandidates[0]?.scoreBreakdown?.adaptiveBonus).toBeGreaterThan(0);
   });
 
   it("marks thin profile suggestions as cautious instead of strict evidence", async () => {

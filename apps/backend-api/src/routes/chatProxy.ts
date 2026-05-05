@@ -23,6 +23,7 @@ import {
   resolveAccessibleKnowledgeCollections,
   resolveSuggestibleKnowledgeCollections,
   type KnowledgeCollectionAccessItem,
+  type KnowledgeMetadataRouteCandidate,
 } from "../lib/knowledgeAccess.js";
 import { retrieveKnowledgeContext } from "../lib/knowledgeRetrieval.js";
 import { retrieveKnowledgeContextQdrant } from "../lib/qdrantRetrieval.js";
@@ -71,16 +72,7 @@ interface ChatRetrievalDebug {
       usedCollectionIds: string[];
       unusedSelectedCollectionIds: string[];
       suggestedCollections: Array<{ id: string; name: string; reason: string }>;
-      metadataRouteCandidates: Array<{
-        id: string;
-        name: string;
-        score: number;
-        domain: string | null;
-        subtopics: string[];
-        matchedTerms: string[];
-        reason: string;
-        sourceQuality: "structured" | "inferred" | "thin" | null;
-      }>;
+      metadataRouteCandidates: KnowledgeMetadataRouteCandidate[];
       includePublic: boolean;
       routeDomain: DomainRoutePlan["domain"] | null;
       hasSources: boolean;
@@ -572,6 +564,18 @@ function summarizeSourceSelectionForTrace(
     unusedSelectedCollectionCount: sourceSelection.unusedSelectedCollectionIds.length,
     suggestedCollectionCount: sourceSelection.suggestedCollections.length,
     metadataRouteCandidateCount: sourceSelection.metadataRouteCandidates.length,
+    topMetadataRouteCandidates: sourceSelection.metadataRouteCandidates.slice(0, 3).map((candidate) => ({
+      id: candidate.id,
+      score: Math.round(candidate.score * 100) / 100,
+      domain: candidate.domain,
+      sourceQuality: candidate.sourceQuality,
+      matchedTermCount: candidate.matchedTerms.length,
+      scoringMode: candidate.scoreBreakdown?.scoringMode,
+      scoreSignals: candidate.scoreBreakdown?.signals,
+      scoreContributions: candidate.scoreBreakdown?.contributions,
+      adaptiveBonus: candidate.scoreBreakdown?.adaptiveBonus,
+      missingSignals: candidate.scoreBreakdown?.missingSignals,
+    })),
     hasSources: sourceSelection.hasSources,
     warning: sourceSelection.warning,
     decision: {
