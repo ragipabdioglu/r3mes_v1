@@ -232,6 +232,16 @@ export interface KnowledgeFeedbackApplyRecordItem {
   proposalId: string;
   status: "PLANNED" | "GATE_PASSED" | "APPLIED" | "ROLLED_BACK" | "BLOCKED";
   plan: KnowledgeFeedbackApplyPlanResponse;
+  gateReportSummary: {
+    ok: boolean | null;
+    checksTotal: number;
+    checksPassed: number;
+    checksFailed: number;
+    failedChecks: string[];
+    durationMs: number | null;
+    quick: boolean | null;
+    generatedAt: string | null;
+  } | null;
   reason: string | null;
   plannedAt: string;
   gateCheckedAt: string | null;

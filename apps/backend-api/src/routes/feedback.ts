@@ -355,11 +355,39 @@ function buildApplyPlan(proposal: KnowledgeFeedbackProposalItem): {
   return { steps, blockedReasons };
 }
 
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function summarizeGateReport(value: unknown): KnowledgeFeedbackApplyRecordItem["gateReportSummary"] {
+  const report = asObject(value);
+  if (!report) return null;
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  const normalizedChecks = checks
+    .map((check) => asObject(check))
+    .filter((check): check is Record<string, unknown> => Boolean(check));
+  const checksPassed = normalizedChecks.filter((check) => check.ok === true).length;
+  const failedChecks = normalizedChecks
+    .filter((check) => check.ok === false)
+    .map((check) => typeof check.name === "string" && check.name.trim() ? check.name.trim() : "unnamed_check");
+  return {
+    ok: typeof report.ok === "boolean" ? report.ok : null,
+    checksTotal: normalizedChecks.length,
+    checksPassed,
+    checksFailed: failedChecks.length,
+    failedChecks,
+    durationMs: typeof report.durationMs === "number" && Number.isFinite(report.durationMs) ? report.durationMs : null,
+    quick: typeof report.quick === "boolean" ? report.quick : null,
+    generatedAt: typeof report.generatedAt === "string" ? report.generatedAt : null,
+  };
+}
+
 function toApplyRecordItem(row: {
   id: string;
   proposalId: string;
   status: string;
   plan: unknown;
+  gateReport?: unknown;
   reason: string | null;
   plannedAt: Date;
   gateCheckedAt: Date | null;
@@ -373,6 +401,7 @@ function toApplyRecordItem(row: {
     proposalId: row.proposalId,
     status: row.status as KnowledgeFeedbackApplyRecordItem["status"],
     plan: row.plan as KnowledgeFeedbackApplyPlanResponse,
+    gateReportSummary: summarizeGateReport(row.gateReport),
     reason: row.reason,
     plannedAt: row.plannedAt.toISOString(),
     gateCheckedAt: row.gateCheckedAt?.toISOString() ?? null,

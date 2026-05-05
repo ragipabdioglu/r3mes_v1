@@ -61,6 +61,12 @@ function signalCount(item: KnowledgeFeedbackProposalItem): number {
   }, 0);
 }
 
+function formatDurationMs(value: number | null): string {
+  if (value == null) return "-";
+  if (value < 1000) return `${Math.round(value)}ms`;
+  return `${(value / 1000).toFixed(1)}s`;
+}
+
 export function FeedbackLearningBoard() {
   const account = useCurrentAccount();
   const { ensureAuthHeaders } = useR3mesWalletAuth();
@@ -289,6 +295,18 @@ export function FeedbackLearningBoard() {
                 <p className="mt-1 text-zinc-500">
                   gate={record.gateCheckedAt ? new Date(record.gateCheckedAt).toLocaleString("tr-TR") : "bekliyor"} · reason={record.reason ?? "-"}
                 </p>
+                {record.gateReportSummary ? (
+                  <div className="mt-2 rounded-lg border border-zinc-800 bg-black/20 p-2 text-[11px] text-zinc-500">
+                    <p>
+                      gateOk={String(record.gateReportSummary.ok)} · checks={record.gateReportSummary.checksPassed}/{record.gateReportSummary.checksTotal} · failed={record.gateReportSummary.checksFailed} · duration={formatDurationMs(record.gateReportSummary.durationMs)}
+                    </p>
+                    {record.gateReportSummary.failedChecks.length > 0 ? (
+                      <p className="mt-1 text-rose-200/75">
+                        Failed: {record.gateReportSummary.failedChecks.join(", ")}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
