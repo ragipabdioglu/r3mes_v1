@@ -17,6 +17,12 @@ vi.mock("./lib/prisma.js", () => ({
     },
     knowledgeFeedback: {
       create: vi.fn(),
+      findMany: vi.fn(),
+    },
+    knowledgeFeedbackProposal: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      update: vi.fn(),
     },
     stakePosition: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -112,6 +118,137 @@ describe("knowledge feedback routes", () => {
 
     expect(res.statusCode).toBe(403);
     expect(prisma.knowledgeFeedback.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("summarizes feedback and generates pending human-review proposals", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedback.findMany).mockResolvedValue([
+      {
+        kind: "WRONG_SOURCE",
+        collectionId: "kc_wrong",
+        expectedCollectionId: "kc_expected",
+        queryHash: "hash_1",
+      },
+      {
+        kind: "WRONG_SOURCE",
+        collectionId: "kc_wrong",
+        expectedCollectionId: "kc_expected",
+        queryHash: "hash_1",
+      },
+      {
+        kind: "GOOD_SOURCE",
+        collectionId: "kc_good",
+        expectedCollectionId: null,
+        queryHash: "hash_2",
+      },
+    ] as never);
+    vi.mocked(prisma.knowledgeFeedbackProposal.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.knowledgeFeedbackProposal.create).mockResolvedValue({
+      id: "proposal_1",
+      action: "PENALIZE_SOURCE",
+      status: "PENDING",
+      collectionId: "kc_wrong",
+      expectedCollectionId: "kc_expected",
+      queryHash: "hash_1",
+      confidence: 1,
+      reason: "2 wrong-source feedback sinyali bu collection için temkinli ceza öneriyor.",
+      evidence: {
+        key: "kc_wrong|kc_expected|hash_1",
+        wrongSourceCount: 2,
+      },
+      reviewedAt: null,
+      createdAt: new Date("2026-05-05T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:00:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const summaryRes = await app.inject({
+      method: "GET",
+      url: "/v1/feedback/knowledge/summary",
+    });
+    expect(summaryRes.statusCode).toBe(200);
+    const summary = JSON.parse(summaryRes.body) as {
+      data?: Array<{ collectionId?: string | null; wrongSourceCount?: number; suggestedAction?: string | null }>;
+      totalFeedback?: number;
+    };
+    expect(summary.totalFeedback).toBe(3);
+    expect(summary.data?.[0]).toMatchObject({
+      collectionId: "kc_wrong",
+      wrongSourceCount: 2,
+      suggestedAction: "PENALIZE_SOURCE",
+    });
+
+    const proposalRes = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge/proposals/generate?minSignals=2",
+    });
+    expect(proposalRes.statusCode).toBe(200);
+    const proposalBody = JSON.parse(proposalRes.body) as {
+      generatedCount?: number;
+      data?: Array<{ action?: string; status?: string; collectionId?: string | null }>;
+    };
+    expect(proposalBody.generatedCount).toBe(1);
+    expect(proposalBody.data?.[0]).toMatchObject({
+      action: "PENALIZE_SOURCE",
+      status: "PENDING",
+      collectionId: "kc_wrong",
+    });
+    expect(prisma.knowledgeFeedbackProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "PENALIZE_SOURCE",
+          collectionId: "kc_wrong",
+          expectedCollectionId: "kc_expected",
+          queryHash: "hash_1",
+        }),
+      }),
+    );
+    await app.close();
+  });
+
+  it("approves or rejects proposals without applying router changes", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackProposal.findFirst).mockResolvedValue({ id: "proposal_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackProposal.update).mockResolvedValue({
+      id: "proposal_1",
+      action: "PENALIZE_SOURCE",
+      status: "APPROVED",
+      collectionId: "kc_wrong",
+      expectedCollectionId: null,
+      queryHash: "hash_1",
+      confidence: 0.8,
+      reason: "reviewed",
+      evidence: { wrongSourceCount: 2 },
+      reviewedAt: new Date("2026-05-05T12:05:00.000Z"),
+      createdAt: new Date("2026-05-05T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:05:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge/proposals/proposal_1/approve",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({
+      proposal: {
+        id: "proposal_1",
+        status: "APPROVED",
+        action: "PENALIZE_SOURCE",
+      },
+    });
+    expect(prisma.knowledgeFeedbackProposal.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "proposal_1" },
+        data: expect.objectContaining({ status: "APPROVED" }),
+      }),
+    );
     await app.close();
   });
 });

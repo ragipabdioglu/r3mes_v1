@@ -10,8 +10,13 @@ import type {
   ChatSourceCitation,
   KnowledgeCollectionListItem,
   KnowledgeDetailResponse,
+  KnowledgeFeedbackAggregateItem,
   KnowledgeFeedbackCreateRequest,
   KnowledgeFeedbackCreateResponse,
+  KnowledgeFeedbackProposalGenerateResponse,
+  KnowledgeFeedbackProposalItem,
+  KnowledgeFeedbackProposalReviewResponse,
+  KnowledgeFeedbackSummaryResponse,
   KnowledgeDocumentListItem,
   KnowledgeListResponse,
   KnowledgeUploadAcceptedResponse,
@@ -157,6 +162,62 @@ export const KnowledgeFeedbackCreateResponseSchema: z.ZodType<KnowledgeFeedbackC
   createdAt: z.string().min(1),
 });
 
+export const KnowledgeFeedbackProposalActionSchema = z.enum([
+  "BOOST_SOURCE",
+  "PENALIZE_SOURCE",
+  "REVIEW_MISSING_SOURCE",
+  "REVIEW_ANSWER_QUALITY",
+]);
+
+export const KnowledgeFeedbackProposalStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
+
+export const KnowledgeFeedbackAggregateItemSchema: z.ZodType<KnowledgeFeedbackAggregateItem> = z.object({
+  key: z.string().min(1),
+  collectionId: z.string().nullable(),
+  expectedCollectionId: z.string().nullable(),
+  queryHash: z.string().nullable(),
+  total: z.number().int().nonnegative(),
+  goodSourceCount: z.number().int().nonnegative(),
+  wrongSourceCount: z.number().int().nonnegative(),
+  missingSourceCount: z.number().int().nonnegative(),
+  badAnswerCount: z.number().int().nonnegative(),
+  goodAnswerCount: z.number().int().nonnegative(),
+  negativeRate: z.number().min(0).max(1),
+  suggestedAction: KnowledgeFeedbackProposalActionSchema.nullable(),
+});
+
+export const KnowledgeFeedbackSummaryResponseSchema: z.ZodType<KnowledgeFeedbackSummaryResponse> = z.object({
+  data: z.array(KnowledgeFeedbackAggregateItemSchema),
+  totalFeedback: z.number().int().nonnegative(),
+  generatedAt: z.string().min(1),
+});
+
+export const KnowledgeFeedbackProposalItemSchema: z.ZodType<KnowledgeFeedbackProposalItem> = z.object({
+  id: z.string().min(1),
+  action: KnowledgeFeedbackProposalActionSchema,
+  status: KnowledgeFeedbackProposalStatusSchema,
+  collectionId: z.string().nullable(),
+  expectedCollectionId: z.string().nullable(),
+  queryHash: z.string().nullable(),
+  confidence: z.number().min(0).max(1),
+  reason: z.string().min(1),
+  evidence: z.record(z.string(), z.unknown()),
+  reviewedAt: z.string().nullable(),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+
+export const KnowledgeFeedbackProposalGenerateResponseSchema: z.ZodType<KnowledgeFeedbackProposalGenerateResponse> =
+  z.object({
+    data: z.array(KnowledgeFeedbackProposalItemSchema),
+    generatedCount: z.number().int().nonnegative(),
+  });
+
+export const KnowledgeFeedbackProposalReviewResponseSchema: z.ZodType<KnowledgeFeedbackProposalReviewResponse> =
+  z.object({
+    proposal: KnowledgeFeedbackProposalItemSchema,
+  });
+
 /** §3.6 — 501 stake / claim (kasıtlı yüzey; runtime çıkış doğrulaması) */
 export const NotImplementedOnChainRestResponseSchema: z.ZodType<NotImplementedOnChainRestResponse> =
   z.object({
@@ -269,6 +330,24 @@ export function safeParseKnowledgeFeedbackCreateResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackCreateResponse> {
   return KnowledgeFeedbackCreateResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackSummaryResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackSummaryResponse> {
+  return KnowledgeFeedbackSummaryResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackProposalGenerateResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackProposalGenerateResponse> {
+  return KnowledgeFeedbackProposalGenerateResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackProposalReviewResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackProposalReviewResponse> {
+  return KnowledgeFeedbackProposalReviewResponseSchema.safeParse(input);
 }
 
 export function parseNotImplementedOnChainRestResponse(

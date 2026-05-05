@@ -63,6 +63,19 @@ enum KnowledgeFeedbackKind {
   GOOD_ANSWER
 }
 
+enum KnowledgeFeedbackProposalAction {
+  BOOST_SOURCE
+  PENALIZE_SOURCE
+  REVIEW_MISSING_SOURCE
+  REVIEW_ANSWER_QUALITY
+}
+
+enum KnowledgeFeedbackProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model User {
   id             String   @id @default(cuid())
   walletAddress  String   @unique
@@ -74,6 +87,7 @@ model User {
   aiQueries            AiQuery[]
   knowledgeCollections KnowledgeCollection[]
   knowledgeFeedback    KnowledgeFeedback[]
+  knowledgeFeedbackProposals KnowledgeFeedbackProposal[]
 }
 
 /// LoRA / DoRA adaptörü — zincir + off-chain metadata
@@ -125,6 +139,7 @@ model KnowledgeCollection {
 
   documents KnowledgeDocument[]
   feedback  KnowledgeFeedback[]
+  feedbackProposals KnowledgeFeedbackProposal[]
 
   @@index([ownerId, createdAt(sort: Desc)])
   @@index([visibility, publishedAt])
@@ -155,6 +170,31 @@ model KnowledgeFeedback {
   @@index([collectionId, kind, createdAt(sort: Desc)])
   @@index([queryHash])
   @@index([traceId])
+}
+
+model KnowledgeFeedbackProposal {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  collectionId String?
+  collection   KnowledgeCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+
+  expectedCollectionId String?
+  action               KnowledgeFeedbackProposalAction
+  status               KnowledgeFeedbackProposalStatus @default(PENDING)
+  queryHash            String?
+  confidence           Float                           @default(0)
+  evidence             Json
+  reason               String                          @db.Text
+
+  reviewedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([collectionId, action, status])
+  @@index([queryHash])
 }
 
 model KnowledgeDocument {

@@ -125,6 +125,59 @@ export interface KnowledgeFeedbackCreateResponse {
   createdAt: string;
 }
 
+export type KnowledgeFeedbackProposalAction =
+  | "BOOST_SOURCE"
+  | "PENALIZE_SOURCE"
+  | "REVIEW_MISSING_SOURCE"
+  | "REVIEW_ANSWER_QUALITY";
+
+export type KnowledgeFeedbackProposalStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface KnowledgeFeedbackAggregateItem {
+  key: string;
+  collectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  total: number;
+  goodSourceCount: number;
+  wrongSourceCount: number;
+  missingSourceCount: number;
+  badAnswerCount: number;
+  goodAnswerCount: number;
+  negativeRate: number;
+  suggestedAction: KnowledgeFeedbackProposalAction | null;
+}
+
+export interface KnowledgeFeedbackSummaryResponse {
+  data: KnowledgeFeedbackAggregateItem[];
+  totalFeedback: number;
+  generatedAt: string;
+}
+
+export interface KnowledgeFeedbackProposalItem {
+  id: string;
+  action: KnowledgeFeedbackProposalAction;
+  status: KnowledgeFeedbackProposalStatus;
+  collectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  confidence: number;
+  reason: string;
+  evidence: Record<string, unknown>;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeFeedbackProposalGenerateResponse {
+  data: KnowledgeFeedbackProposalItem[];
+  generatedCount: number;
+}
+
+export interface KnowledgeFeedbackProposalReviewResponse {
+  proposal: KnowledgeFeedbackProposalItem;
+}
+
 export interface ChatRetrievalDebug {
   groundingConfidence: "high" | "medium" | "low";
   domain: "medical" | "legal" | "finance" | "technical" | "education" | "general";
