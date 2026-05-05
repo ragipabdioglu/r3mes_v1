@@ -151,6 +151,14 @@ describe("chat proxy RAG orchestration", () => {
       };
       choices?: Array<{ message?: { content?: string } }>;
       answer_quality?: { fallbackTemplateUsed?: boolean; lowLanguageQualityDetected?: boolean };
+      chat_trace?: {
+        query?: { hash?: string; length?: number };
+        stages?: Array<{ name?: string; status?: string; durationMs?: number }>;
+        retrieval?: { mode?: string; sourceCount?: number };
+        sourceSelection?: { selectionMode?: string; usedCollectionCount?: number };
+        safety?: { pass?: boolean };
+        answerPath?: { name?: string };
+      };
     };
     expect(body.sources?.[0]?.documentId).toBe("doc_1");
     expect(body.choices?.[0]?.message?.content).toContain("LoRA");
@@ -164,6 +172,19 @@ describe("chat proxy RAG orchestration", () => {
     expect(body.retrieval_debug?.evidence?.sourceIds).toContain("doc_1");
     expect(body.retrieval_debug?.quality?.sourceCount).toBe(1);
     expect(body.retrieval_debug?.quality?.directFactCount).toBeGreaterThan(0);
+    expect(body.chat_trace?.query?.hash).toHaveLength(16);
+    expect(body.chat_trace?.query?.length).toBeGreaterThan(0);
+    expect(body.chat_trace?.retrieval?.mode).toBe("true_hybrid");
+    expect(body.chat_trace?.retrieval?.sourceCount).toBe(1);
+    expect(body.chat_trace?.sourceSelection?.selectionMode).toBe("selected");
+    expect(body.chat_trace?.sourceSelection?.usedCollectionCount).toBe(1);
+    expect(body.chat_trace?.safety?.pass).toBe(true);
+    expect(body.chat_trace?.answerPath?.name).toBe("ai_engine_validated");
+    const traceStageNames = body.chat_trace?.stages?.map((stage) => stage.name) ?? [];
+    expect(traceStageNames).toEqual(
+      expect.arrayContaining(["request", "source_access", "query_planning", "retrieval", "source_selection", "ai_engine", "validator", "render_safety"]),
+    );
+    expect(body.chat_trace?.stages?.every((stage) => typeof stage.durationMs === "number")).toBe(true);
 
     const chatCalls = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/v1/chat/completions"));
     expect(chatCalls).toHaveLength(2);
@@ -247,6 +268,7 @@ describe("chat proxy RAG orchestration", () => {
     expect(body.safety_gate).toBeUndefined();
     expect(body.answer_quality).toBeUndefined();
     expect(body.retrieval_debug).toBeUndefined();
+    expect(body.chat_trace).toBeUndefined();
     await app.close();
   });
 

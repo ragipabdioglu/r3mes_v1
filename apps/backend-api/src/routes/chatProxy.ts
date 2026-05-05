@@ -9,6 +9,7 @@ import { EMPTY_GROUNDED_MEDICAL_ANSWER, type GroundedMedicalAnswer } from "../li
 import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
+import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
 import { retrieveKnowledgeContextTrueHybrid } from "../lib/hybridKnowledgeRetrieval.js";
@@ -541,6 +542,50 @@ async function postChatCompletionToAiEngine(opts: {
   return await send();
 }
 
+function summarizeRetrievalDiagnostics(diagnostics?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!diagnostics) return undefined;
+  const keys = [
+    "mode",
+    "embeddingProvider",
+    "embeddingDimension",
+    "qdrantCandidateCount",
+    "lexicalCandidateCount",
+    "preRankedCandidateCount",
+    "finalCandidateCount",
+    "droppedByAlignmentCount",
+    "alignmentFastFailed",
+    "rerankerMode",
+    "rerankerCandidateCount",
+  ];
+  return Object.fromEntries(keys.map((key) => [key, diagnostics[key]]).filter(([, value]) => value !== undefined));
+}
+
+function summarizeSourceSelectionForTrace(
+  sourceSelection: ChatRetrievalDebug["sourceSelection"],
+): Record<string, unknown> {
+  return {
+    selectionMode: sourceSelection.selectionMode,
+    includePublic: sourceSelection.includePublic,
+    requestedCollectionCount: sourceSelection.requestedCollectionIds.length,
+    accessibleCollectionCount: sourceSelection.accessibleCollectionIds.length,
+    usedCollectionCount: sourceSelection.usedCollectionIds.length,
+    unusedSelectedCollectionCount: sourceSelection.unusedSelectedCollectionIds.length,
+    suggestedCollectionCount: sourceSelection.suggestedCollections.length,
+    metadataRouteCandidateCount: sourceSelection.metadataRouteCandidates.length,
+    hasSources: sourceSelection.hasSources,
+    warning: sourceSelection.warning,
+    decision: {
+      mode: sourceSelection.routeDecision.mode,
+      confidence: sourceSelection.routeDecision.confidence,
+      selectedCollectionCount: sourceSelection.routeDecision.selectedCollectionIds.length,
+      usedCollectionCount: sourceSelection.routeDecision.usedCollectionIds.length,
+      suggestedCollectionCount: sourceSelection.routeDecision.suggestedCollectionIds.length,
+      rejectedCollectionCount: sourceSelection.routeDecision.rejectedCollectionIds.length,
+      reasons: sourceSelection.routeDecision.reasons,
+    },
+  };
+}
+
 function applyRenderedAnswer(
   payload: Record<string, unknown>,
   answer: GroundedMedicalAnswer,
@@ -548,7 +593,7 @@ function applyRenderedAnswer(
   userQuery = "",
   retrievalWasUsed = false,
   retrievalDebug: ChatRetrievalDebug | null = null,
-  opts: { useFallbackTemplate?: boolean; exposeDebug?: boolean } = {},
+  opts: { useFallbackTemplate?: boolean; exposeDebug?: boolean; chatTrace?: ChatTraceBuilder; answerPath?: string } = {},
 ): Record<string, unknown> {
   const next = structuredClone(payload) as Record<string, unknown>;
   const enrichedAnswer = enrichAnswerWithEvidence({
@@ -595,6 +640,15 @@ function applyRenderedAnswer(
     safetyGate.fallbackMode === "privacy_safe";
   const exposedSources = shouldHideCitations ? [] : sources;
   const exposedAnswer = shouldHideCitations ? { ...enrichedAnswer, used_source_ids: [] } : enrichedAnswer;
+  opts.chatTrace?.recordNow("render_safety", "ok", {
+    pass: safetyGate.pass,
+    fallbackMode: safetyGate.fallbackMode,
+    blockedReasons: safetyGate.blockedReasons,
+    exposedSourceCount: exposedSources.length,
+    hiddenSourceCount: sources.length - exposedSources.length,
+    fallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
+    lowLanguageQualityDetected: answerQuality.lowLanguageQualityDetected,
+  });
   const finalContent = shouldHideCitations
     ? (safetyGate.safeFallback ?? finalRendered)
         .replace(
@@ -621,6 +675,41 @@ function applyRenderedAnswer(
     next.safety_gate = safetyGate;
     next.answer_quality = answerQuality;
     if (retrievalDebug) next.retrieval_debug = retrievalDebug;
+    if (opts.chatTrace) {
+      next.chat_trace = opts.chatTrace.snapshot({
+        route: retrievalDebug?.routePlan
+          ? {
+              domain: retrievalDebug.routePlan.domain,
+              confidence: retrievalDebug.routePlan.confidence,
+              subtopics: retrievalDebug.routePlan.subtopics,
+            }
+          : undefined,
+        retrieval: retrievalDebug
+          ? {
+              mode: retrievalDebug.retrievalMode,
+              groundingConfidence: retrievalDebug.groundingConfidence,
+              sourceCount: retrievalDebug.quality.sourceCount,
+              directFactCount: retrievalDebug.quality.directFactCount,
+              hasUsableGrounding: retrievalDebug.quality.hasUsableGrounding,
+              diagnostics: summarizeRetrievalDiagnostics(retrievalDebug.retrievalDiagnostics),
+            }
+          : undefined,
+        sourceSelection: retrievalDebug
+          ? summarizeSourceSelectionForTrace(retrievalDebug.sourceSelection)
+          : undefined,
+        answerPath: {
+          name: opts.answerPath ?? "unknown",
+          retrievalWasUsed,
+          responseMode: retrievalDebug?.responseMode ?? null,
+        },
+        safety: {
+          pass: safetyGate.pass,
+          fallbackMode: safetyGate.fallbackMode,
+          blockedReasons: safetyGate.blockedReasons,
+          exposedSourceCount: exposedSources.length,
+        },
+      });
+    }
   }
   return next;
 }
@@ -1111,6 +1200,17 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const includePublic = rawBody.includePublic === true;
       const requestedCollectionIds = normalizeStringArray(rawBody.collectionIds);
       const retrievalQuery = extractRetrievalQuery(rawBody);
+      const chatTrace = createChatTrace({
+        query: retrievalQuery,
+        stream,
+        includePublic,
+        requestedCollectionCount: requestedCollectionIds.length,
+      });
+      chatTrace.recordNow("request", "ok", {
+        hasQuery: retrievalQuery.trim().length > 0,
+        messageCount: Array.isArray(rawBody.messages) ? rawBody.messages.length : 0,
+      });
+      const sourceAccessTrace = chatTrace.start("source_access");
       const accessibleCollections =
         requestedCollectionIds.length > 0 || includePublic
           ? await resolveAccessibleKnowledgeCollections({
@@ -1119,8 +1219,18 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               includePublic,
             })
           : [];
+      chatTrace.finish(sourceAccessTrace, "ok", {
+        requestedCollectionCount: requestedCollectionIds.length,
+        accessibleCollectionCount: accessibleCollections.length,
+        includePublic,
+      });
 
       if (requestedCollectionIds.length > 0 && accessibleCollections.length !== requestedCollectionIds.length) {
+        chatTrace.recordNow("answer_path", "error", {
+          name: "knowledge_access_denied",
+          requestedCollectionCount: requestedCollectionIds.length,
+          accessibleCollectionCount: accessibleCollections.length,
+        });
         return sendApiError(
           reply,
           403,
@@ -1129,19 +1239,28 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         );
       }
 
-        const queryPlan = retrievalQuery
-          ? await runQueryPlannerSkill({ userQuery: retrievalQuery, language: "tr" })
-          : null;
-        const plannedRetrievalQuery = queryPlan?.output.retrievalQuery || retrievalQuery;
-        const routePlan = queryPlan?.output.routePlan ?? null;
-        const suggestibleCollections = retrievalQuery
-          ? await resolveSuggestibleKnowledgeCollections({
-              walletAddress: wallet,
-              includePublic: true,
-            })
-          : [];
+      const queryPlanningTrace = chatTrace.start("query_planning");
+      const queryPlan = retrievalQuery
+        ? await runQueryPlannerSkill({ userQuery: retrievalQuery, language: "tr" })
+        : null;
+      const plannedRetrievalQuery = queryPlan?.output.retrievalQuery || retrievalQuery;
+      const routePlan = queryPlan?.output.routePlan ?? null;
+      const suggestibleCollections = retrievalQuery
+        ? await resolveSuggestibleKnowledgeCollections({
+            walletAddress: wallet,
+            includePublic: true,
+          })
+        : [];
+      chatTrace.finish(queryPlanningTrace, retrievalQuery ? "ok" : "skipped", {
+        routeDomain: routePlan?.domain ?? null,
+        routeConfidence: routePlan?.confidence ?? null,
+        subtopicCount: routePlan?.subtopics.length ?? 0,
+        suggestibleCollectionCount: suggestibleCollections.length,
+        plannedQueryChanged: plannedRetrievalQuery !== retrievalQuery,
+      });
 
-        const accessibleCollectionIds = accessibleCollections.map((item) => item.id);
+      const accessibleCollectionIds = accessibleCollections.map((item) => item.id);
+      const retrievalTrace = chatTrace.start("retrieval");
       const retrieval =
         retrievalQuery && accessibleCollectionIds.length > 0
           ? await (async () => {
@@ -1211,6 +1330,14 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               retrievalMode: "prisma" as const,
               retrievalDiagnostics: null,
             };
+      chatTrace.finish(retrievalTrace, retrievalQuery && accessibleCollectionIds.length > 0 ? "ok" : "skipped", {
+        mode: retrieval.retrievalMode,
+        groundingConfidence: retrieval.groundingConfidence,
+        sourceCount: retrieval.sources.length,
+        contextLength: retrieval.contextText.length,
+        hasEvidence: Boolean(retrieval.evidence),
+        diagnostics: summarizeRetrievalDiagnostics(retrieval.retrievalDiagnostics ?? undefined),
+      });
 
       const answerDomain = inferAnswerDomain({
         userQuery: retrievalQuery,
@@ -1221,6 +1348,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const domainPolicy = getDomainPolicy(answerDomain);
       const groundedComposerMode = getGroundedComposerMode();
       const responseMode = getChatResponseMode();
+      const suggestionProbeTrace = chatTrace.start("suggestion_probe");
       const retrievalSuggestedCollectionIds = retrievalQuery
         ? await resolveRetrievalBackedSuggestionIds({
             query: plannedRetrievalQuery,
@@ -1233,6 +1361,9 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             ]),
           })
         : [];
+      chatTrace.finish(suggestionProbeTrace, retrievalQuery ? "ok" : "skipped", {
+        suggestedCollectionCount: retrievalSuggestedCollectionIds.length,
+      });
       const sourceSelection = buildSourceSelectionSummary({
         query: plannedRetrievalQuery,
         requestedCollectionIds,
@@ -1243,6 +1374,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         routePlan,
         retrievalSuggestedCollectionIds,
       });
+      chatTrace.recordNow("source_selection", "ok", summarizeSourceSelectionForTrace(sourceSelection));
       const routeDecisionQuality = {
         sourceCount: retrieval.sources.length,
         directFactCount: retrieval.evidence?.directAnswerFacts.length ?? retrieval.evidence?.usableFacts.length ?? 0,
@@ -1290,6 +1422,11 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           sourceSelection.routeDecision.mode === "no_source"
         )
       ) {
+        chatTrace.recordNow("answer_path", "ok", {
+          name: "no_source_fallback",
+          retrievalWasUsed: false,
+          sourceCount: retrieval.sources.length,
+        });
         const deterministicAnswer = buildDeterministicGroundedAnswer({
           answerDomain,
           groundingConfidence: retrieval.groundingConfidence,
@@ -1304,7 +1441,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             retrievalQuery,
             false,
             retrievalDebug,
-            { useFallbackTemplate: true, exposeDebug },
+            { useFallbackTemplate: true, exposeDebug, chatTrace, answerPath: "no_source_fallback" },
           ),
         );
       }
@@ -1318,6 +1455,11 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           composerMode: groundedComposerMode,
         })
       ) {
+        chatTrace.recordNow("answer_path", "ok", {
+          name: "rag_fast_path",
+          retrievalWasUsed,
+          sourceCount: retrieval.sources.length,
+        });
         const deterministicAnswer = buildDeterministicGroundedAnswer({
           answerDomain,
           groundingConfidence: retrieval.groundingConfidence,
@@ -1332,7 +1474,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             retrievalQuery,
             retrievalWasUsed,
             retrievalDebug,
-            { useFallbackTemplate: true, exposeDebug },
+            { useFallbackTemplate: true, exposeDebug, chatTrace, answerPath: "rag_fast_path" },
           ),
         );
       }
@@ -1343,6 +1485,11 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           groundingConfidence: retrieval.groundingConfidence,
         })
       ) {
+        chatTrace.recordNow("answer_path", "ok", {
+          name: "fast_grounded_composer",
+          retrievalWasUsed,
+          sourceCount: retrieval.sources.length,
+        });
         const deterministicAnswer = buildDeterministicGroundedAnswer({
           answerDomain,
           groundingConfidence: retrieval.groundingConfidence,
@@ -1357,7 +1504,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             retrievalQuery,
             retrievalWasUsed,
             retrievalDebug,
-            { useFallbackTemplate: true, exposeDebug },
+            { useFallbackTemplate: true, exposeDebug, chatTrace, answerPath: "fast_grounded_composer" },
           ),
         );
       }
@@ -1404,6 +1551,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
 
       const resolved = await resolveAdapterCidForChatProxy({ body: orchestratedBody, answerDomain });
       if (!resolved.ok) {
+        chatTrace.recordNow("answer_path", "error", {
+          name: "adapter_resolution_failed",
+          statusCode: resolved.statusCode,
+        });
         reply.code(resolved.statusCode);
         return resolved.body;
       }
@@ -1413,16 +1564,29 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         e2eLifecycle: "chat_proxy_resolved",
         hasAdapterCid: typeof cid === "string" && cid.length > 0,
       });
+      chatTrace.recordNow("answer_path", "ok", {
+        name: "ai_engine",
+        retrievalWasUsed,
+        sourceCount: retrieval.sources.length,
+        hasAdapterCid: typeof cid === "string" && cid.length > 0,
+      });
 
       const upstream = `${getAiEngineBase()}/v1/chat/completions`;
       let res: Response;
+      const aiEngineTrace = chatTrace.start("ai_engine");
       try {
         res = await postChatCompletionToAiEngine({
           upstream,
           payload: resolved.upstreamBody,
           stream,
         });
+        chatTrace.finish(aiEngineTrace, res.ok ? "ok" : "error", {
+          status: res.status,
+          stream,
+          contentType: res.headers.get("content-type") ?? null,
+        });
       } catch (error) {
+        chatTrace.finish(aiEngineTrace, "error", { stream }, error);
         req.log.error({ err: error, upstream }, "AI engine chat request failed");
         return sendApiError(
           reply,
@@ -1458,6 +1622,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           if (shouldRunValidator) {
             const draftAnswer = extractAssistantContent(parsed);
             if (draftAnswer) {
+              const validatorTrace = chatTrace.start("validator");
               const validatorPayload = buildValidatorPayload({
                 baseBody: resolved.upstreamBody,
                 draftAnswer,
@@ -1467,6 +1632,9 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 domainPolicy,
               });
               const validatorRes = await postJsonToAiEngine(upstream, validatorPayload, "application/json");
+              chatTrace.finish(validatorTrace, validatorRes.ok ? "ok" : "error", {
+                status: validatorRes.status,
+              });
               if (validatorRes.ok) {
                 const validatorParsed = (await validatorRes.json()) as Record<string, unknown>;
                 const validatedAnswer = parseGroundedMedicalAnswer(
@@ -1481,12 +1649,18 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                       retrievalQuery,
                       retrievalWasUsed,
                       retrievalDebug,
-                      { exposeDebug },
+                      { exposeDebug, chatTrace, answerPath: "ai_engine_validated" },
                     ),
                   );
                 }
               }
             }
+          } else {
+            chatTrace.recordNow("validator", "skipped", {
+              retrievalWasUsed,
+              groundingConfidence: retrieval.groundingConfidence,
+              parsedAnswer: parsedAnswer != null,
+            });
           }
           if (parsedAnswer) {
             return reply.type(ct).send(
@@ -1497,7 +1671,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 retrievalQuery,
                 retrievalWasUsed,
                 retrievalDebug,
-                { exposeDebug },
+                { exposeDebug, chatTrace, answerPath: "ai_engine_parsed" },
               ),
             );
           }
@@ -1519,7 +1693,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                   retrievalQuery,
                   retrievalWasUsed,
                   retrievalDebug,
-                  { exposeDebug },
+                  { exposeDebug, chatTrace, answerPath: "ai_engine_draft_wrapped" },
                 ),
               );
             }
@@ -1536,12 +1710,28 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 retrievalQuery,
                 retrievalWasUsed,
                 retrievalDebug,
-                { exposeDebug },
+                { exposeDebug, chatTrace, answerPath: "ai_engine_empty_wrapped" },
               ),
             );
           }
           parsed.sources = retrieval.sources;
           if (exposeDebug && retrievalDebug) parsed.retrieval_debug = retrievalDebug;
+          if (exposeDebug) {
+            parsed.chat_trace = chatTrace.snapshot({
+              retrieval: retrievalDebug
+                ? {
+                    mode: retrievalDebug.retrievalMode,
+                    groundingConfidence: retrievalDebug.groundingConfidence,
+                    sourceCount: retrievalDebug.quality.sourceCount,
+                  }
+                : undefined,
+              answerPath: {
+                name: "ai_engine_raw_json",
+                retrievalWasUsed,
+                responseMode,
+              },
+            });
+          }
           return reply.type(ct).send(parsed);
         } catch {
           // fall through to raw buffer
