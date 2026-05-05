@@ -11,6 +11,8 @@ import type {
   KnowledgeCollectionListItem,
   KnowledgeDetailResponse,
   KnowledgeFeedbackAggregateItem,
+  KnowledgeFeedbackApplyPlanResponse,
+  KnowledgeFeedbackApplyPlanStep,
   KnowledgeFeedbackCreateRequest,
   KnowledgeFeedbackCreateResponse,
   KnowledgeFeedbackProposalGenerateResponse,
@@ -246,6 +248,33 @@ export const KnowledgeFeedbackProposalImpactResponseSchema: z.ZodType<KnowledgeF
     nextSafeAction: z.enum(["review_only", "run_eval_before_apply", "needs_more_feedback"]),
   });
 
+export const KnowledgeFeedbackApplyPlanStepSchema: z.ZodType<KnowledgeFeedbackApplyPlanStep> = z.object({
+  id: z.string().min(1),
+  kind: z.enum([
+    "BOOST_COLLECTION_SCORE",
+    "PENALIZE_COLLECTION_SCORE",
+    "CREATE_MISSING_SOURCE_REVIEW",
+    "CREATE_ANSWER_QUALITY_EVAL",
+  ]),
+  targetCollectionId: z.string().nullable(),
+  expectedCollectionId: z.string().nullable(),
+  queryHash: z.string().nullable(),
+  scoreDelta: z.number().min(-1).max(1),
+  reversible: z.literal(true),
+  rollback: z.string().min(1),
+  rationale: z.string().min(1),
+});
+
+export const KnowledgeFeedbackApplyPlanResponseSchema: z.ZodType<KnowledgeFeedbackApplyPlanResponse> = z.object({
+  proposal: KnowledgeFeedbackProposalItemSchema,
+  impact: KnowledgeFeedbackProposalImpactItemSchema,
+  steps: z.array(KnowledgeFeedbackApplyPlanStepSchema),
+  mutationEnabled: z.literal(false),
+  applyAllowed: z.literal(false),
+  requiredGate: z.literal("feedback_eval_gate"),
+  blockedReasons: z.array(z.string()),
+});
+
 /** §3.6 — 501 stake / claim (kasıtlı yüzey; runtime çıkış doğrulaması) */
 export const NotImplementedOnChainRestResponseSchema: z.ZodType<NotImplementedOnChainRestResponse> =
   z.object({
@@ -388,6 +417,12 @@ export function safeParseKnowledgeFeedbackProposalImpactResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackProposalImpactResponse> {
   return KnowledgeFeedbackProposalImpactResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackApplyPlanResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyPlanResponse> {
+  return KnowledgeFeedbackApplyPlanResponseSchema.safeParse(input);
 }
 
 export function parseNotImplementedOnChainRestResponse(

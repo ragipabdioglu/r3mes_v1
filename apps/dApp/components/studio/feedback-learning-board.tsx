@@ -4,11 +4,13 @@ import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  fetchKnowledgeFeedbackApplyPlan,
   fetchKnowledgeFeedbackProposalImpact,
   fetchKnowledgeFeedbackProposals,
   fetchKnowledgeFeedbackSummary,
   generateKnowledgeFeedbackProposals,
   reviewKnowledgeFeedbackProposal,
+  type KnowledgeFeedbackApplyPlanResponse,
   type KnowledgeFeedbackProposalImpactResponse,
   type KnowledgeFeedbackProposalItem,
   type KnowledgeFeedbackSummaryResponse,
@@ -53,6 +55,7 @@ export function FeedbackLearningBoard() {
   const [summary, setSummary] = useState<KnowledgeFeedbackSummaryResponse | null>(null);
   const [proposals, setProposals] = useState<KnowledgeFeedbackProposalItem[]>([]);
   const [impact, setImpact] = useState<Record<string, KnowledgeFeedbackProposalImpactResponse>>({});
+  const [applyPlan, setApplyPlan] = useState<Record<string, KnowledgeFeedbackApplyPlanResponse>>({});
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -118,6 +121,20 @@ export function FeedbackLearningBoard() {
       setImpact((current) => ({ ...current, [proposal.id]: nextImpact }));
     } catch {
       setErr("Impact raporu alınamadı.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function showApplyPlan(proposal: KnowledgeFeedbackProposalItem) {
+    setBusyId(proposal.id);
+    setErr(null);
+    try {
+      const auth = await ensureAuthHeaders();
+      const nextPlan = await fetchKnowledgeFeedbackApplyPlan(proposal.id, auth);
+      setApplyPlan((current) => ({ ...current, [proposal.id]: nextPlan }));
+    } catch {
+      setErr("Apply plan alınamadı.");
     } finally {
       setBusyId(null);
     }
@@ -227,6 +244,7 @@ export function FeedbackLearningBoard() {
         <ul className="space-y-3">
           {proposals.map((proposal) => {
             const proposalImpact = impact[proposal.id];
+            const proposalApplyPlan = applyPlan[proposal.id];
             const isBusy = busyId === proposal.id;
             return (
               <li key={proposal.id} className="rounded-2xl border border-zinc-800 bg-zinc-950/45 p-4">
@@ -254,6 +272,14 @@ export function FeedbackLearningBoard() {
                       className="rounded-full border border-sky-500/30 px-3 py-1.5 text-xs text-sky-100 hover:border-sky-400/60 disabled:opacity-50"
                     >
                       Impact
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void showApplyPlan(proposal)}
+                      disabled={isBusy}
+                      className="rounded-full border border-cyan-500/30 px-3 py-1.5 text-xs text-cyan-100 hover:border-cyan-400/60 disabled:opacity-50"
+                    >
+                      Apply plan
                     </button>
                     {proposal.status === "PENDING" ? (
                       <>
@@ -285,6 +311,29 @@ export function FeedbackLearningBoard() {
                     <ul className="mt-2 list-disc space-y-1 pl-4 text-sky-100/65">
                       {proposalImpact.impact.rationale.map((item) => (
                         <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {proposalApplyPlan ? (
+                  <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-950/10 p-3 text-xs leading-relaxed text-cyan-100/80">
+                    <p>
+                      mutation={String(proposalApplyPlan.mutationEnabled)} · applyAllowed={String(proposalApplyPlan.applyAllowed)} · gate={proposalApplyPlan.requiredGate}
+                    </p>
+                    {proposalApplyPlan.blockedReasons.length > 0 ? (
+                      <p className="mt-1 text-cyan-100/65">
+                        Blok: {proposalApplyPlan.blockedReasons.join(" · ")}
+                      </p>
+                    ) : null}
+                    <ul className="mt-2 space-y-2">
+                      {proposalApplyPlan.steps.map((step) => (
+                        <li key={step.id} className="rounded-lg border border-cyan-500/15 bg-black/15 p-2">
+                          <p className="font-mono text-[11px] text-cyan-100">
+                            {step.kind} · delta={step.scoreDelta} · target={shortId(step.targetCollectionId)}
+                          </p>
+                          <p className="mt-1 text-cyan-100/65">{step.rationale}</p>
+                          <p className="mt-1 text-cyan-100/50">Rollback: {step.rollback}</p>
+                        </li>
                       ))}
                     </ul>
                   </div>

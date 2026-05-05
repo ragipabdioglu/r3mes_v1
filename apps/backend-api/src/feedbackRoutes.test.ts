@@ -344,4 +344,61 @@ describe("knowledge feedback routes", () => {
     expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
     await app.close();
   });
+
+  it("returns a controlled apply preview without mutating router or profile state", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackProposal.findFirst).mockResolvedValue({
+      id: "proposal_apply",
+      action: "PENALIZE_SOURCE",
+      status: "APPROVED",
+      collectionId: "kc_wrong",
+      expectedCollectionId: "kc_expected",
+      queryHash: "hash_1",
+      confidence: 1,
+      reason: "reviewed wrong source cluster",
+      evidence: {
+        wrongSourceCount: 3,
+        total: 3,
+      },
+      reviewedAt: new Date("2026-05-05T12:05:00.000Z"),
+      createdAt: new Date("2026-05-05T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:05:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/feedback/knowledge/proposals/proposal_apply/apply-plan",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      mutationEnabled?: boolean;
+      applyAllowed?: boolean;
+      requiredGate?: string;
+      steps?: Array<{ kind?: string; targetCollectionId?: string | null; scoreDelta?: number }>;
+      blockedReasons?: string[];
+    };
+    expect(body.mutationEnabled).toBe(false);
+    expect(body.applyAllowed).toBe(false);
+    expect(body.requiredGate).toBe("feedback_eval_gate");
+    expect(body.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "PENALIZE_COLLECTION_SCORE",
+          targetCollectionId: "kc_wrong",
+        }),
+        expect.objectContaining({
+          kind: "BOOST_COLLECTION_SCORE",
+          targetCollectionId: "kc_expected",
+        }),
+      ]),
+    );
+    expect(body.steps?.[0]?.scoreDelta).toBeLessThan(0);
+    expect(body.blockedReasons?.join(" ")).toContain("mutation disabled");
+    expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
+    await app.close();
+  });
 });

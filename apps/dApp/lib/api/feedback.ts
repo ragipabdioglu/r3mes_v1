@@ -80,6 +80,30 @@ export type KnowledgeFeedbackProposalImpactResponse = {
   nextSafeAction: "review_only" | "run_eval_before_apply" | "needs_more_feedback";
 };
 
+export type KnowledgeFeedbackApplyPlanResponse = {
+  proposal: KnowledgeFeedbackProposalItem;
+  impact: KnowledgeFeedbackProposalImpactResponse["impact"];
+  steps: Array<{
+    id: string;
+    kind:
+      | "BOOST_COLLECTION_SCORE"
+      | "PENALIZE_COLLECTION_SCORE"
+      | "CREATE_MISSING_SOURCE_REVIEW"
+      | "CREATE_ANSWER_QUALITY_EVAL";
+    targetCollectionId: string | null;
+    expectedCollectionId: string | null;
+    queryHash: string | null;
+    scoreDelta: number;
+    reversible: true;
+    rollback: string;
+    rationale: string;
+  }>;
+  mutationEnabled: false;
+  applyAllowed: false;
+  requiredGate: "feedback_eval_gate";
+  blockedReasons: string[];
+};
+
 function authHeaders(auth: R3mesWalletAuthHeaders): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -142,6 +166,21 @@ export async function fetchKnowledgeFeedbackProposalImpact(
   );
   if (!res.ok) throw new Error(`Feedback proposal impact ${res.status}`);
   return (await res.json()) as KnowledgeFeedbackProposalImpactResponse;
+}
+
+export async function fetchKnowledgeFeedbackApplyPlan(
+  proposalId: string,
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeFeedbackApplyPlanResponse> {
+  const res = await fetch(
+    `${getBackendUrl()}/v1/feedback/knowledge/proposals/${encodeURIComponent(proposalId)}/apply-plan`,
+    {
+      cache: "no-store",
+      headers: authHeaders(auth),
+    },
+  );
+  if (!res.ok) throw new Error(`Feedback apply plan ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackApplyPlanResponse;
 }
 
 export async function reviewKnowledgeFeedbackProposal(

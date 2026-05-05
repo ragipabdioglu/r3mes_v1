@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@prisma/client";
 import {
+  safeParseKnowledgeFeedbackApplyPlanResponse,
   safeParseKnowledgeFeedbackCreateRequest,
   safeParseKnowledgeFeedbackCreateResponse,
   safeParseKnowledgeFeedbackProposalGenerateResponse,
@@ -12,6 +13,8 @@ import {
   safeParseKnowledgeFeedbackSummaryResponse,
   type KnowledgeFeedbackCreateResponse,
   type KnowledgeFeedbackAggregateItem,
+  type KnowledgeFeedbackApplyPlanResponse,
+  type KnowledgeFeedbackApplyPlanStep,
   type KnowledgeFeedbackProposalAction,
   type KnowledgeFeedbackProposalGenerateResponse,
   type KnowledgeFeedbackProposalImpactItem,
@@ -262,6 +265,86 @@ function buildImpact(proposal: KnowledgeFeedbackProposalItem): {
           ? "run_eval_before_apply"
           : "review_only",
   };
+}
+
+function buildApplyPlan(proposal: KnowledgeFeedbackProposalItem): {
+  steps: KnowledgeFeedbackApplyPlanStep[];
+  blockedReasons: string[];
+} {
+  const { impact, nextSafeAction } = buildImpact(proposal);
+  const blockedReasons = [
+    "mutation disabled: controlled apply preview only",
+    "feedback eval gate must pass before any durable router/profile change",
+  ];
+  if (proposal.status !== "APPROVED") {
+    blockedReasons.push("proposal is not approved");
+  }
+  if (nextSafeAction !== "run_eval_before_apply") {
+    blockedReasons.push(`next safe action is ${nextSafeAction}`);
+  }
+
+  const absDelta = Math.max(0.03, Math.min(0.25, Math.abs(impact.estimatedScoreDelta)));
+  const base = {
+    expectedCollectionId: proposal.expectedCollectionId,
+    queryHash: proposal.queryHash,
+    reversible: true as const,
+  };
+  const steps: KnowledgeFeedbackApplyPlanStep[] = [];
+
+  if (proposal.action === "PENALIZE_SOURCE" && proposal.collectionId) {
+    steps.push({
+      ...base,
+      id: `${proposal.id}:penalize:${proposal.collectionId}`,
+      kind: "PENALIZE_COLLECTION_SCORE",
+      targetCollectionId: proposal.collectionId,
+      scoreDelta: -absDelta,
+      rollback: "Remove or invert this query-scoped collection penalty.",
+      rationale: "Wrong-source feedback says this collection should rank lower for the same query cluster.",
+    });
+    if (proposal.expectedCollectionId) {
+      steps.push({
+        ...base,
+        id: `${proposal.id}:boost-expected:${proposal.expectedCollectionId}`,
+        kind: "BOOST_COLLECTION_SCORE",
+        targetCollectionId: proposal.expectedCollectionId,
+        scoreDelta: Math.min(0.18, absDelta * 0.75),
+        rollback: "Remove this query-scoped expected-source boost.",
+        rationale: "Feedback included an expected collection, so the safer preview pairs penalty with a smaller expected-source boost.",
+      });
+    }
+  } else if (proposal.action === "BOOST_SOURCE" && proposal.collectionId) {
+    steps.push({
+      ...base,
+      id: `${proposal.id}:boost:${proposal.collectionId}`,
+      kind: "BOOST_COLLECTION_SCORE",
+      targetCollectionId: proposal.collectionId,
+      scoreDelta: absDelta,
+      rollback: "Remove or invert this query-scoped collection boost.",
+      rationale: "Good-source feedback says this collection should rank higher for the same query cluster.",
+    });
+  } else if (proposal.action === "REVIEW_MISSING_SOURCE") {
+    steps.push({
+      ...base,
+      id: `${proposal.id}:missing-source-review`,
+      kind: "CREATE_MISSING_SOURCE_REVIEW",
+      targetCollectionId: proposal.expectedCollectionId ?? proposal.collectionId,
+      scoreDelta: 0,
+      rollback: "Close the generated missing-source review item without router/profile changes.",
+      rationale: "Missing-source feedback should become an ingestion/source coverage review before scoring changes.",
+    });
+  } else if (proposal.action === "REVIEW_ANSWER_QUALITY") {
+    steps.push({
+      ...base,
+      id: `${proposal.id}:answer-quality-eval`,
+      kind: "CREATE_ANSWER_QUALITY_EVAL",
+      targetCollectionId: proposal.collectionId,
+      scoreDelta: 0,
+      rollback: "Remove the generated answer-quality eval case before it is promoted to a gate.",
+      rationale: "Bad-answer feedback should become a regression eval before router/profile scoring changes.",
+    });
+  }
+
+  return { steps, blockedReasons };
 }
 
 export async function registerFeedbackRoutes(app: FastifyInstance) {
@@ -523,6 +606,42 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback proposal impact contract failed");
       return sendApiError(reply, 500, "FEEDBACK_PROPOSAL_IMPACT_CONTRACT_FAILED", "Feedback proposal etki raporu doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.get("/v1/feedback/knowledge/proposals/:id/apply-plan", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const params = req.params as { id?: string };
+    if (!params.id) {
+      return sendApiError(reply, 400, "INVALID_FEEDBACK_PROPOSAL_ID", "Proposal id gerekli");
+    }
+    const user = await ensureUser(wallet);
+    const proposalRow = await prisma.knowledgeFeedbackProposal.findFirst({
+      where: { id: params.id, userId: user.id },
+    });
+    if (!proposalRow) {
+      return sendApiError(reply, 404, "FEEDBACK_PROPOSAL_NOT_FOUND", "Feedback proposal bulunamadı");
+    }
+    const proposal = toProposalItem(proposalRow);
+    const { impact } = buildImpact(proposal);
+    const plan = buildApplyPlan(proposal);
+    const response: KnowledgeFeedbackApplyPlanResponse = {
+      proposal,
+      impact,
+      steps: plan.steps,
+      mutationEnabled: false,
+      applyAllowed: false,
+      requiredGate: "feedback_eval_gate",
+      blockedReasons: plan.blockedReasons,
+    };
+    const checked = safeParseKnowledgeFeedbackApplyPlanResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback apply plan contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_APPLY_PLAN_CONTRACT_FAILED", "Feedback apply plan doğrulanamadı");
     }
     return reply.send(checked.data);
   });

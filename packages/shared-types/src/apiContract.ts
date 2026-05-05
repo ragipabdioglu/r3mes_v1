@@ -201,6 +201,32 @@ export interface KnowledgeFeedbackProposalImpactResponse {
   nextSafeAction: "review_only" | "run_eval_before_apply" | "needs_more_feedback";
 }
 
+export interface KnowledgeFeedbackApplyPlanStep {
+  id: string;
+  kind:
+    | "BOOST_COLLECTION_SCORE"
+    | "PENALIZE_COLLECTION_SCORE"
+    | "CREATE_MISSING_SOURCE_REVIEW"
+    | "CREATE_ANSWER_QUALITY_EVAL";
+  targetCollectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  scoreDelta: number;
+  reversible: true;
+  rollback: string;
+  rationale: string;
+}
+
+export interface KnowledgeFeedbackApplyPlanResponse {
+  proposal: KnowledgeFeedbackProposalItem;
+  impact: KnowledgeFeedbackProposalImpactItem;
+  steps: KnowledgeFeedbackApplyPlanStep[];
+  mutationEnabled: false;
+  applyAllowed: false;
+  requiredGate: "feedback_eval_gate";
+  blockedReasons: string[];
+}
+
 export interface ChatRetrievalDebug {
   groundingConfidence: "high" | "medium" | "low";
   domain: "medical" | "legal" | "finance" | "technical" | "education" | "general";
