@@ -25,6 +25,10 @@ vi.mock("./lib/prisma.js", () => ({
       findFirst: vi.fn(),
       update: vi.fn(),
     },
+    knowledgeFeedbackApplyRecord: {
+      create: vi.fn(),
+      findMany: vi.fn(),
+    },
     stakePosition: {
       findMany: vi.fn().mockResolvedValue([]),
     },
@@ -398,6 +402,100 @@ describe("knowledge feedback routes", () => {
     );
     expect(body.steps?.[0]?.scoreDelta).toBeLessThan(0);
     expect(body.blockedReasons?.join(" ")).toContain("mutation disabled");
+    expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("records a planned apply record without applying router or profile mutations", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackProposal.findFirst).mockResolvedValue({
+      id: "proposal_record",
+      action: "BOOST_SOURCE",
+      status: "APPROVED",
+      collectionId: "kc_good",
+      expectedCollectionId: null,
+      queryHash: "hash_2",
+      confidence: 1,
+      reason: "reviewed good source cluster",
+      evidence: {
+        goodSourceCount: 2,
+        total: 2,
+      },
+      reviewedAt: new Date("2026-05-05T12:05:00.000Z"),
+      createdAt: new Date("2026-05-05T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:05:00.000Z"),
+    } as never);
+    vi.mocked(prisma.knowledgeFeedbackApplyRecord.create).mockResolvedValue({
+      id: "apply_record_1",
+      proposalId: "proposal_record",
+      status: "PLANNED",
+      plan: {
+        proposal: {
+          id: "proposal_record",
+          action: "BOOST_SOURCE",
+          status: "APPROVED",
+          collectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          confidence: 1,
+          reason: "reviewed good source cluster",
+          evidence: { goodSourceCount: 2, total: 2 },
+          reviewedAt: "2026-05-05T12:05:00.000Z",
+          createdAt: "2026-05-05T12:00:00.000Z",
+          updatedAt: "2026-05-05T12:05:00.000Z",
+        },
+        impact: {
+          proposalId: "proposal_record",
+          action: "BOOST_SOURCE",
+          targetCollectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          estimatedScoreDelta: 0.16,
+          riskLevel: "low",
+          wouldAutoApply: false,
+          rationale: ["dry-run only: router/profile state is not mutated"],
+        },
+        steps: [],
+        mutationEnabled: false,
+        applyAllowed: false,
+        requiredGate: "feedback_eval_gate",
+        blockedReasons: ["mutation disabled: controlled apply preview only"],
+      },
+      reason: "controlled apply preview recorded; no router/profile mutation applied",
+      plannedAt: new Date("2026-05-05T12:06:00.000Z"),
+      gateCheckedAt: null,
+      appliedAt: null,
+      rolledBackAt: null,
+      createdAt: new Date("2026-05-05T12:06:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:06:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge/proposals/proposal_record/apply-records",
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body) as {
+      mutationApplied?: boolean;
+      nextSafeAction?: string;
+      record?: { status?: string; proposalId?: string };
+    };
+    expect(body.mutationApplied).toBe(false);
+    expect(body.nextSafeAction).toBe("run_feedback_eval_gate");
+    expect(body.record).toMatchObject({ status: "PLANNED", proposalId: "proposal_record" });
+    expect(prisma.knowledgeFeedbackApplyRecord.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: "user_1",
+          proposalId: "proposal_record",
+          status: "PLANNED",
+        }),
+      }),
+    );
     expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
     await app.close();
   });

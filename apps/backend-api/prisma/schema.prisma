@@ -76,6 +76,14 @@ enum KnowledgeFeedbackProposalStatus {
   REJECTED
 }
 
+enum KnowledgeFeedbackApplyStatus {
+  PLANNED
+  GATE_PASSED
+  APPLIED
+  ROLLED_BACK
+  BLOCKED
+}
+
 model User {
   id             String   @id @default(cuid())
   walletAddress  String   @unique
@@ -88,6 +96,7 @@ model User {
   knowledgeCollections KnowledgeCollection[]
   knowledgeFeedback    KnowledgeFeedback[]
   knowledgeFeedbackProposals KnowledgeFeedbackProposal[]
+  knowledgeFeedbackApplyRecords KnowledgeFeedbackApplyRecord[]
 }
 
 /// LoRA / DoRA adaptörü — zincir + off-chain metadata
@@ -192,9 +201,37 @@ model KnowledgeFeedbackProposal {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  applyRecords KnowledgeFeedbackApplyRecord[]
+
   @@index([userId, status, createdAt(sort: Desc)])
   @@index([collectionId, action, status])
   @@index([queryHash])
+}
+
+model KnowledgeFeedbackApplyRecord {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  proposalId String
+  proposal   KnowledgeFeedbackProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  status       KnowledgeFeedbackApplyStatus @default(PLANNED)
+  plan         Json
+  gateReport   Json?
+  appliedDelta Json?
+  rollbackPlan Json?
+  reason       String?                      @db.Text
+
+  plannedAt    DateTime @default(now())
+  gateCheckedAt DateTime?
+  appliedAt    DateTime?
+  rolledBackAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([proposalId, status])
 }
 
 model KnowledgeDocument {

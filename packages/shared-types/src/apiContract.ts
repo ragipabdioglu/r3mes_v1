@@ -227,6 +227,26 @@ export interface KnowledgeFeedbackApplyPlanResponse {
   blockedReasons: string[];
 }
 
+export interface KnowledgeFeedbackApplyRecordItem {
+  id: string;
+  proposalId: string;
+  status: "PLANNED" | "GATE_PASSED" | "APPLIED" | "ROLLED_BACK" | "BLOCKED";
+  plan: KnowledgeFeedbackApplyPlanResponse;
+  reason: string | null;
+  plannedAt: string;
+  gateCheckedAt: string | null;
+  appliedAt: string | null;
+  rolledBackAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeFeedbackApplyRecordCreateResponse {
+  record: KnowledgeFeedbackApplyRecordItem;
+  mutationApplied: false;
+  nextSafeAction: "run_feedback_eval_gate";
+}
+
 export interface ChatRetrievalDebug {
   groundingConfidence: "high" | "medium" | "low";
   domain: "medical" | "legal" | "finance" | "technical" | "education" | "general";

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@prisma/client";
 import {
+  safeParseKnowledgeFeedbackApplyRecordCreateResponse,
   safeParseKnowledgeFeedbackApplyPlanResponse,
   safeParseKnowledgeFeedbackCreateRequest,
   safeParseKnowledgeFeedbackCreateResponse,
@@ -14,6 +15,8 @@ import {
   type KnowledgeFeedbackCreateResponse,
   type KnowledgeFeedbackAggregateItem,
   type KnowledgeFeedbackApplyPlanResponse,
+  type KnowledgeFeedbackApplyRecordCreateResponse,
+  type KnowledgeFeedbackApplyRecordItem,
   type KnowledgeFeedbackApplyPlanStep,
   type KnowledgeFeedbackProposalAction,
   type KnowledgeFeedbackProposalGenerateResponse,
@@ -347,6 +350,48 @@ function buildApplyPlan(proposal: KnowledgeFeedbackProposalItem): {
   return { steps, blockedReasons };
 }
 
+function toApplyRecordItem(row: {
+  id: string;
+  proposalId: string;
+  status: string;
+  plan: unknown;
+  reason: string | null;
+  plannedAt: Date;
+  gateCheckedAt: Date | null;
+  appliedAt: Date | null;
+  rolledBackAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): KnowledgeFeedbackApplyRecordItem {
+  return {
+    id: row.id,
+    proposalId: row.proposalId,
+    status: row.status as KnowledgeFeedbackApplyRecordItem["status"],
+    plan: row.plan as KnowledgeFeedbackApplyPlanResponse,
+    reason: row.reason,
+    plannedAt: row.plannedAt.toISOString(),
+    gateCheckedAt: row.gateCheckedAt?.toISOString() ?? null,
+    appliedAt: row.appliedAt?.toISOString() ?? null,
+    rolledBackAt: row.rolledBackAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function buildApplyPlanResponse(proposal: KnowledgeFeedbackProposalItem): KnowledgeFeedbackApplyPlanResponse {
+  const { impact } = buildImpact(proposal);
+  const plan = buildApplyPlan(proposal);
+  return {
+    proposal,
+    impact,
+    steps: plan.steps,
+    mutationEnabled: false,
+    applyAllowed: false,
+    requiredGate: "feedback_eval_gate",
+    blockedReasons: plan.blockedReasons,
+  };
+}
+
 export async function registerFeedbackRoutes(app: FastifyInstance) {
   app.get("/v1/feedback/knowledge/proposals", { preHandler: walletAuthPreHandler }, async (req, reply) => {
     const wallet = req.verifiedWalletAddress;
@@ -627,22 +672,63 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
       return sendApiError(reply, 404, "FEEDBACK_PROPOSAL_NOT_FOUND", "Feedback proposal bulunamadı");
     }
     const proposal = toProposalItem(proposalRow);
-    const { impact } = buildImpact(proposal);
-    const plan = buildApplyPlan(proposal);
-    const response: KnowledgeFeedbackApplyPlanResponse = {
-      proposal,
-      impact,
-      steps: plan.steps,
-      mutationEnabled: false,
-      applyAllowed: false,
-      requiredGate: "feedback_eval_gate",
-      blockedReasons: plan.blockedReasons,
-    };
+    const response = buildApplyPlanResponse(proposal);
     const checked = safeParseKnowledgeFeedbackApplyPlanResponse(response);
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback apply plan contract failed");
       return sendApiError(reply, 500, "FEEDBACK_APPLY_PLAN_CONTRACT_FAILED", "Feedback apply plan doğrulanamadı");
     }
     return reply.send(checked.data);
+  });
+
+  app.post("/v1/feedback/knowledge/proposals/:id/apply-records", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const params = req.params as { id?: string };
+    if (!params.id) {
+      return sendApiError(reply, 400, "INVALID_FEEDBACK_PROPOSAL_ID", "Proposal id gerekli");
+    }
+    const user = await ensureUser(wallet);
+    const proposalRow = await prisma.knowledgeFeedbackProposal.findFirst({
+      where: { id: params.id, userId: user.id },
+    });
+    if (!proposalRow) {
+      return sendApiError(reply, 404, "FEEDBACK_PROPOSAL_NOT_FOUND", "Feedback proposal bulunamadı");
+    }
+    const proposal = toProposalItem(proposalRow);
+    const plan = buildApplyPlanResponse(proposal);
+    const checkedPlan = safeParseKnowledgeFeedbackApplyPlanResponse(plan);
+    if (!checkedPlan.success) {
+      req.log.error({ err: checkedPlan.error }, "Knowledge feedback apply plan contract failed before record create");
+      return sendApiError(reply, 500, "FEEDBACK_APPLY_PLAN_CONTRACT_FAILED", "Feedback apply plan doğrulanamadı");
+    }
+    const record = await prisma.knowledgeFeedbackApplyRecord.create({
+      data: {
+        userId: user.id,
+        proposalId: proposal.id,
+        status: "PLANNED",
+        plan: checkedPlan.data as unknown as Prisma.InputJsonValue,
+        rollbackPlan: {
+          steps: checkedPlan.data.steps.map((step) => ({
+            stepId: step.id,
+            rollback: step.rollback,
+          })),
+        },
+        reason: "controlled apply preview recorded; no router/profile mutation applied",
+      },
+    });
+    const response: KnowledgeFeedbackApplyRecordCreateResponse = {
+      record: toApplyRecordItem(record),
+      mutationApplied: false,
+      nextSafeAction: "run_feedback_eval_gate",
+    };
+    const checked = safeParseKnowledgeFeedbackApplyRecordCreateResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback apply record contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_APPLY_RECORD_CONTRACT_FAILED", "Feedback apply record doğrulanamadı");
+    }
+    return reply.code(201).send(checked.data);
   });
 }

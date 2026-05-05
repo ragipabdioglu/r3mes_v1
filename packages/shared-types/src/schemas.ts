@@ -13,6 +13,8 @@ import type {
   KnowledgeFeedbackAggregateItem,
   KnowledgeFeedbackApplyPlanResponse,
   KnowledgeFeedbackApplyPlanStep,
+  KnowledgeFeedbackApplyRecordCreateResponse,
+  KnowledgeFeedbackApplyRecordItem,
   KnowledgeFeedbackCreateRequest,
   KnowledgeFeedbackCreateResponse,
   KnowledgeFeedbackProposalGenerateResponse,
@@ -275,6 +277,27 @@ export const KnowledgeFeedbackApplyPlanResponseSchema: z.ZodType<KnowledgeFeedba
   blockedReasons: z.array(z.string()),
 });
 
+export const KnowledgeFeedbackApplyRecordItemSchema: z.ZodType<KnowledgeFeedbackApplyRecordItem> = z.object({
+  id: z.string().min(1),
+  proposalId: z.string().min(1),
+  status: z.enum(["PLANNED", "GATE_PASSED", "APPLIED", "ROLLED_BACK", "BLOCKED"]),
+  plan: KnowledgeFeedbackApplyPlanResponseSchema,
+  reason: z.string().nullable(),
+  plannedAt: z.string(),
+  gateCheckedAt: z.string().nullable(),
+  appliedAt: z.string().nullable(),
+  rolledBackAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const KnowledgeFeedbackApplyRecordCreateResponseSchema: z.ZodType<KnowledgeFeedbackApplyRecordCreateResponse> =
+  z.object({
+    record: KnowledgeFeedbackApplyRecordItemSchema,
+    mutationApplied: z.literal(false),
+    nextSafeAction: z.literal("run_feedback_eval_gate"),
+  });
+
 /** §3.6 — 501 stake / claim (kasıtlı yüzey; runtime çıkış doğrulaması) */
 export const NotImplementedOnChainRestResponseSchema: z.ZodType<NotImplementedOnChainRestResponse> =
   z.object({
@@ -423,6 +446,12 @@ export function safeParseKnowledgeFeedbackApplyPlanResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyPlanResponse> {
   return KnowledgeFeedbackApplyPlanResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackApplyRecordCreateResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyRecordCreateResponse> {
+  return KnowledgeFeedbackApplyRecordCreateResponseSchema.safeParse(input);
 }
 
 export function parseNotImplementedOnChainRestResponse(
