@@ -196,6 +196,25 @@ export type KnowledgeFeedbackRouterAdjustmentListResponse = {
   generatedAt: string;
 };
 
+export type KnowledgeFeedbackRouterScoringSimulationItem = {
+  collectionId: string | null;
+  queryHash: string | null;
+  activeAdjustmentCount: number;
+  totalScoreDelta: number;
+  appliedStepIds: string[];
+  adjustmentIds: string[];
+  simulatedBefore: number;
+  simulatedAfter: number;
+};
+
+export type KnowledgeFeedbackRouterScoringSimulationResponse = {
+  queryHash: string | null;
+  collectionIds: string[];
+  results: KnowledgeFeedbackRouterScoringSimulationItem[];
+  runtimeAffected: false;
+  generatedAt: string;
+};
+
 export type KnowledgeFeedbackPassiveApplyResponse = {
   record: KnowledgeFeedbackApplyRecordItem;
   adjustments: KnowledgeFeedbackRouterAdjustmentItem[];
@@ -347,6 +366,21 @@ export async function fetchKnowledgeFeedbackRouterAdjustments(
   });
   if (!res.ok) throw new Error(`Feedback router adjustments ${res.status}`);
   return (await res.json()) as KnowledgeFeedbackRouterAdjustmentListResponse;
+}
+
+export async function fetchKnowledgeFeedbackRouterScoringSimulation(
+  auth: R3mesWalletAuthHeaders,
+  options: { queryHash?: string | null; collectionIds?: string[] } = {},
+): Promise<KnowledgeFeedbackRouterScoringSimulationResponse> {
+  const url = new URL("/v1/feedback/knowledge/router-adjustments/simulation", getBackendUrl());
+  if (options.queryHash) url.searchParams.set("queryHash", options.queryHash);
+  if (options.collectionIds?.length) url.searchParams.set("collectionIds", options.collectionIds.join(","));
+  const res = await fetch(url.toString(), {
+    headers: authHeaders(auth),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Feedback scoring simulation ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackRouterScoringSimulationResponse;
 }
 
 export async function passiveApplyKnowledgeFeedbackRecord(

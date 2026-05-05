@@ -328,6 +328,25 @@ export interface KnowledgeFeedbackRouterAdjustmentListResponse {
   generatedAt: string;
 }
 
+export interface KnowledgeFeedbackRouterScoringSimulationItem {
+  collectionId: string | null;
+  queryHash: string | null;
+  activeAdjustmentCount: number;
+  totalScoreDelta: number;
+  appliedStepIds: string[];
+  adjustmentIds: string[];
+  simulatedBefore: number;
+  simulatedAfter: number;
+}
+
+export interface KnowledgeFeedbackRouterScoringSimulationResponse {
+  queryHash: string | null;
+  collectionIds: string[];
+  results: KnowledgeFeedbackRouterScoringSimulationItem[];
+  runtimeAffected: false;
+  generatedAt: string;
+}
+
 export interface KnowledgeFeedbackGateResultRequest {
   ok: boolean;
   report?: Record<string, unknown> | null;

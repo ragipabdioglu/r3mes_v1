@@ -24,6 +24,8 @@ import type {
   KnowledgeFeedbackPassiveApplyResponse,
   KnowledgeFeedbackRouterAdjustmentItem,
   KnowledgeFeedbackRouterAdjustmentListResponse,
+  KnowledgeFeedbackRouterScoringSimulationItem,
+  KnowledgeFeedbackRouterScoringSimulationResponse,
   KnowledgeFeedbackCreateRequest,
   KnowledgeFeedbackCreateResponse,
   KnowledgeFeedbackProposalGenerateResponse,
@@ -397,6 +399,27 @@ export const KnowledgeFeedbackRouterAdjustmentListResponseSchema: z.ZodType<Know
     generatedAt: z.string(),
   });
 
+export const KnowledgeFeedbackRouterScoringSimulationItemSchema: z.ZodType<KnowledgeFeedbackRouterScoringSimulationItem> =
+  z.object({
+    collectionId: z.string().nullable(),
+    queryHash: z.string().nullable(),
+    activeAdjustmentCount: z.number().int().nonnegative(),
+    totalScoreDelta: z.number().min(-1).max(1),
+    appliedStepIds: z.array(z.string().min(1)),
+    adjustmentIds: z.array(z.string().min(1)),
+    simulatedBefore: z.number().min(-1).max(1),
+    simulatedAfter: z.number().min(-1).max(1),
+  });
+
+export const KnowledgeFeedbackRouterScoringSimulationResponseSchema: z.ZodType<KnowledgeFeedbackRouterScoringSimulationResponse> =
+  z.object({
+    queryHash: z.string().nullable(),
+    collectionIds: z.array(z.string().min(1)),
+    results: z.array(KnowledgeFeedbackRouterScoringSimulationItemSchema),
+    runtimeAffected: z.literal(false),
+    generatedAt: z.string(),
+  });
+
 export const KnowledgeFeedbackGateResultRequestSchema: z.ZodType<KnowledgeFeedbackGateResultRequest> = z.object({
   ok: z.boolean(),
   report: z.record(z.unknown()).nullable().optional(),
@@ -594,6 +617,12 @@ export function safeParseKnowledgeFeedbackRouterAdjustmentListResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackRouterAdjustmentListResponse> {
   return KnowledgeFeedbackRouterAdjustmentListResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackRouterScoringSimulationResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackRouterScoringSimulationResponse> {
+  return KnowledgeFeedbackRouterScoringSimulationResponseSchema.safeParse(input);
 }
 
 export function safeParseKnowledgeFeedbackGateResultRequest(

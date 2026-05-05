@@ -944,6 +944,96 @@ describe("knowledge feedback routes", () => {
     await app.close();
   });
 
+  it("simulates active passive adjustment score impact without affecting runtime scoring", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.findMany).mockResolvedValue([
+      {
+        id: "adjustment_1",
+        proposalId: "proposal_record_1",
+        applyRecordId: "apply_record_1",
+        status: "ACTIVE",
+        stepId: "proposal_record_1:penalty:kc_wrong",
+        kind: "PENALIZE_COLLECTION_SCORE",
+        mutationPath: "query_scoped_collection_adjustment",
+        collectionId: "kc_wrong",
+        expectedCollectionId: null,
+        queryHash: "abc123def4567890",
+        scoreDelta: -0.18,
+        simulatedBefore: 0,
+        simulatedAfter: -0.18,
+        rollbackReason: null,
+        createdAt: new Date("2026-05-05T12:08:00.000Z"),
+        rolledBackAt: null,
+        updatedAt: new Date("2026-05-05T12:08:00.000Z"),
+      },
+      {
+        id: "adjustment_2",
+        proposalId: "proposal_record_2",
+        applyRecordId: "apply_record_2",
+        status: "ACTIVE",
+        stepId: "proposal_record_2:penalty:kc_wrong",
+        kind: "PENALIZE_COLLECTION_SCORE",
+        mutationPath: "query_scoped_collection_adjustment",
+        collectionId: "kc_wrong",
+        expectedCollectionId: null,
+        queryHash: "abc123def4567890",
+        scoreDelta: -0.12,
+        simulatedBefore: 0,
+        simulatedAfter: -0.12,
+        rollbackReason: null,
+        createdAt: new Date("2026-05-05T12:09:00.000Z"),
+        rolledBackAt: null,
+        updatedAt: new Date("2026-05-05T12:09:00.000Z"),
+      },
+    ] as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/feedback/knowledge/router-adjustments/simulation?queryHash=abc123def4567890&collectionIds=kc_wrong",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      runtimeAffected?: boolean;
+      queryHash?: string | null;
+      collectionIds?: string[];
+      results?: Array<{
+        collectionId?: string | null;
+        queryHash?: string | null;
+        activeAdjustmentCount?: number;
+        totalScoreDelta?: number;
+        simulatedAfter?: number;
+        adjustmentIds?: string[];
+      }>;
+    };
+    expect(body.runtimeAffected).toBe(false);
+    expect(body.queryHash).toBe("abc123def4567890");
+    expect(body.collectionIds).toEqual(["kc_wrong"]);
+    expect(body.results?.[0]).toMatchObject({
+      collectionId: "kc_wrong",
+      queryHash: "abc123def4567890",
+      activeAdjustmentCount: 2,
+      totalScoreDelta: -0.3,
+      simulatedAfter: -0.3,
+      adjustmentIds: ["adjustment_1", "adjustment_2"],
+    });
+    expect(prisma.knowledgeFeedbackRouterAdjustment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user_1",
+          status: "ACTIVE",
+          queryHash: "abc123def4567890",
+          collectionId: { in: ["kc_wrong"] },
+        }),
+      }),
+    );
+    expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("marks a planned apply record as gate passed without applying mutations", async () => {
     const { prisma } = await import("./lib/prisma.js");
     vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);

@@ -18,6 +18,7 @@ import {
   safeParseKnowledgeFeedbackProposalListResponse,
   safeParseKnowledgeFeedbackProposalReviewResponse,
   safeParseKnowledgeFeedbackRouterAdjustmentListResponse,
+  safeParseKnowledgeFeedbackRouterScoringSimulationResponse,
   safeParseKnowledgeFeedbackSummaryResponse,
   type KnowledgeFeedbackCreateResponse,
   type KnowledgeFeedbackAggregateItem,
@@ -40,6 +41,8 @@ import {
   type KnowledgeFeedbackProposalReviewResponse,
   type KnowledgeFeedbackRouterAdjustmentItem,
   type KnowledgeFeedbackRouterAdjustmentListResponse,
+  type KnowledgeFeedbackRouterScoringSimulationItem,
+  type KnowledgeFeedbackRouterScoringSimulationResponse,
   type KnowledgeFeedbackSummaryResponse,
 } from "@r3mes/shared-types";
 
@@ -478,6 +481,53 @@ function buildApplyPlanResponse(proposal: KnowledgeFeedbackProposalItem): Knowle
 
 function clampPreviewScore(value: number): number {
   return Math.max(-1, Math.min(1, Number(value.toFixed(4))));
+}
+
+function parseCollectionIds(value: unknown): string[] {
+  const rawValues = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  return Array.from(
+    new Set(
+      rawValues
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 50);
+}
+
+function groupRouterScoringSimulation(
+  adjustments: Array<{
+    id: string;
+    stepId: string;
+    collectionId: string | null;
+    queryHash: string | null;
+    scoreDelta: number;
+  }>,
+): KnowledgeFeedbackRouterScoringSimulationItem[] {
+  const grouped = new Map<string, KnowledgeFeedbackRouterScoringSimulationItem>();
+  for (const adjustment of adjustments) {
+    const key = `${adjustment.collectionId ?? "-"}|${adjustment.queryHash ?? "-"}`;
+    const existing = grouped.get(key) ?? {
+      collectionId: adjustment.collectionId,
+      queryHash: adjustment.queryHash,
+      activeAdjustmentCount: 0,
+      totalScoreDelta: 0,
+      appliedStepIds: [],
+      adjustmentIds: [],
+      simulatedBefore: 0,
+      simulatedAfter: 0,
+    };
+    existing.activeAdjustmentCount += 1;
+    existing.totalScoreDelta = clampPreviewScore(existing.totalScoreDelta + adjustment.scoreDelta);
+    existing.simulatedAfter = clampPreviewScore(existing.simulatedBefore + existing.totalScoreDelta);
+    existing.appliedStepIds.push(adjustment.stepId);
+    existing.adjustmentIds.push(adjustment.id);
+    grouped.set(key, existing);
+  }
+  return Array.from(grouped.values()).sort((a, b) => {
+    const impactDiff = Math.abs(b.totalScoreDelta) - Math.abs(a.totalScoreDelta);
+    if (impactDiff !== 0) return impactDiff;
+    return b.activeAdjustmentCount - a.activeAdjustmentCount;
+  });
 }
 
 function mutationPathForStep(step: KnowledgeFeedbackApplyPlanStep): KnowledgeFeedbackApplyMutationPreviewStep["mutationPath"] {
@@ -973,6 +1023,43 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback passive apply contract failed");
       return sendApiError(reply, 500, "FEEDBACK_PASSIVE_APPLY_CONTRACT_FAILED", "Feedback passive apply doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.get("/v1/feedback/knowledge/router-adjustments/simulation", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const query = asObject(req.query) ?? {};
+    const queryHash = normalizeOptionalString(typeof query.queryHash === "string" ? query.queryHash : null);
+    if (queryHash && !HASH_RE.test(queryHash)) {
+      return sendApiError(reply, 400, "INVALID_QUERY_HASH", "queryHash 8-64 karakter hex olmalı");
+    }
+    const collectionIds = parseCollectionIds(query.collectionIds);
+    const user = await ensureUser(wallet);
+    const rows = await prisma.knowledgeFeedbackRouterAdjustment.findMany({
+      where: {
+        userId: user.id,
+        status: "ACTIVE",
+        ...(queryHash ? { queryHash } : {}),
+        ...(collectionIds.length > 0 ? { collectionId: { in: collectionIds } } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+    const response: KnowledgeFeedbackRouterScoringSimulationResponse = {
+      queryHash,
+      collectionIds,
+      results: groupRouterScoringSimulation(rows),
+      runtimeAffected: false,
+      generatedAt: new Date().toISOString(),
+    };
+    const checked = safeParseKnowledgeFeedbackRouterScoringSimulationResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback router scoring simulation contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_SCORING_SIMULATION_CONTRACT_FAILED", "Feedback scoring simulation doğrulanamadı");
     }
     return reply.send(checked.data);
   });
