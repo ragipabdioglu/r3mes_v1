@@ -95,6 +95,36 @@ export interface ChatSourceCitation {
   excerpt?: string | null;
 }
 
+export type KnowledgeFeedbackKind =
+  | "GOOD_SOURCE"
+  | "WRONG_SOURCE"
+  | "MISSING_SOURCE"
+  | "BAD_ANSWER"
+  | "GOOD_ANSWER";
+
+export interface KnowledgeFeedbackCreateRequest {
+  kind: KnowledgeFeedbackKind;
+  traceId?: string | null;
+  query?: string | null;
+  queryHash?: string | null;
+  collectionId?: string | null;
+  documentId?: string | null;
+  chunkId?: string | null;
+  expectedCollectionId?: string | null;
+  reason?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface KnowledgeFeedbackCreateResponse {
+  id: string;
+  kind: KnowledgeFeedbackKind;
+  status: "recorded";
+  queryHash: string | null;
+  collectionId: string | null;
+  expectedCollectionId: string | null;
+  createdAt: string;
+}
+
 export interface ChatRetrievalDebug {
   groundingConfidence: "high" | "medium" | "low";
   domain: "medical" | "legal" | "finance" | "technical" | "education" | "general";

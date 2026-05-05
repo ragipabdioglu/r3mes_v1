@@ -55,6 +55,14 @@ enum KnowledgeParseStatus {
   FAILED
 }
 
+enum KnowledgeFeedbackKind {
+  GOOD_SOURCE
+  WRONG_SOURCE
+  MISSING_SOURCE
+  BAD_ANSWER
+  GOOD_ANSWER
+}
+
 model User {
   id             String   @id @default(cuid())
   walletAddress  String   @unique
@@ -65,6 +73,7 @@ model User {
   adapters             Adapter[]             @relation("OwnerAdapters")
   aiQueries            AiQuery[]
   knowledgeCollections KnowledgeCollection[]
+  knowledgeFeedback    KnowledgeFeedback[]
 }
 
 /// LoRA / DoRA adaptörü — zincir + off-chain metadata
@@ -115,9 +124,37 @@ model KnowledgeCollection {
   updatedAt   DateTime            @updatedAt
 
   documents KnowledgeDocument[]
+  feedback  KnowledgeFeedback[]
 
   @@index([ownerId, createdAt(sort: Desc)])
   @@index([visibility, publishedAt])
+}
+
+model KnowledgeFeedback {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  collectionId String?
+  collection   KnowledgeCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+
+  documentId           String?
+  chunkId              String?
+  expectedCollectionId String?
+  traceId              String?
+  queryHash            String?
+
+  kind   KnowledgeFeedbackKind
+  reason String?               @db.Text
+  metadata Json?
+
+  appliedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([collectionId, kind, createdAt(sort: Desc)])
+  @@index([queryHash])
+  @@index([traceId])
 }
 
 model KnowledgeDocument {

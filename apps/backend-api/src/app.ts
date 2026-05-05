@@ -2,6 +2,7 @@ import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { registerAdapterRoutes } from "./routes/adapters.js";
 import { registerChatProxyRoutes } from "./routes/chatProxy.js";
+import { registerFeedbackRoutes } from "./routes/feedback.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerInternalQaRoutes } from "./routes/internalQa.js";
 import { registerKnowledgeRoutes } from "./routes/knowledge.js";
@@ -101,6 +102,7 @@ export async function buildApp() {
 
   await registerHealthRoutes(app);
   await registerChatProxyRoutes(app);
+  await registerFeedbackRoutes(app);
   await registerAdapterRoutes(app);
   await registerKnowledgeRoutes(app);
   await registerInternalQaRoutes(app);

@@ -10,6 +10,8 @@ import type {
   ChatSourceCitation,
   KnowledgeCollectionListItem,
   KnowledgeDetailResponse,
+  KnowledgeFeedbackCreateRequest,
+  KnowledgeFeedbackCreateResponse,
   KnowledgeDocumentListItem,
   KnowledgeListResponse,
   KnowledgeUploadAcceptedResponse,
@@ -124,6 +126,37 @@ export const ChatSourceCitationSchema: z.ZodType<ChatSourceCitation> = z.object(
   excerpt: z.string().nullable().optional(),
 });
 
+export const KnowledgeFeedbackKindSchema = z.enum([
+  "GOOD_SOURCE",
+  "WRONG_SOURCE",
+  "MISSING_SOURCE",
+  "BAD_ANSWER",
+  "GOOD_ANSWER",
+]);
+
+export const KnowledgeFeedbackCreateRequestSchema: z.ZodType<KnowledgeFeedbackCreateRequest> = z.object({
+  kind: KnowledgeFeedbackKindSchema,
+  traceId: z.string().min(1).max(128).nullable().optional(),
+  query: z.string().max(4000).nullable().optional(),
+  queryHash: z.string().min(8).max(64).nullable().optional(),
+  collectionId: z.string().min(1).max(128).nullable().optional(),
+  documentId: z.string().min(1).max(128).nullable().optional(),
+  chunkId: z.string().min(1).max(128).nullable().optional(),
+  expectedCollectionId: z.string().min(1).max(128).nullable().optional(),
+  reason: z.string().max(1000).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+});
+
+export const KnowledgeFeedbackCreateResponseSchema: z.ZodType<KnowledgeFeedbackCreateResponse> = z.object({
+  id: z.string().min(1),
+  kind: KnowledgeFeedbackKindSchema,
+  status: z.literal("recorded"),
+  queryHash: z.string().nullable(),
+  collectionId: z.string().nullable(),
+  expectedCollectionId: z.string().nullable(),
+  createdAt: z.string().min(1),
+});
+
 /** §3.6 — 501 stake / claim (kasıtlı yüzey; runtime çıkış doğrulaması) */
 export const NotImplementedOnChainRestResponseSchema: z.ZodType<NotImplementedOnChainRestResponse> =
   z.object({
@@ -216,6 +249,26 @@ export function safeParseKnowledgeUploadAcceptedResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeUploadAcceptedResponse> {
   return KnowledgeUploadAcceptedResponseSchema.safeParse(input);
+}
+
+export function parseKnowledgeFeedbackCreateRequest(input: unknown): KnowledgeFeedbackCreateRequest {
+  return KnowledgeFeedbackCreateRequestSchema.parse(input);
+}
+
+export function safeParseKnowledgeFeedbackCreateRequest(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackCreateRequest> {
+  return KnowledgeFeedbackCreateRequestSchema.safeParse(input);
+}
+
+export function parseKnowledgeFeedbackCreateResponse(input: unknown): KnowledgeFeedbackCreateResponse {
+  return KnowledgeFeedbackCreateResponseSchema.parse(input);
+}
+
+export function safeParseKnowledgeFeedbackCreateResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackCreateResponse> {
+  return KnowledgeFeedbackCreateResponseSchema.safeParse(input);
 }
 
 export function parseNotImplementedOnChainRestResponse(
