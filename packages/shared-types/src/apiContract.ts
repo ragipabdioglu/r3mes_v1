@@ -178,6 +178,24 @@ export interface KnowledgeFeedbackProposalReviewResponse {
   proposal: KnowledgeFeedbackProposalItem;
 }
 
+export interface KnowledgeFeedbackProposalImpactItem {
+  proposalId: string;
+  action: KnowledgeFeedbackProposalAction;
+  targetCollectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  estimatedScoreDelta: number;
+  riskLevel: "low" | "medium" | "high";
+  wouldAutoApply: false;
+  rationale: string[];
+}
+
+export interface KnowledgeFeedbackProposalImpactResponse {
+  proposal: KnowledgeFeedbackProposalItem;
+  impact: KnowledgeFeedbackProposalImpactItem;
+  nextSafeAction: "review_only" | "run_eval_before_apply" | "needs_more_feedback";
+}
+
 export interface ChatRetrievalDebug {
   groundingConfidence: "high" | "medium" | "low";
   domain: "medical" | "legal" | "finance" | "technical" | "education" | "general";

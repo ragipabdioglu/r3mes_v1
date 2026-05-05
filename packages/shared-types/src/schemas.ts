@@ -14,6 +14,8 @@ import type {
   KnowledgeFeedbackCreateRequest,
   KnowledgeFeedbackCreateResponse,
   KnowledgeFeedbackProposalGenerateResponse,
+  KnowledgeFeedbackProposalImpactItem,
+  KnowledgeFeedbackProposalImpactResponse,
   KnowledgeFeedbackProposalItem,
   KnowledgeFeedbackProposalReviewResponse,
   KnowledgeFeedbackSummaryResponse,
@@ -218,6 +220,25 @@ export const KnowledgeFeedbackProposalReviewResponseSchema: z.ZodType<KnowledgeF
     proposal: KnowledgeFeedbackProposalItemSchema,
   });
 
+export const KnowledgeFeedbackProposalImpactItemSchema: z.ZodType<KnowledgeFeedbackProposalImpactItem> = z.object({
+  proposalId: z.string().min(1),
+  action: KnowledgeFeedbackProposalActionSchema,
+  targetCollectionId: z.string().nullable(),
+  expectedCollectionId: z.string().nullable(),
+  queryHash: z.string().nullable(),
+  estimatedScoreDelta: z.number().min(-1).max(1),
+  riskLevel: z.enum(["low", "medium", "high"]),
+  wouldAutoApply: z.literal(false),
+  rationale: z.array(z.string()),
+});
+
+export const KnowledgeFeedbackProposalImpactResponseSchema: z.ZodType<KnowledgeFeedbackProposalImpactResponse> =
+  z.object({
+    proposal: KnowledgeFeedbackProposalItemSchema,
+    impact: KnowledgeFeedbackProposalImpactItemSchema,
+    nextSafeAction: z.enum(["review_only", "run_eval_before_apply", "needs_more_feedback"]),
+  });
+
 /** §3.6 — 501 stake / claim (kasıtlı yüzey; runtime çıkış doğrulaması) */
 export const NotImplementedOnChainRestResponseSchema: z.ZodType<NotImplementedOnChainRestResponse> =
   z.object({
@@ -348,6 +369,12 @@ export function safeParseKnowledgeFeedbackProposalReviewResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackProposalReviewResponse> {
   return KnowledgeFeedbackProposalReviewResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackProposalImpactResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackProposalImpactResponse> {
+  return KnowledgeFeedbackProposalImpactResponseSchema.safeParse(input);
 }
 
 export function parseNotImplementedOnChainRestResponse(

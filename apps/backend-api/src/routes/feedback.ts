@@ -6,12 +6,15 @@ import {
   safeParseKnowledgeFeedbackCreateRequest,
   safeParseKnowledgeFeedbackCreateResponse,
   safeParseKnowledgeFeedbackProposalGenerateResponse,
+  safeParseKnowledgeFeedbackProposalImpactResponse,
   safeParseKnowledgeFeedbackProposalReviewResponse,
   safeParseKnowledgeFeedbackSummaryResponse,
   type KnowledgeFeedbackCreateResponse,
   type KnowledgeFeedbackAggregateItem,
   type KnowledgeFeedbackProposalAction,
   type KnowledgeFeedbackProposalGenerateResponse,
+  type KnowledgeFeedbackProposalImpactItem,
+  type KnowledgeFeedbackProposalImpactResponse,
   type KnowledgeFeedbackProposalItem,
   type KnowledgeFeedbackProposalReviewResponse,
   type KnowledgeFeedbackSummaryResponse,
@@ -185,6 +188,77 @@ function toProposalItem(row: {
     reviewedAt: row.reviewedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function evidenceSignalCount(proposal: KnowledgeFeedbackProposalItem): number {
+  const evidence = proposal.evidence;
+  const key =
+    proposal.action === "PENALIZE_SOURCE"
+      ? "wrongSourceCount"
+      : proposal.action === "BOOST_SOURCE"
+        ? "goodSourceCount"
+        : proposal.action === "REVIEW_MISSING_SOURCE"
+          ? "missingSourceCount"
+          : "badAnswerCount";
+  const value = evidence[key];
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function buildImpact(proposal: KnowledgeFeedbackProposalItem): {
+  impact: KnowledgeFeedbackProposalImpactItem;
+  nextSafeAction: KnowledgeFeedbackProposalImpactResponse["nextSafeAction"];
+} {
+  const signalCount = evidenceSignalCount(proposal);
+  const confidence = Math.max(0, Math.min(1, proposal.confidence));
+  const direction =
+    proposal.action === "BOOST_SOURCE"
+      ? 1
+      : proposal.action === "PENALIZE_SOURCE"
+        ? -1
+        : 0;
+  const estimatedScoreDelta =
+    direction === 0
+      ? 0
+      : Number((direction * Math.min(0.35, 0.08 + signalCount * 0.04) * Math.max(confidence, 0.25)).toFixed(3));
+  const riskLevel =
+    proposal.status !== "APPROVED"
+      ? "low"
+      : Math.abs(estimatedScoreDelta) >= 0.2 || proposal.action === "PENALIZE_SOURCE"
+        ? "medium"
+        : "low";
+  const rationale = [
+    `action=${proposal.action}`,
+    `status=${proposal.status}`,
+    `signalCount=${signalCount}`,
+    `confidence=${confidence.toFixed(2)}`,
+    "dry-run only: router/profile state is not mutated",
+  ];
+  if (proposal.action === "REVIEW_MISSING_SOURCE") {
+    rationale.push("missing source proposals require ingestion/source review before any router change");
+  }
+  if (proposal.action === "REVIEW_ANSWER_QUALITY") {
+    rationale.push("answer quality proposals should become eval cases before router scoring changes");
+  }
+
+  return {
+    impact: {
+      proposalId: proposal.id,
+      action: proposal.action,
+      targetCollectionId: proposal.collectionId,
+      expectedCollectionId: proposal.expectedCollectionId,
+      queryHash: proposal.queryHash,
+      estimatedScoreDelta,
+      riskLevel,
+      wouldAutoApply: false,
+      rationale,
+    },
+    nextSafeAction:
+      signalCount < DEFAULT_PROPOSAL_MIN_SIGNALS
+        ? "needs_more_feedback"
+        : proposal.status === "APPROVED"
+          ? "run_eval_before_apply"
+          : "review_only",
   };
 }
 
@@ -385,6 +459,36 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback proposal review contract failed");
       return sendApiError(reply, 500, "FEEDBACK_PROPOSAL_REVIEW_CONTRACT_FAILED", "Feedback proposal karar yanıtı doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.get("/v1/feedback/knowledge/proposals/:id/impact", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const params = req.params as { id?: string };
+    if (!params.id) {
+      return sendApiError(reply, 400, "INVALID_FEEDBACK_PROPOSAL_ID", "Proposal id gerekli");
+    }
+    const user = await ensureUser(wallet);
+    const proposalRow = await prisma.knowledgeFeedbackProposal.findFirst({
+      where: { id: params.id, userId: user.id },
+    });
+    if (!proposalRow) {
+      return sendApiError(reply, 404, "FEEDBACK_PROPOSAL_NOT_FOUND", "Feedback proposal bulunamadı");
+    }
+    const proposal = toProposalItem(proposalRow);
+    const impact = buildImpact(proposal);
+    const response: KnowledgeFeedbackProposalImpactResponse = {
+      proposal,
+      ...impact,
+    };
+    const checked = safeParseKnowledgeFeedbackProposalImpactResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback proposal impact contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_PROPOSAL_IMPACT_CONTRACT_FAILED", "Feedback proposal etki raporu doğrulanamadı");
     }
     return reply.send(checked.data);
   });
