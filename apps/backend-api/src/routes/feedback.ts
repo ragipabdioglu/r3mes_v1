@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@prisma/client";
 import {
   safeParseKnowledgeFeedbackApplyRecordCreateResponse,
+  safeParseKnowledgeFeedbackApplyRecordListResponse,
   safeParseKnowledgeFeedbackApplyPlanResponse,
   safeParseKnowledgeFeedbackCreateRequest,
   safeParseKnowledgeFeedbackCreateResponse,
@@ -19,6 +20,7 @@ import {
   type KnowledgeFeedbackApplyPlanResponse,
   type KnowledgeFeedbackApplyRecordCreateResponse,
   type KnowledgeFeedbackApplyRecordItem,
+  type KnowledgeFeedbackApplyRecordListResponse,
   type KnowledgeFeedbackApplyPlanStep,
   type KnowledgeFeedbackGateResultResponse,
   type KnowledgeFeedbackProposalAction,
@@ -680,6 +682,37 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback apply plan contract failed");
       return sendApiError(reply, 500, "FEEDBACK_APPLY_PLAN_CONTRACT_FAILED", "Feedback apply plan doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.get("/v1/feedback/knowledge/apply-records", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const query = req.query as { status?: string; limit?: string };
+    const allowedStatuses = new Set(["PLANNED", "GATE_PASSED", "APPLIED", "ROLLED_BACK", "BLOCKED"]);
+    const status = typeof query.status === "string" && allowedStatuses.has(query.status) ? query.status : null;
+    const limit = Math.max(1, Math.min(100, Number(query.limit ?? 25) || 25));
+    const user = await ensureUser(wallet);
+    const rows = await prisma.knowledgeFeedbackApplyRecord.findMany({
+      where: {
+        userId: user.id,
+        ...(status ? { status: status as "PLANNED" | "GATE_PASSED" | "APPLIED" | "ROLLED_BACK" | "BLOCKED" } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+    const response: KnowledgeFeedbackApplyRecordListResponse = {
+      data: rows.map(toApplyRecordItem),
+      total: rows.length,
+      generatedAt: new Date().toISOString(),
+    };
+    const checked = safeParseKnowledgeFeedbackApplyRecordListResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback apply record list contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_APPLY_RECORD_LIST_CONTRACT_FAILED", "Feedback apply record listesi doğrulanamadı");
     }
     return reply.send(checked.data);
   });

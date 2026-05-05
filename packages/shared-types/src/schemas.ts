@@ -15,6 +15,7 @@ import type {
   KnowledgeFeedbackApplyPlanStep,
   KnowledgeFeedbackApplyRecordCreateResponse,
   KnowledgeFeedbackApplyRecordItem,
+  KnowledgeFeedbackApplyRecordListResponse,
   KnowledgeFeedbackGateResultRequest,
   KnowledgeFeedbackGateResultResponse,
   KnowledgeFeedbackCreateRequest,
@@ -300,6 +301,13 @@ export const KnowledgeFeedbackApplyRecordCreateResponseSchema: z.ZodType<Knowled
     nextSafeAction: z.literal("run_feedback_eval_gate"),
   });
 
+export const KnowledgeFeedbackApplyRecordListResponseSchema: z.ZodType<KnowledgeFeedbackApplyRecordListResponse> =
+  z.object({
+    data: z.array(KnowledgeFeedbackApplyRecordItemSchema),
+    total: z.number().int().nonnegative(),
+    generatedAt: z.string(),
+  });
+
 export const KnowledgeFeedbackGateResultRequestSchema: z.ZodType<KnowledgeFeedbackGateResultRequest> = z.object({
   ok: z.boolean(),
   report: z.record(z.unknown()).nullable().optional(),
@@ -467,6 +475,12 @@ export function safeParseKnowledgeFeedbackApplyRecordCreateResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyRecordCreateResponse> {
   return KnowledgeFeedbackApplyRecordCreateResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackApplyRecordListResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyRecordListResponse> {
+  return KnowledgeFeedbackApplyRecordListResponseSchema.safeParse(input);
 }
 
 export function safeParseKnowledgeFeedbackGateResultRequest(

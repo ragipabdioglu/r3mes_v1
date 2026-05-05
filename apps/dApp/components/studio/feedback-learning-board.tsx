@@ -4,12 +4,16 @@ import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  createKnowledgeFeedbackApplyRecord,
   fetchKnowledgeFeedbackApplyPlan,
+  fetchKnowledgeFeedbackApplyRecords,
   fetchKnowledgeFeedbackProposalImpact,
   fetchKnowledgeFeedbackProposals,
   fetchKnowledgeFeedbackSummary,
   generateKnowledgeFeedbackProposals,
   reviewKnowledgeFeedbackProposal,
+  type KnowledgeFeedbackApplyRecordItem,
+  type KnowledgeFeedbackApplyRecordListResponse,
   type KnowledgeFeedbackApplyPlanResponse,
   type KnowledgeFeedbackProposalImpactResponse,
   type KnowledgeFeedbackProposalItem,
@@ -41,6 +45,14 @@ function statusClass(status: KnowledgeFeedbackProposalItem["status"]): string {
   return "border-amber-500/25 bg-amber-950/15 text-amber-100";
 }
 
+function applyRecordStatusClass(status: KnowledgeFeedbackApplyRecordItem["status"]): string {
+  if (status === "GATE_PASSED") return "border-emerald-500/25 bg-emerald-950/15 text-emerald-100";
+  if (status === "BLOCKED") return "border-rose-500/25 bg-rose-950/15 text-rose-100";
+  if (status === "APPLIED") return "border-cyan-500/25 bg-cyan-950/15 text-cyan-100";
+  if (status === "ROLLED_BACK") return "border-zinc-700 bg-zinc-950/60 text-zinc-400";
+  return "border-amber-500/25 bg-amber-950/15 text-amber-100";
+}
+
 function signalCount(item: KnowledgeFeedbackProposalItem): number {
   const keys = ["wrongSourceCount", "goodSourceCount", "missingSourceCount", "badAnswerCount"];
   return keys.reduce((sum, key) => {
@@ -54,6 +66,7 @@ export function FeedbackLearningBoard() {
   const { ensureAuthHeaders } = useR3mesWalletAuth();
   const [summary, setSummary] = useState<KnowledgeFeedbackSummaryResponse | null>(null);
   const [proposals, setProposals] = useState<KnowledgeFeedbackProposalItem[]>([]);
+  const [applyRecords, setApplyRecords] = useState<KnowledgeFeedbackApplyRecordListResponse | null>(null);
   const [impact, setImpact] = useState<Record<string, KnowledgeFeedbackProposalImpactResponse>>({});
   const [applyPlan, setApplyPlan] = useState<Record<string, KnowledgeFeedbackApplyPlanResponse>>({});
   const [loading, setLoading] = useState(false);
@@ -65,18 +78,21 @@ export function FeedbackLearningBoard() {
     if (!account?.address) {
       setSummary(null);
       setProposals([]);
+      setApplyRecords(null);
       return;
     }
     setLoading(true);
     setErr(null);
     try {
       const auth = await ensureAuthHeaders();
-      const [nextSummary, nextProposals] = await Promise.all([
+      const [nextSummary, nextProposals, nextApplyRecords] = await Promise.all([
         fetchKnowledgeFeedbackSummary(auth),
         fetchKnowledgeFeedbackProposals(auth, "all"),
+        fetchKnowledgeFeedbackApplyRecords(auth, "all"),
       ]);
       setSummary(nextSummary);
       setProposals(nextProposals);
+      setApplyRecords(nextApplyRecords);
     } catch (e) {
       setErr(
         isLikelyWalletAuthFailure(e)
@@ -140,6 +156,22 @@ export function FeedbackLearningBoard() {
     }
   }
 
+  async function recordApplyPlan(proposal: KnowledgeFeedbackProposalItem) {
+    setBusyId(proposal.id);
+    setErr(null);
+    setMessage(null);
+    try {
+      const auth = await ensureAuthHeaders();
+      const created = await createKnowledgeFeedbackApplyRecord(proposal.id, auth);
+      setMessage(`Apply record kaydedildi: ${shortId(created.record.id)}. Sıradaki güvenli adım eval gate.`);
+      await load();
+    } catch {
+      setErr("Apply record kaydedilemedi.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function review(proposal: KnowledgeFeedbackProposalItem, decision: "approve" | "reject") {
     setBusyId(proposal.id);
     setErr(null);
@@ -165,6 +197,7 @@ export function FeedbackLearningBoard() {
   }
 
   const pendingCount = proposals.filter((item) => item.status === "PENDING").length;
+  const gatePassedCount = applyRecords?.data.filter((item) => item.status === "GATE_PASSED").length ?? 0;
   const topSummary = summary?.data.slice(0, 3) ?? [];
 
   return (
@@ -215,8 +248,8 @@ export function FeedbackLearningBoard() {
           <p className="mt-1 text-2xl font-semibold text-amber-100">{pendingCount}</p>
         </div>
         <div className="rounded-xl border border-zinc-800 bg-black/20 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Kural</p>
-          <p className="mt-1 text-xs leading-relaxed text-zinc-400">Auto-apply kapalı</p>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Gate passed</p>
+          <p className="mt-1 text-2xl font-semibold text-emerald-100">{gatePassedCount}</p>
         </div>
       </div>
 
@@ -230,6 +263,32 @@ export function FeedbackLearningBoard() {
             {topSummary.map((item) => (
               <li key={item.key}>
                 {item.suggestedAction ?? "NO_ACTION"} · total={item.total} · wrong={item.wrongSourceCount} · missing={item.missingSourceCount} · bad={item.badAnswerCount} · source={shortId(item.collectionId)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {applyRecords && applyRecords.data.length > 0 ? (
+        <div className="rounded-xl border border-zinc-800 bg-black/15 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Apply review queue</p>
+            <p className="text-[11px] text-zinc-600">Auto-apply kapalı · son karar insan kontrolünde</p>
+          </div>
+          <ul className="mt-3 space-y-2 text-xs text-zinc-400">
+            {applyRecords.data.slice(0, 5).map((record) => (
+              <li key={record.id} className="rounded-lg border border-zinc-800 bg-zinc-950/45 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${applyRecordStatusClass(record.status)}`}>
+                    {record.status}
+                  </span>
+                  <span className="font-mono text-[11px] text-zinc-500">
+                    record={shortId(record.id)} · proposal={shortId(record.proposalId)}
+                  </span>
+                </div>
+                <p className="mt-1 text-zinc-500">
+                  gate={record.gateCheckedAt ? new Date(record.gateCheckedAt).toLocaleString("tr-TR") : "bekliyor"} · reason={record.reason ?? "-"}
+                </p>
               </li>
             ))}
           </ul>
@@ -300,6 +359,16 @@ export function FeedbackLearningBoard() {
                           Reject
                         </button>
                       </>
+                    ) : null}
+                    {proposal.status === "APPROVED" ? (
+                      <button
+                        type="button"
+                        onClick={() => void recordApplyPlan(proposal)}
+                        disabled={isBusy}
+                        className="rounded-full border border-emerald-500/30 px-3 py-1.5 text-xs text-emerald-100 hover:border-emerald-400/60 disabled:opacity-50"
+                      >
+                        Record plan
+                      </button>
                     ) : null}
                   </div>
                 </div>

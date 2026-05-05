@@ -104,6 +104,39 @@ export type KnowledgeFeedbackApplyPlanResponse = {
   blockedReasons: string[];
 };
 
+export type KnowledgeFeedbackApplyRecordStatus =
+  | "PLANNED"
+  | "GATE_PASSED"
+  | "APPLIED"
+  | "ROLLED_BACK"
+  | "BLOCKED";
+
+export type KnowledgeFeedbackApplyRecordItem = {
+  id: string;
+  proposalId: string;
+  status: KnowledgeFeedbackApplyRecordStatus;
+  plan: KnowledgeFeedbackApplyPlanResponse;
+  reason: string | null;
+  plannedAt: string;
+  gateCheckedAt: string | null;
+  appliedAt: string | null;
+  rolledBackAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type KnowledgeFeedbackApplyRecordListResponse = {
+  data: KnowledgeFeedbackApplyRecordItem[];
+  total: number;
+  generatedAt: string;
+};
+
+export type KnowledgeFeedbackApplyRecordCreateResponse = {
+  record: KnowledgeFeedbackApplyRecordItem;
+  mutationApplied: false;
+  nextSafeAction: "run_feedback_eval_gate";
+};
+
 function authHeaders(auth: R3mesWalletAuthHeaders): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -181,6 +214,36 @@ export async function fetchKnowledgeFeedbackApplyPlan(
   );
   if (!res.ok) throw new Error(`Feedback apply plan ${res.status}`);
   return (await res.json()) as KnowledgeFeedbackApplyPlanResponse;
+}
+
+export async function fetchKnowledgeFeedbackApplyRecords(
+  auth: R3mesWalletAuthHeaders,
+  status: KnowledgeFeedbackApplyRecordStatus | "all" = "all",
+): Promise<KnowledgeFeedbackApplyRecordListResponse> {
+  const url = new URL("/v1/feedback/knowledge/apply-records", getBackendUrl());
+  url.searchParams.set("limit", "25");
+  if (status !== "all") url.searchParams.set("status", status);
+  const res = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Feedback apply records ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackApplyRecordListResponse;
+}
+
+export async function createKnowledgeFeedbackApplyRecord(
+  proposalId: string,
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeFeedbackApplyRecordCreateResponse> {
+  const res = await fetch(
+    `${getBackendUrl()}/v1/feedback/knowledge/proposals/${encodeURIComponent(proposalId)}/apply-records`,
+    {
+      method: "POST",
+      headers: authHeaders(auth),
+    },
+  );
+  if (!res.ok) throw new Error(`Feedback apply record create ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackApplyRecordCreateResponse;
 }
 
 export async function reviewKnowledgeFeedbackProposal(

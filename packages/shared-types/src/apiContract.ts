@@ -247,6 +247,12 @@ export interface KnowledgeFeedbackApplyRecordCreateResponse {
   nextSafeAction: "run_feedback_eval_gate";
 }
 
+export interface KnowledgeFeedbackApplyRecordListResponse {
+  data: KnowledgeFeedbackApplyRecordItem[];
+  total: number;
+  generatedAt: string;
+}
+
 export interface KnowledgeFeedbackGateResultRequest {
   ok: boolean;
   report?: Record<string, unknown> | null;
