@@ -17,6 +17,7 @@ import {
   safeParseKnowledgeFeedbackProposalImpactResponse,
   safeParseKnowledgeFeedbackProposalListResponse,
   safeParseKnowledgeFeedbackProposalReviewResponse,
+  safeParseKnowledgeFeedbackRouterAdjustmentListResponse,
   safeParseKnowledgeFeedbackSummaryResponse,
   type KnowledgeFeedbackCreateResponse,
   type KnowledgeFeedbackAggregateItem,
@@ -38,6 +39,7 @@ import {
   type KnowledgeFeedbackProposalListResponse,
   type KnowledgeFeedbackProposalReviewResponse,
   type KnowledgeFeedbackRouterAdjustmentItem,
+  type KnowledgeFeedbackRouterAdjustmentListResponse,
   type KnowledgeFeedbackSummaryResponse,
 } from "@r3mes/shared-types";
 
@@ -1013,6 +1015,36 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback adjustment rollback contract failed");
       return sendApiError(reply, 500, "FEEDBACK_ADJUSTMENT_ROLLBACK_CONTRACT_FAILED", "Feedback adjustment rollback doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.get("/v1/feedback/knowledge/router-adjustments", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const query = req.query as { status?: string; limit?: string };
+    const status = query.status === "ACTIVE" || query.status === "ROLLED_BACK" ? query.status : null;
+    const limit = Math.max(1, Math.min(100, Number(query.limit ?? 25) || 25));
+    const user = await ensureUser(wallet);
+    const rows = await prisma.knowledgeFeedbackRouterAdjustment.findMany({
+      where: {
+        userId: user.id,
+        ...(status ? { status } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+    const response: KnowledgeFeedbackRouterAdjustmentListResponse = {
+      data: rows.map(toRouterAdjustmentItem),
+      total: rows.length,
+      generatedAt: new Date().toISOString(),
+    };
+    const checked = safeParseKnowledgeFeedbackRouterAdjustmentListResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback router adjustment list contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_ADJUSTMENT_LIST_CONTRACT_FAILED", "Feedback adjustment listesi doğrulanamadı");
     }
     return reply.send(checked.data);
   });

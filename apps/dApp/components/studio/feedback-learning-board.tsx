@@ -10,15 +10,19 @@ import {
   fetchKnowledgeFeedbackMutationPreview,
   fetchKnowledgeFeedbackProposalImpact,
   fetchKnowledgeFeedbackProposals,
+  fetchKnowledgeFeedbackRouterAdjustments,
   fetchKnowledgeFeedbackSummary,
   generateKnowledgeFeedbackProposals,
+  passiveApplyKnowledgeFeedbackRecord,
   reviewKnowledgeFeedbackProposal,
+  rollbackKnowledgeFeedbackAdjustment,
   type KnowledgeFeedbackApplyRecordItem,
   type KnowledgeFeedbackApplyRecordListResponse,
   type KnowledgeFeedbackApplyMutationPreviewResponse,
   type KnowledgeFeedbackApplyPlanResponse,
   type KnowledgeFeedbackProposalImpactResponse,
   type KnowledgeFeedbackProposalItem,
+  type KnowledgeFeedbackRouterAdjustmentListResponse,
   type KnowledgeFeedbackSummaryResponse,
 } from "@/lib/api/feedback";
 import { useR3mesWalletAuth } from "@/lib/hooks/use-r3mes-wallet-auth";
@@ -75,6 +79,7 @@ export function FeedbackLearningBoard() {
   const [summary, setSummary] = useState<KnowledgeFeedbackSummaryResponse | null>(null);
   const [proposals, setProposals] = useState<KnowledgeFeedbackProposalItem[]>([]);
   const [applyRecords, setApplyRecords] = useState<KnowledgeFeedbackApplyRecordListResponse | null>(null);
+  const [routerAdjustments, setRouterAdjustments] = useState<KnowledgeFeedbackRouterAdjustmentListResponse | null>(null);
   const [mutationPreview, setMutationPreview] = useState<Record<string, KnowledgeFeedbackApplyMutationPreviewResponse>>({});
   const [impact, setImpact] = useState<Record<string, KnowledgeFeedbackProposalImpactResponse>>({});
   const [applyPlan, setApplyPlan] = useState<Record<string, KnowledgeFeedbackApplyPlanResponse>>({});
@@ -88,20 +93,23 @@ export function FeedbackLearningBoard() {
       setSummary(null);
       setProposals([]);
       setApplyRecords(null);
+      setRouterAdjustments(null);
       return;
     }
     setLoading(true);
     setErr(null);
     try {
       const auth = await ensureAuthHeaders();
-      const [nextSummary, nextProposals, nextApplyRecords] = await Promise.all([
+      const [nextSummary, nextProposals, nextApplyRecords, nextAdjustments] = await Promise.all([
         fetchKnowledgeFeedbackSummary(auth),
         fetchKnowledgeFeedbackProposals(auth, "all"),
         fetchKnowledgeFeedbackApplyRecords(auth, "all"),
+        fetchKnowledgeFeedbackRouterAdjustments(auth, "all"),
       ]);
       setSummary(nextSummary);
       setProposals(nextProposals);
       setApplyRecords(nextApplyRecords);
+      setRouterAdjustments(nextAdjustments);
     } catch (e) {
       setErr(
         isLikelyWalletAuthFailure(e)
@@ -195,6 +203,38 @@ export function FeedbackLearningBoard() {
     }
   }
 
+  async function passiveApply(record: KnowledgeFeedbackApplyRecordItem) {
+    setBusyId(record.id);
+    setErr(null);
+    setMessage(null);
+    try {
+      const auth = await ensureAuthHeaders();
+      const applied = await passiveApplyKnowledgeFeedbackRecord(record.id, auth);
+      setMessage(`${applied.adjustments.length} passive adjustment kaydedildi. Router runtime etkilenmedi.`);
+      await load();
+    } catch {
+      setErr("Passive apply yapılamadı. Gate durumu veya record statüsünü kontrol edin.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function rollbackAdjustment(adjustmentId: string) {
+    setBusyId(adjustmentId);
+    setErr(null);
+    setMessage(null);
+    try {
+      const auth = await ensureAuthHeaders();
+      await rollbackKnowledgeFeedbackAdjustment(adjustmentId, auth);
+      setMessage("Passive adjustment rollback edildi. Router runtime zaten etkilenmemişti.");
+      await load();
+    } catch {
+      setErr("Adjustment rollback yapılamadı.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function review(proposal: KnowledgeFeedbackProposalItem, decision: "approve" | "reject") {
     setBusyId(proposal.id);
     setErr(null);
@@ -221,6 +261,7 @@ export function FeedbackLearningBoard() {
 
   const pendingCount = proposals.filter((item) => item.status === "PENDING").length;
   const gatePassedCount = applyRecords?.data.filter((item) => item.status === "GATE_PASSED").length ?? 0;
+  const activeAdjustmentCount = routerAdjustments?.data.filter((item) => item.status === "ACTIVE").length ?? 0;
   const topSummary = summary?.data.slice(0, 3) ?? [];
 
   return (
@@ -271,8 +312,8 @@ export function FeedbackLearningBoard() {
           <p className="mt-1 text-2xl font-semibold text-amber-100">{pendingCount}</p>
         </div>
         <div className="rounded-xl border border-zinc-800 bg-black/20 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Gate passed</p>
-          <p className="mt-1 text-2xl font-semibold text-emerald-100">{gatePassedCount}</p>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Passive adj.</p>
+          <p className="mt-1 text-2xl font-semibold text-cyan-100">{activeAdjustmentCount}</p>
         </div>
       </div>
 
@@ -320,6 +361,16 @@ export function FeedbackLearningBoard() {
                   >
                     Preview diff
                   </button>
+                  {record.status === "GATE_PASSED" ? (
+                    <button
+                      type="button"
+                      onClick={() => void passiveApply(record)}
+                      disabled={busyId === record.id}
+                      className="rounded-full border border-emerald-500/25 px-2 py-0.5 text-[10px] text-emerald-100 hover:border-emerald-400/60 disabled:opacity-50"
+                    >
+                      Passive apply
+                    </button>
+                  ) : null}
                 </div>
                 <p className="mt-1 text-zinc-500">
                   gate={record.gateCheckedAt ? new Date(record.gateCheckedAt).toLocaleString("tr-TR") : "bekliyor"} · reason={record.reason ?? "-"}
@@ -361,6 +412,45 @@ export function FeedbackLearningBoard() {
                     </>
                   );
                 })()}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {routerAdjustments && routerAdjustments.data.length > 0 ? (
+        <div className="rounded-xl border border-zinc-800 bg-black/15 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Passive router adjustments</p>
+            <p className="text-[11px] text-zinc-600">Read-only runtime · skorlamaya henüz bağlı değil</p>
+          </div>
+          <ul className="mt-3 space-y-2 text-xs text-zinc-400">
+            {routerAdjustments.data.slice(0, 5).map((item) => (
+              <li key={item.id} className="rounded-lg border border-zinc-800 bg-zinc-950/45 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${item.status === "ACTIVE" ? "border-cyan-500/25 bg-cyan-950/15 text-cyan-100" : "border-zinc-700 bg-zinc-950/60 text-zinc-400"}`}>
+                    {item.status}
+                  </span>
+                  <span className="font-mono text-[11px] text-zinc-500">
+                    adj={shortId(item.id)} · record={shortId(item.applyRecordId)} · collection={shortId(item.collectionId)}
+                  </span>
+                  {item.status === "ACTIVE" ? (
+                    <button
+                      type="button"
+                      onClick={() => void rollbackAdjustment(item.id)}
+                      disabled={busyId === item.id}
+                      className="rounded-full border border-rose-500/25 px-2 py-0.5 text-[10px] text-rose-100 hover:border-rose-400/60 disabled:opacity-50"
+                    >
+                      Rollback
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-zinc-500">
+                  {item.kind} · {item.mutationPath} · delta={item.scoreDelta} · simulated={item.simulatedBefore ?? "-"}→{item.simulatedAfter ?? "-"}
+                </p>
+                {item.rollbackReason ? (
+                  <p className="mt-1 text-zinc-600">rollback={item.rollbackReason}</p>
+                ) : null}
               </li>
             ))}
           </ul>

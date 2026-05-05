@@ -23,6 +23,7 @@ import type {
   KnowledgeFeedbackAdjustmentRollbackResponse,
   KnowledgeFeedbackPassiveApplyResponse,
   KnowledgeFeedbackRouterAdjustmentItem,
+  KnowledgeFeedbackRouterAdjustmentListResponse,
   KnowledgeFeedbackCreateRequest,
   KnowledgeFeedbackCreateResponse,
   KnowledgeFeedbackProposalGenerateResponse,
@@ -389,6 +390,13 @@ export const KnowledgeFeedbackAdjustmentRollbackResponseSchema: z.ZodType<Knowle
   routerRuntimeAffected: z.literal(false),
 });
 
+export const KnowledgeFeedbackRouterAdjustmentListResponseSchema: z.ZodType<KnowledgeFeedbackRouterAdjustmentListResponse> =
+  z.object({
+    data: z.array(KnowledgeFeedbackRouterAdjustmentItemSchema),
+    total: z.number().int().nonnegative(),
+    generatedAt: z.string(),
+  });
+
 export const KnowledgeFeedbackGateResultRequestSchema: z.ZodType<KnowledgeFeedbackGateResultRequest> = z.object({
   ok: z.boolean(),
   report: z.record(z.unknown()).nullable().optional(),
@@ -580,6 +588,12 @@ export function safeParseKnowledgeFeedbackAdjustmentRollbackResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackAdjustmentRollbackResponse> {
   return KnowledgeFeedbackAdjustmentRollbackResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackRouterAdjustmentListResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackRouterAdjustmentListResponse> {
+  return KnowledgeFeedbackRouterAdjustmentListResponseSchema.safeParse(input);
 }
 
 export function safeParseKnowledgeFeedbackGateResultRequest(

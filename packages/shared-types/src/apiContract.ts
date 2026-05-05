@@ -322,6 +322,12 @@ export interface KnowledgeFeedbackAdjustmentRollbackResponse {
   routerRuntimeAffected: false;
 }
 
+export interface KnowledgeFeedbackRouterAdjustmentListResponse {
+  data: KnowledgeFeedbackRouterAdjustmentItem[];
+  total: number;
+  generatedAt: string;
+}
+
 export interface KnowledgeFeedbackGateResultRequest {
   ok: boolean;
   report?: Record<string, unknown> | null;

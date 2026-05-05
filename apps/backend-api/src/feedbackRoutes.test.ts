@@ -894,6 +894,56 @@ describe("knowledge feedback routes", () => {
     await app.close();
   });
 
+  it("lists passive router adjustments without exposing runtime mutation", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.findMany).mockResolvedValue([
+      {
+        id: "adjustment_1",
+        proposalId: "proposal_record",
+        applyRecordId: "apply_record_1",
+        status: "ACTIVE",
+        stepId: "proposal_record:boost:kc_good",
+        kind: "BOOST_COLLECTION_SCORE",
+        mutationPath: "query_scoped_collection_adjustment",
+        collectionId: "kc_good",
+        expectedCollectionId: null,
+        queryHash: "hash_2",
+        scoreDelta: 0.16,
+        simulatedBefore: 0,
+        simulatedAfter: 0.16,
+        rollbackReason: null,
+        createdAt: new Date("2026-05-05T12:08:00.000Z"),
+        rolledBackAt: null,
+        updatedAt: new Date("2026-05-05T12:08:00.000Z"),
+      },
+    ] as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/feedback/knowledge/router-adjustments?status=ACTIVE",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { total?: number; data?: Array<{ status?: string; mutationPath?: string }> };
+    expect(body.total).toBe(1);
+    expect(body.data?.[0]).toMatchObject({
+      status: "ACTIVE",
+      mutationPath: "query_scoped_collection_adjustment",
+    });
+    expect(prisma.knowledgeFeedbackRouterAdjustment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user_1",
+          status: "ACTIVE",
+        }),
+      }),
+    );
+    await app.close();
+  });
+
   it("marks a planned apply record as gate passed without applying mutations", async () => {
     const { prisma } = await import("./lib/prisma.js");
     vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);

@@ -170,6 +170,46 @@ export type KnowledgeFeedbackApplyMutationPreviewResponse = {
   generatedAt: string;
 };
 
+export type KnowledgeFeedbackRouterAdjustmentItem = {
+  id: string;
+  proposalId: string;
+  applyRecordId: string;
+  status: "ACTIVE" | "ROLLED_BACK";
+  stepId: string;
+  kind: string;
+  mutationPath: string;
+  collectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  scoreDelta: number;
+  simulatedBefore: number | null;
+  simulatedAfter: number | null;
+  rollbackReason: string | null;
+  createdAt: string;
+  rolledBackAt: string | null;
+  updatedAt: string;
+};
+
+export type KnowledgeFeedbackRouterAdjustmentListResponse = {
+  data: KnowledgeFeedbackRouterAdjustmentItem[];
+  total: number;
+  generatedAt: string;
+};
+
+export type KnowledgeFeedbackPassiveApplyResponse = {
+  record: KnowledgeFeedbackApplyRecordItem;
+  adjustments: KnowledgeFeedbackRouterAdjustmentItem[];
+  mutationApplied: false;
+  routerRuntimeAffected: false;
+  nextSafeAction: "router_integration_disabled";
+};
+
+export type KnowledgeFeedbackAdjustmentRollbackResponse = {
+  adjustment: KnowledgeFeedbackRouterAdjustmentItem;
+  mutationApplied: false;
+  routerRuntimeAffected: false;
+};
+
 function authHeaders(auth: R3mesWalletAuthHeaders): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -292,6 +332,53 @@ export async function fetchKnowledgeFeedbackMutationPreview(
   );
   if (!res.ok) throw new Error(`Feedback mutation preview ${res.status}`);
   return (await res.json()) as KnowledgeFeedbackApplyMutationPreviewResponse;
+}
+
+export async function fetchKnowledgeFeedbackRouterAdjustments(
+  auth: R3mesWalletAuthHeaders,
+  status: "ACTIVE" | "ROLLED_BACK" | "all" = "all",
+): Promise<KnowledgeFeedbackRouterAdjustmentListResponse> {
+  const url = new URL("/v1/feedback/knowledge/router-adjustments", getBackendUrl());
+  url.searchParams.set("limit", "25");
+  if (status !== "all") url.searchParams.set("status", status);
+  const res = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Feedback router adjustments ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackRouterAdjustmentListResponse;
+}
+
+export async function passiveApplyKnowledgeFeedbackRecord(
+  recordId: string,
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeFeedbackPassiveApplyResponse> {
+  const res = await fetch(
+    `${getBackendUrl()}/v1/feedback/knowledge/apply-records/${encodeURIComponent(recordId)}/apply-passive`,
+    {
+      method: "POST",
+      headers: authHeaders(auth),
+    },
+  );
+  if (!res.ok) throw new Error(`Feedback passive apply ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackPassiveApplyResponse;
+}
+
+export async function rollbackKnowledgeFeedbackAdjustment(
+  adjustmentId: string,
+  auth: R3mesWalletAuthHeaders,
+  reason = "manual rollback from Studio",
+): Promise<KnowledgeFeedbackAdjustmentRollbackResponse> {
+  const res = await fetch(
+    `${getBackendUrl()}/v1/feedback/knowledge/router-adjustments/${encodeURIComponent(adjustmentId)}/rollback`,
+    {
+      method: "POST",
+      headers: authHeaders(auth),
+      body: JSON.stringify({ reason }),
+    },
+  );
+  if (!res.ok) throw new Error(`Feedback adjustment rollback ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackAdjustmentRollbackResponse;
 }
 
 export async function reviewKnowledgeFeedbackProposal(
