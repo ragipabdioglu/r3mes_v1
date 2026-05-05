@@ -7,10 +7,12 @@ import {
   safeParseKnowledgeFeedbackApplyRecordCreateResponse,
   safeParseKnowledgeFeedbackApplyRecordListResponse,
   safeParseKnowledgeFeedbackApplyPlanResponse,
+  safeParseKnowledgeFeedbackAdjustmentRollbackResponse,
   safeParseKnowledgeFeedbackCreateRequest,
   safeParseKnowledgeFeedbackCreateResponse,
   safeParseKnowledgeFeedbackGateResultRequest,
   safeParseKnowledgeFeedbackGateResultResponse,
+  safeParseKnowledgeFeedbackPassiveApplyResponse,
   safeParseKnowledgeFeedbackProposalGenerateResponse,
   safeParseKnowledgeFeedbackProposalImpactResponse,
   safeParseKnowledgeFeedbackProposalListResponse,
@@ -25,7 +27,9 @@ import {
   type KnowledgeFeedbackApplyRecordItem,
   type KnowledgeFeedbackApplyRecordListResponse,
   type KnowledgeFeedbackApplyPlanStep,
+  type KnowledgeFeedbackAdjustmentRollbackResponse,
   type KnowledgeFeedbackGateResultResponse,
+  type KnowledgeFeedbackPassiveApplyResponse,
   type KnowledgeFeedbackProposalAction,
   type KnowledgeFeedbackProposalGenerateResponse,
   type KnowledgeFeedbackProposalImpactItem,
@@ -33,6 +37,7 @@ import {
   type KnowledgeFeedbackProposalItem,
   type KnowledgeFeedbackProposalListResponse,
   type KnowledgeFeedbackProposalReviewResponse,
+  type KnowledgeFeedbackRouterAdjustmentItem,
   type KnowledgeFeedbackSummaryResponse,
 } from "@r3mes/shared-types";
 
@@ -415,6 +420,46 @@ function toApplyRecordItem(row: {
   };
 }
 
+function toRouterAdjustmentItem(row: {
+  id: string;
+  proposalId: string;
+  applyRecordId: string;
+  status: string;
+  stepId: string;
+  kind: string;
+  mutationPath: string;
+  collectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  scoreDelta: number;
+  simulatedBefore: number | null;
+  simulatedAfter: number | null;
+  rollbackReason: string | null;
+  createdAt: Date;
+  rolledBackAt: Date | null;
+  updatedAt: Date;
+}): KnowledgeFeedbackRouterAdjustmentItem {
+  return {
+    id: row.id,
+    proposalId: row.proposalId,
+    applyRecordId: row.applyRecordId,
+    status: row.status as KnowledgeFeedbackRouterAdjustmentItem["status"],
+    stepId: row.stepId,
+    kind: row.kind,
+    mutationPath: row.mutationPath,
+    collectionId: row.collectionId,
+    expectedCollectionId: row.expectedCollectionId,
+    queryHash: row.queryHash,
+    scoreDelta: row.scoreDelta,
+    simulatedBefore: row.simulatedBefore,
+    simulatedAfter: row.simulatedAfter,
+    rollbackReason: row.rollbackReason,
+    createdAt: row.createdAt.toISOString(),
+    rolledBackAt: row.rolledBackAt?.toISOString() ?? null,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
 function buildApplyPlanResponse(proposal: KnowledgeFeedbackProposalItem): KnowledgeFeedbackApplyPlanResponse {
   const { impact } = buildImpact(proposal);
   const plan = buildApplyPlan(proposal);
@@ -483,6 +528,34 @@ function buildMutationPreview(record: KnowledgeFeedbackApplyRecordItem): Knowled
     applyAllowed: false,
     blockedReasons,
     generatedAt: new Date().toISOString(),
+  };
+}
+
+function adjustmentDataFromPreviewStep(opts: {
+  userId: string;
+  record: KnowledgeFeedbackApplyRecordItem;
+  step: KnowledgeFeedbackApplyMutationPreviewStep;
+}) {
+  return {
+    userId: opts.userId,
+    proposalId: opts.record.proposalId,
+    applyRecordId: opts.record.id,
+    stepId: opts.step.stepId,
+    kind: opts.step.kind,
+    mutationPath: opts.step.mutationPath,
+    collectionId: opts.step.targetCollectionId,
+    expectedCollectionId: opts.step.expectedCollectionId,
+    queryHash: opts.step.queryHash,
+    scoreDelta: opts.step.scoreDelta,
+    simulatedBefore: opts.step.simulatedCurrentScore,
+    simulatedAfter: opts.step.simulatedNextScore,
+    metadata: {
+      passive: true,
+      routerRuntimeAffected: false,
+      rationale: opts.step.rationale,
+      effect: opts.step.effect,
+      rollback: opts.step.rollback,
+    },
   };
 }
 
@@ -827,6 +900,119 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback mutation preview contract failed");
       return sendApiError(reply, 500, "FEEDBACK_MUTATION_PREVIEW_CONTRACT_FAILED", "Feedback mutation preview doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.post("/v1/feedback/knowledge/apply-records/:recordId/apply-passive", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const params = req.params as { recordId?: string };
+    if (!params.recordId) {
+      return sendApiError(reply, 400, "INVALID_FEEDBACK_APPLY_RECORD_ID", "Apply record id gerekli");
+    }
+    const user = await ensureUser(wallet);
+    const row = await prisma.knowledgeFeedbackApplyRecord.findFirst({
+      where: { id: params.recordId, userId: user.id },
+    });
+    if (!row) {
+      return sendApiError(reply, 404, "FEEDBACK_APPLY_RECORD_NOT_FOUND", "Feedback apply record bulunamadı");
+    }
+    const record = toApplyRecordItem(row);
+    if (record.status !== "GATE_PASSED" && record.status !== "APPLIED") {
+      return sendApiError(reply, 409, "FEEDBACK_APPLY_RECORD_NOT_READY", "Apply record önce eval gate'ten geçmeli");
+    }
+    if (record.gateReportSummary?.ok !== true) {
+      return sendApiError(reply, 409, "FEEDBACK_GATE_NOT_PASSED", "Feedback eval gate geçmeden passive apply yapılamaz");
+    }
+
+    let adjustments = await prisma.knowledgeFeedbackRouterAdjustment.findMany({
+      where: { userId: user.id, applyRecordId: record.id },
+      orderBy: { createdAt: "asc" },
+    });
+    let nextRecord = record;
+
+    if (adjustments.length === 0) {
+      const preview = buildMutationPreview(record);
+      await prisma.knowledgeFeedbackRouterAdjustment.createMany({
+        data: preview.previewSteps.map((step) => adjustmentDataFromPreviewStep({ userId: user.id, record, step })),
+      });
+      adjustments = await prisma.knowledgeFeedbackRouterAdjustment.findMany({
+        where: { userId: user.id, applyRecordId: record.id },
+        orderBy: { createdAt: "asc" },
+      });
+      const updatedRecord = await prisma.knowledgeFeedbackApplyRecord.update({
+        where: { id: record.id },
+        data: {
+          status: "APPLIED",
+          appliedAt: new Date(),
+          appliedDelta: {
+            passive: true,
+            routerRuntimeAffected: false,
+            adjustmentIds: adjustments.map((item) => item.id),
+            previewSteps: preview.previewSteps,
+          } as unknown as Prisma.InputJsonValue,
+          reason: "passive router adjustments recorded; router runtime integration remains disabled",
+        },
+      });
+      nextRecord = toApplyRecordItem(updatedRecord);
+    }
+
+    const response: KnowledgeFeedbackPassiveApplyResponse = {
+      record: nextRecord,
+      adjustments: adjustments.map(toRouterAdjustmentItem),
+      mutationApplied: false,
+      routerRuntimeAffected: false,
+      nextSafeAction: "router_integration_disabled",
+    };
+    const checked = safeParseKnowledgeFeedbackPassiveApplyResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback passive apply contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_PASSIVE_APPLY_CONTRACT_FAILED", "Feedback passive apply doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.post("/v1/feedback/knowledge/router-adjustments/:adjustmentId/rollback", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const params = req.params as { adjustmentId?: string };
+    if (!params.adjustmentId) {
+      return sendApiError(reply, 400, "INVALID_FEEDBACK_ADJUSTMENT_ID", "Adjustment id gerekli");
+    }
+    const user = await ensureUser(wallet);
+    const existing = await prisma.knowledgeFeedbackRouterAdjustment.findFirst({
+      where: { id: params.adjustmentId, userId: user.id },
+    });
+    if (!existing) {
+      return sendApiError(reply, 404, "FEEDBACK_ADJUSTMENT_NOT_FOUND", "Feedback adjustment bulunamadı");
+    }
+    const body = asObject(req.body);
+    const rollbackReason = normalizeOptionalString(typeof body?.reason === "string" ? body.reason : null)
+      ?? "manual passive adjustment rollback";
+    const adjustment = existing.status === "ROLLED_BACK"
+      ? existing
+      : await prisma.knowledgeFeedbackRouterAdjustment.update({
+          where: { id: existing.id },
+          data: {
+            status: "ROLLED_BACK",
+            rolledBackAt: new Date(),
+            rollbackReason,
+          },
+        });
+    const response: KnowledgeFeedbackAdjustmentRollbackResponse = {
+      adjustment: toRouterAdjustmentItem(adjustment),
+      mutationApplied: false,
+      routerRuntimeAffected: false,
+    };
+    const checked = safeParseKnowledgeFeedbackAdjustmentRollbackResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback adjustment rollback contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_ADJUSTMENT_ROLLBACK_CONTRACT_FAILED", "Feedback adjustment rollback doğrulanamadı");
     }
     return reply.send(checked.data);
   });

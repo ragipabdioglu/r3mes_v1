@@ -84,6 +84,11 @@ enum KnowledgeFeedbackApplyStatus {
   BLOCKED
 }
 
+enum KnowledgeFeedbackRouterAdjustmentStatus {
+  ACTIVE
+  ROLLED_BACK
+}
+
 model User {
   id             String   @id @default(cuid())
   walletAddress  String   @unique
@@ -97,6 +102,7 @@ model User {
   knowledgeFeedback    KnowledgeFeedback[]
   knowledgeFeedbackProposals KnowledgeFeedbackProposal[]
   knowledgeFeedbackApplyRecords KnowledgeFeedbackApplyRecord[]
+  knowledgeFeedbackRouterAdjustments KnowledgeFeedbackRouterAdjustment[]
 }
 
 /// LoRA / DoRA adaptörü — zincir + off-chain metadata
@@ -202,6 +208,7 @@ model KnowledgeFeedbackProposal {
   updatedAt  DateTime @updatedAt
 
   applyRecords KnowledgeFeedbackApplyRecord[]
+  routerAdjustments KnowledgeFeedbackRouterAdjustment[]
 
   @@index([userId, status, createdAt(sort: Desc)])
   @@index([collectionId, action, status])
@@ -230,8 +237,45 @@ model KnowledgeFeedbackApplyRecord {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  routerAdjustments KnowledgeFeedbackRouterAdjustment[]
+
   @@index([userId, status, createdAt(sort: Desc)])
   @@index([proposalId, status])
+}
+
+model KnowledgeFeedbackRouterAdjustment {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  proposalId String
+  proposal   KnowledgeFeedbackProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  applyRecordId String
+  applyRecord   KnowledgeFeedbackApplyRecord @relation(fields: [applyRecordId], references: [id], onDelete: Cascade)
+
+  status KnowledgeFeedbackRouterAdjustmentStatus @default(ACTIVE)
+
+  stepId               String
+  kind                 String
+  mutationPath         String
+  collectionId         String?
+  expectedCollectionId String?
+  queryHash            String?
+  scoreDelta           Float
+  simulatedBefore      Float?
+  simulatedAfter       Float?
+  metadata             Json?
+  rollbackReason       String? @db.Text
+
+  createdAt    DateTime @default(now())
+  rolledBackAt DateTime?
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([applyRecordId, status])
+  @@index([proposalId, status])
+  @@index([collectionId, queryHash, status])
 }
 
 model KnowledgeDocument {

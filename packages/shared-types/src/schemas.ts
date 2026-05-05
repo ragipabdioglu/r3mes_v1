@@ -20,6 +20,9 @@ import type {
   KnowledgeFeedbackApplyRecordListResponse,
   KnowledgeFeedbackGateResultRequest,
   KnowledgeFeedbackGateResultResponse,
+  KnowledgeFeedbackAdjustmentRollbackResponse,
+  KnowledgeFeedbackPassiveApplyResponse,
+  KnowledgeFeedbackRouterAdjustmentItem,
   KnowledgeFeedbackCreateRequest,
   KnowledgeFeedbackCreateResponse,
   KnowledgeFeedbackProposalGenerateResponse,
@@ -352,6 +355,40 @@ export const KnowledgeFeedbackApplyMutationPreviewResponseSchema: z.ZodType<Know
     generatedAt: z.string(),
   });
 
+export const KnowledgeFeedbackRouterAdjustmentItemSchema: z.ZodType<KnowledgeFeedbackRouterAdjustmentItem> = z.object({
+  id: z.string().min(1),
+  proposalId: z.string().min(1),
+  applyRecordId: z.string().min(1),
+  status: z.enum(["ACTIVE", "ROLLED_BACK"]),
+  stepId: z.string().min(1),
+  kind: z.string().min(1),
+  mutationPath: z.string().min(1),
+  collectionId: z.string().nullable(),
+  expectedCollectionId: z.string().nullable(),
+  queryHash: z.string().nullable(),
+  scoreDelta: z.number().min(-1).max(1),
+  simulatedBefore: z.number().nullable(),
+  simulatedAfter: z.number().nullable(),
+  rollbackReason: z.string().nullable(),
+  createdAt: z.string(),
+  rolledBackAt: z.string().nullable(),
+  updatedAt: z.string(),
+});
+
+export const KnowledgeFeedbackPassiveApplyResponseSchema: z.ZodType<KnowledgeFeedbackPassiveApplyResponse> = z.object({
+  record: KnowledgeFeedbackApplyRecordItemSchema,
+  adjustments: z.array(KnowledgeFeedbackRouterAdjustmentItemSchema),
+  mutationApplied: z.literal(false),
+  routerRuntimeAffected: z.literal(false),
+  nextSafeAction: z.literal("router_integration_disabled"),
+});
+
+export const KnowledgeFeedbackAdjustmentRollbackResponseSchema: z.ZodType<KnowledgeFeedbackAdjustmentRollbackResponse> = z.object({
+  adjustment: KnowledgeFeedbackRouterAdjustmentItemSchema,
+  mutationApplied: z.literal(false),
+  routerRuntimeAffected: z.literal(false),
+});
+
 export const KnowledgeFeedbackGateResultRequestSchema: z.ZodType<KnowledgeFeedbackGateResultRequest> = z.object({
   ok: z.boolean(),
   report: z.record(z.unknown()).nullable().optional(),
@@ -531,6 +568,18 @@ export function safeParseKnowledgeFeedbackApplyMutationPreviewResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyMutationPreviewResponse> {
   return KnowledgeFeedbackApplyMutationPreviewResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackPassiveApplyResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackPassiveApplyResponse> {
+  return KnowledgeFeedbackPassiveApplyResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackAdjustmentRollbackResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackAdjustmentRollbackResponse> {
+  return KnowledgeFeedbackAdjustmentRollbackResponseSchema.safeParse(input);
 }
 
 export function safeParseKnowledgeFeedbackGateResultRequest(

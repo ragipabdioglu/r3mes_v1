@@ -288,6 +288,40 @@ export interface KnowledgeFeedbackApplyMutationPreviewResponse {
   generatedAt: string;
 }
 
+export interface KnowledgeFeedbackRouterAdjustmentItem {
+  id: string;
+  proposalId: string;
+  applyRecordId: string;
+  status: "ACTIVE" | "ROLLED_BACK";
+  stepId: string;
+  kind: string;
+  mutationPath: string;
+  collectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  scoreDelta: number;
+  simulatedBefore: number | null;
+  simulatedAfter: number | null;
+  rollbackReason: string | null;
+  createdAt: string;
+  rolledBackAt: string | null;
+  updatedAt: string;
+}
+
+export interface KnowledgeFeedbackPassiveApplyResponse {
+  record: KnowledgeFeedbackApplyRecordItem;
+  adjustments: KnowledgeFeedbackRouterAdjustmentItem[];
+  mutationApplied: false;
+  routerRuntimeAffected: false;
+  nextSafeAction: "router_integration_disabled";
+}
+
+export interface KnowledgeFeedbackAdjustmentRollbackResponse {
+  adjustment: KnowledgeFeedbackRouterAdjustmentItem;
+  mutationApplied: false;
+  routerRuntimeAffected: false;
+}
+
 export interface KnowledgeFeedbackGateResultRequest {
   ok: boolean;
   report?: Record<string, unknown> | null;

@@ -31,6 +31,12 @@ vi.mock("./lib/prisma.js", () => ({
       findMany: vi.fn(),
       update: vi.fn(),
     },
+    knowledgeFeedbackRouterAdjustment: {
+      createMany: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+    },
     stakePosition: {
       findMany: vi.fn().mockResolvedValue([]),
     },
@@ -660,6 +666,231 @@ describe("knowledge feedback routes", () => {
     });
     expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
     expect(prisma.knowledgeFeedbackApplyRecord.update).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("records passive router adjustments without affecting runtime scoring", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackApplyRecord.findFirst).mockResolvedValue({
+      id: "apply_record_1",
+      proposalId: "proposal_record",
+      status: "GATE_PASSED",
+      plan: {
+        proposal: {
+          id: "proposal_record",
+          action: "BOOST_SOURCE",
+          status: "APPROVED",
+          collectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          confidence: 1,
+          reason: "reviewed good source cluster",
+          evidence: { goodSourceCount: 2, total: 2 },
+          reviewedAt: "2026-05-05T12:05:00.000Z",
+          createdAt: "2026-05-05T12:00:00.000Z",
+          updatedAt: "2026-05-05T12:05:00.000Z",
+        },
+        impact: {
+          proposalId: "proposal_record",
+          action: "BOOST_SOURCE",
+          targetCollectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          estimatedScoreDelta: 0.16,
+          riskLevel: "low",
+          wouldAutoApply: false,
+          rationale: ["dry-run only: router/profile state is not mutated"],
+        },
+        steps: [
+          {
+            id: "proposal_record:boost:kc_good",
+            kind: "BOOST_COLLECTION_SCORE",
+            targetCollectionId: "kc_good",
+            expectedCollectionId: null,
+            queryHash: "hash_2",
+            scoreDelta: 0.16,
+            reversible: true,
+            rollback: "Remove or invert this query-scoped collection boost.",
+            rationale: "Good-source feedback says this collection should rank higher.",
+          },
+        ],
+        mutationEnabled: false,
+        applyAllowed: false,
+        requiredGate: "feedback_eval_gate",
+        blockedReasons: ["mutation disabled: controlled apply preview only"],
+      },
+      gateReport: { ok: true, checks: [{ name: "rag_quality_gates", ok: true }] },
+      reason: "feedback eval gate passed",
+      plannedAt: new Date("2026-05-05T12:06:00.000Z"),
+      gateCheckedAt: new Date("2026-05-05T12:07:00.000Z"),
+      appliedAt: null,
+      rolledBackAt: null,
+      createdAt: new Date("2026-05-05T12:06:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:07:00.000Z"),
+    } as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.findMany)
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([
+        {
+          id: "adjustment_1",
+          proposalId: "proposal_record",
+          applyRecordId: "apply_record_1",
+          status: "ACTIVE",
+          stepId: "proposal_record:boost:kc_good",
+          kind: "BOOST_COLLECTION_SCORE",
+          mutationPath: "query_scoped_collection_adjustment",
+          collectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          scoreDelta: 0.16,
+          simulatedBefore: 0,
+          simulatedAfter: 0.16,
+          rollbackReason: null,
+          createdAt: new Date("2026-05-05T12:08:00.000Z"),
+          rolledBackAt: null,
+          updatedAt: new Date("2026-05-05T12:08:00.000Z"),
+        },
+      ] as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.createMany).mockResolvedValue({ count: 1 } as never);
+    vi.mocked(prisma.knowledgeFeedbackApplyRecord.update).mockResolvedValue({
+      id: "apply_record_1",
+      proposalId: "proposal_record",
+      status: "APPLIED",
+      plan: {
+        proposal: {
+          id: "proposal_record",
+          action: "BOOST_SOURCE",
+          status: "APPROVED",
+          collectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          confidence: 1,
+          reason: "reviewed good source cluster",
+          evidence: { goodSourceCount: 2, total: 2 },
+          reviewedAt: "2026-05-05T12:05:00.000Z",
+          createdAt: "2026-05-05T12:00:00.000Z",
+          updatedAt: "2026-05-05T12:05:00.000Z",
+        },
+        impact: {
+          proposalId: "proposal_record",
+          action: "BOOST_SOURCE",
+          targetCollectionId: "kc_good",
+          expectedCollectionId: null,
+          queryHash: "hash_2",
+          estimatedScoreDelta: 0.16,
+          riskLevel: "low",
+          wouldAutoApply: false,
+          rationale: ["dry-run only: router/profile state is not mutated"],
+        },
+        steps: [],
+        mutationEnabled: false,
+        applyAllowed: false,
+        requiredGate: "feedback_eval_gate",
+        blockedReasons: ["mutation disabled: controlled apply preview only"],
+      },
+      gateReport: { ok: true, checks: [{ name: "rag_quality_gates", ok: true }] },
+      reason: "passive router adjustments recorded; router runtime integration remains disabled",
+      plannedAt: new Date("2026-05-05T12:06:00.000Z"),
+      gateCheckedAt: new Date("2026-05-05T12:07:00.000Z"),
+      appliedAt: new Date("2026-05-05T12:08:00.000Z"),
+      rolledBackAt: null,
+      createdAt: new Date("2026-05-05T12:06:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:08:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge/apply-records/apply_record_1/apply-passive",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      mutationApplied?: boolean;
+      routerRuntimeAffected?: boolean;
+      record?: { status?: string };
+      adjustments?: Array<{ status?: string; scoreDelta?: number }>;
+    };
+    expect(body.mutationApplied).toBe(false);
+    expect(body.routerRuntimeAffected).toBe(false);
+    expect(body.record).toMatchObject({ status: "APPLIED" });
+    expect(body.adjustments?.[0]).toMatchObject({ status: "ACTIVE", scoreDelta: 0.16 });
+    expect(prisma.knowledgeFeedbackRouterAdjustment.createMany).toHaveBeenCalled();
+    expect(prisma.knowledgeFeedbackApplyRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "APPLIED",
+          appliedDelta: expect.objectContaining({ passive: true, routerRuntimeAffected: false }),
+        }),
+      }),
+    );
+    expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rolls back a passive router adjustment without affecting runtime scoring", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.findFirst).mockResolvedValue({
+      id: "adjustment_1",
+      proposalId: "proposal_record",
+      applyRecordId: "apply_record_1",
+      status: "ACTIVE",
+      stepId: "proposal_record:boost:kc_good",
+      kind: "BOOST_COLLECTION_SCORE",
+      mutationPath: "query_scoped_collection_adjustment",
+      collectionId: "kc_good",
+      expectedCollectionId: null,
+      queryHash: "hash_2",
+      scoreDelta: 0.16,
+      simulatedBefore: 0,
+      simulatedAfter: 0.16,
+      rollbackReason: null,
+      createdAt: new Date("2026-05-05T12:08:00.000Z"),
+      rolledBackAt: null,
+      updatedAt: new Date("2026-05-05T12:08:00.000Z"),
+    } as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.update).mockResolvedValue({
+      id: "adjustment_1",
+      proposalId: "proposal_record",
+      applyRecordId: "apply_record_1",
+      status: "ROLLED_BACK",
+      stepId: "proposal_record:boost:kc_good",
+      kind: "BOOST_COLLECTION_SCORE",
+      mutationPath: "query_scoped_collection_adjustment",
+      collectionId: "kc_good",
+      expectedCollectionId: null,
+      queryHash: "hash_2",
+      scoreDelta: 0.16,
+      simulatedBefore: 0,
+      simulatedAfter: 0.16,
+      rollbackReason: "manual rollback in test",
+      createdAt: new Date("2026-05-05T12:08:00.000Z"),
+      rolledBackAt: new Date("2026-05-05T12:09:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:09:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge/router-adjustments/adjustment_1/rollback",
+      headers: { "content-type": "application/json" },
+      payload: { reason: "manual rollback in test" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      mutationApplied?: boolean;
+      routerRuntimeAffected?: boolean;
+      adjustment?: { status?: string; rollbackReason?: string };
+    };
+    expect(body.mutationApplied).toBe(false);
+    expect(body.routerRuntimeAffected).toBe(false);
+    expect(body.adjustment).toMatchObject({ status: "ROLLED_BACK", rollbackReason: "manual rollback in test" });
+    expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
     await app.close();
   });
 
