@@ -13,6 +13,8 @@ import type {
   KnowledgeFeedbackAggregateItem,
   KnowledgeFeedbackApplyPlanResponse,
   KnowledgeFeedbackApplyPlanStep,
+  KnowledgeFeedbackApplyMutationPreviewResponse,
+  KnowledgeFeedbackApplyMutationPreviewStep,
   KnowledgeFeedbackApplyRecordCreateResponse,
   KnowledgeFeedbackApplyRecordItem,
   KnowledgeFeedbackApplyRecordListResponse,
@@ -318,6 +320,38 @@ export const KnowledgeFeedbackApplyRecordListResponseSchema: z.ZodType<Knowledge
     generatedAt: z.string(),
   });
 
+export const KnowledgeFeedbackApplyMutationPreviewStepSchema: z.ZodType<KnowledgeFeedbackApplyMutationPreviewStep> =
+  z.object({
+    stepId: z.string().min(1),
+    kind: z.enum([
+      "BOOST_COLLECTION_SCORE",
+      "PENALIZE_COLLECTION_SCORE",
+      "CREATE_MISSING_SOURCE_REVIEW",
+      "CREATE_ANSWER_QUALITY_EVAL",
+    ]),
+    targetCollectionId: z.string().nullable(),
+    expectedCollectionId: z.string().nullable(),
+    queryHash: z.string().nullable(),
+    mutationPath: z.enum(["query_scoped_collection_adjustment", "missing_source_review", "answer_quality_eval"]),
+    simulatedCurrentScore: z.number().nullable(),
+    scoreDelta: z.number().min(-1).max(1),
+    simulatedNextScore: z.number().nullable(),
+    effect: z.enum(["boost", "penalty", "review_only"]),
+    reversible: z.literal(true),
+    rollback: z.string().min(1),
+    rationale: z.string().min(1),
+  });
+
+export const KnowledgeFeedbackApplyMutationPreviewResponseSchema: z.ZodType<KnowledgeFeedbackApplyMutationPreviewResponse> =
+  z.object({
+    record: KnowledgeFeedbackApplyRecordItemSchema,
+    previewSteps: z.array(KnowledgeFeedbackApplyMutationPreviewStepSchema),
+    mutationApplied: z.literal(false),
+    applyAllowed: z.literal(false),
+    blockedReasons: z.array(z.string()),
+    generatedAt: z.string(),
+  });
+
 export const KnowledgeFeedbackGateResultRequestSchema: z.ZodType<KnowledgeFeedbackGateResultRequest> = z.object({
   ok: z.boolean(),
   report: z.record(z.unknown()).nullable().optional(),
@@ -491,6 +525,12 @@ export function safeParseKnowledgeFeedbackApplyRecordListResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyRecordListResponse> {
   return KnowledgeFeedbackApplyRecordListResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackApplyMutationPreviewResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackApplyMutationPreviewResponse> {
+  return KnowledgeFeedbackApplyMutationPreviewResponseSchema.safeParse(input);
 }
 
 export function safeParseKnowledgeFeedbackGateResultRequest(

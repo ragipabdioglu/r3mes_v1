@@ -7,6 +7,7 @@ import {
   createKnowledgeFeedbackApplyRecord,
   fetchKnowledgeFeedbackApplyPlan,
   fetchKnowledgeFeedbackApplyRecords,
+  fetchKnowledgeFeedbackMutationPreview,
   fetchKnowledgeFeedbackProposalImpact,
   fetchKnowledgeFeedbackProposals,
   fetchKnowledgeFeedbackSummary,
@@ -14,6 +15,7 @@ import {
   reviewKnowledgeFeedbackProposal,
   type KnowledgeFeedbackApplyRecordItem,
   type KnowledgeFeedbackApplyRecordListResponse,
+  type KnowledgeFeedbackApplyMutationPreviewResponse,
   type KnowledgeFeedbackApplyPlanResponse,
   type KnowledgeFeedbackProposalImpactResponse,
   type KnowledgeFeedbackProposalItem,
@@ -73,6 +75,7 @@ export function FeedbackLearningBoard() {
   const [summary, setSummary] = useState<KnowledgeFeedbackSummaryResponse | null>(null);
   const [proposals, setProposals] = useState<KnowledgeFeedbackProposalItem[]>([]);
   const [applyRecords, setApplyRecords] = useState<KnowledgeFeedbackApplyRecordListResponse | null>(null);
+  const [mutationPreview, setMutationPreview] = useState<Record<string, KnowledgeFeedbackApplyMutationPreviewResponse>>({});
   const [impact, setImpact] = useState<Record<string, KnowledgeFeedbackProposalImpactResponse>>({});
   const [applyPlan, setApplyPlan] = useState<Record<string, KnowledgeFeedbackApplyPlanResponse>>({});
   const [loading, setLoading] = useState(false);
@@ -173,6 +176,20 @@ export function FeedbackLearningBoard() {
       await load();
     } catch {
       setErr("Apply record kaydedilemedi.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function showMutationPreview(record: KnowledgeFeedbackApplyRecordItem) {
+    setBusyId(record.id);
+    setErr(null);
+    try {
+      const auth = await ensureAuthHeaders();
+      const preview = await fetchKnowledgeFeedbackMutationPreview(record.id, auth);
+      setMutationPreview((current) => ({ ...current, [record.id]: preview }));
+    } catch {
+      setErr("Mutation preview alınamadı.");
     } finally {
       setBusyId(null);
     }
@@ -284,6 +301,10 @@ export function FeedbackLearningBoard() {
           <ul className="mt-3 space-y-2 text-xs text-zinc-400">
             {applyRecords.data.slice(0, 5).map((record) => (
               <li key={record.id} className="rounded-lg border border-zinc-800 bg-zinc-950/45 p-3">
+                {(() => {
+                  const preview = mutationPreview[record.id];
+                  return (
+                    <>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${applyRecordStatusClass(record.status)}`}>
                     {record.status}
@@ -291,6 +312,14 @@ export function FeedbackLearningBoard() {
                   <span className="font-mono text-[11px] text-zinc-500">
                     record={shortId(record.id)} · proposal={shortId(record.proposalId)}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => void showMutationPreview(record)}
+                    disabled={busyId === record.id}
+                    className="rounded-full border border-cyan-500/25 px-2 py-0.5 text-[10px] text-cyan-100 hover:border-cyan-400/60 disabled:opacity-50"
+                  >
+                    Preview diff
+                  </button>
                 </div>
                 <p className="mt-1 text-zinc-500">
                   gate={record.gateCheckedAt ? new Date(record.gateCheckedAt).toLocaleString("tr-TR") : "bekliyor"} · reason={record.reason ?? "-"}
@@ -307,6 +336,31 @@ export function FeedbackLearningBoard() {
                     ) : null}
                   </div>
                 ) : null}
+                {preview ? (
+                  <div className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-950/10 p-2 text-[11px] text-cyan-100/75">
+                    <p>
+                      mutationApplied={String(preview.mutationApplied)} · applyAllowed={String(preview.applyAllowed)} · steps={preview.previewSteps.length}
+                    </p>
+                    {preview.blockedReasons.length > 0 ? (
+                      <p className="mt-1 text-cyan-100/55">Blocked: {preview.blockedReasons.join(" · ")}</p>
+                    ) : null}
+                    <ul className="mt-2 space-y-1">
+                      {preview.previewSteps.map((step) => (
+                        <li key={step.stepId} className="rounded-md border border-cyan-500/15 bg-black/15 p-2">
+                          <p className="font-mono text-[10px] text-cyan-100">
+                            {step.effect} · {step.mutationPath} · {shortId(step.targetCollectionId)}
+                          </p>
+                          <p className="mt-1 text-cyan-100/65">
+                            score {step.simulatedCurrentScore ?? "-"} → {step.simulatedNextScore ?? "-"} · delta={step.scoreDelta}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                    </>
+                  );
+                })()}
               </li>
             ))}
           </ul>

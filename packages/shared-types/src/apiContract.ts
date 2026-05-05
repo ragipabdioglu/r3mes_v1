@@ -263,6 +263,31 @@ export interface KnowledgeFeedbackApplyRecordListResponse {
   generatedAt: string;
 }
 
+export interface KnowledgeFeedbackApplyMutationPreviewStep {
+  stepId: string;
+  kind: KnowledgeFeedbackApplyPlanStep["kind"];
+  targetCollectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  mutationPath: "query_scoped_collection_adjustment" | "missing_source_review" | "answer_quality_eval";
+  simulatedCurrentScore: number | null;
+  scoreDelta: number;
+  simulatedNextScore: number | null;
+  effect: "boost" | "penalty" | "review_only";
+  reversible: true;
+  rollback: string;
+  rationale: string;
+}
+
+export interface KnowledgeFeedbackApplyMutationPreviewResponse {
+  record: KnowledgeFeedbackApplyRecordItem;
+  previewSteps: KnowledgeFeedbackApplyMutationPreviewStep[];
+  mutationApplied: false;
+  applyAllowed: false;
+  blockedReasons: string[];
+  generatedAt: string;
+}
+
 export interface KnowledgeFeedbackGateResultRequest {
   ok: boolean;
   report?: Record<string, unknown> | null;

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@prisma/client";
 import {
+  safeParseKnowledgeFeedbackApplyMutationPreviewResponse,
   safeParseKnowledgeFeedbackApplyRecordCreateResponse,
   safeParseKnowledgeFeedbackApplyRecordListResponse,
   safeParseKnowledgeFeedbackApplyPlanResponse,
@@ -17,6 +18,8 @@ import {
   safeParseKnowledgeFeedbackSummaryResponse,
   type KnowledgeFeedbackCreateResponse,
   type KnowledgeFeedbackAggregateItem,
+  type KnowledgeFeedbackApplyMutationPreviewResponse,
+  type KnowledgeFeedbackApplyMutationPreviewStep,
   type KnowledgeFeedbackApplyPlanResponse,
   type KnowledgeFeedbackApplyRecordCreateResponse,
   type KnowledgeFeedbackApplyRecordItem,
@@ -426,6 +429,63 @@ function buildApplyPlanResponse(proposal: KnowledgeFeedbackProposalItem): Knowle
   };
 }
 
+function clampPreviewScore(value: number): number {
+  return Math.max(-1, Math.min(1, Number(value.toFixed(4))));
+}
+
+function mutationPathForStep(step: KnowledgeFeedbackApplyPlanStep): KnowledgeFeedbackApplyMutationPreviewStep["mutationPath"] {
+  if (step.kind === "CREATE_MISSING_SOURCE_REVIEW") return "missing_source_review";
+  if (step.kind === "CREATE_ANSWER_QUALITY_EVAL") return "answer_quality_eval";
+  return "query_scoped_collection_adjustment";
+}
+
+function previewStepEffect(step: KnowledgeFeedbackApplyPlanStep): KnowledgeFeedbackApplyMutationPreviewStep["effect"] {
+  if (step.kind === "BOOST_COLLECTION_SCORE") return "boost";
+  if (step.kind === "PENALIZE_COLLECTION_SCORE") return "penalty";
+  return "review_only";
+}
+
+function buildMutationPreview(record: KnowledgeFeedbackApplyRecordItem): KnowledgeFeedbackApplyMutationPreviewResponse {
+  const previewSteps: KnowledgeFeedbackApplyMutationPreviewStep[] = record.plan.steps.map((step) => {
+    const isScoreAdjustment = step.kind === "BOOST_COLLECTION_SCORE" || step.kind === "PENALIZE_COLLECTION_SCORE";
+    const simulatedCurrentScore = isScoreAdjustment ? 0 : null;
+    const simulatedNextScore = isScoreAdjustment ? clampPreviewScore((simulatedCurrentScore ?? 0) + step.scoreDelta) : null;
+    return {
+      stepId: step.id,
+      kind: step.kind,
+      targetCollectionId: step.targetCollectionId,
+      expectedCollectionId: step.expectedCollectionId,
+      queryHash: step.queryHash,
+      mutationPath: mutationPathForStep(step),
+      simulatedCurrentScore,
+      scoreDelta: step.scoreDelta,
+      simulatedNextScore,
+      effect: previewStepEffect(step),
+      reversible: true as const,
+      rollback: step.rollback,
+      rationale: step.rationale,
+    };
+  });
+  const blockedReasons = [
+    "mutation preview only: no router/profile state was changed",
+    "durable feedback weights do not exist yet; score values are simulated from neutral baseline",
+  ];
+  if (record.status !== "GATE_PASSED") {
+    blockedReasons.push(`apply record status is ${record.status}, expected GATE_PASSED`);
+  }
+  if (record.gateReportSummary?.ok !== true) {
+    blockedReasons.push("feedback eval gate has not passed");
+  }
+  return {
+    record,
+    previewSteps,
+    mutationApplied: false,
+    applyAllowed: false,
+    blockedReasons,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 export async function registerFeedbackRoutes(app: FastifyInstance) {
   app.get("/v1/feedback/knowledge/proposals", { preHandler: walletAuthPreHandler }, async (req, reply) => {
     const wallet = req.verifiedWalletAddress;
@@ -742,6 +802,31 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     if (!checked.success) {
       req.log.error({ err: checked.error }, "Knowledge feedback apply record list contract failed");
       return sendApiError(reply, 500, "FEEDBACK_APPLY_RECORD_LIST_CONTRACT_FAILED", "Feedback apply record listesi doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
+  app.get("/v1/feedback/knowledge/apply-records/:recordId/mutation-preview", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const params = req.params as { recordId?: string };
+    if (!params.recordId) {
+      return sendApiError(reply, 400, "INVALID_FEEDBACK_APPLY_RECORD_ID", "Apply record id gerekli");
+    }
+    const user = await ensureUser(wallet);
+    const row = await prisma.knowledgeFeedbackApplyRecord.findFirst({
+      where: { id: params.recordId, userId: user.id },
+    });
+    if (!row) {
+      return sendApiError(reply, 404, "FEEDBACK_APPLY_RECORD_NOT_FOUND", "Feedback apply record bulunamadı");
+    }
+    const response = buildMutationPreview(toApplyRecordItem(row));
+    const checked = safeParseKnowledgeFeedbackApplyMutationPreviewResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback mutation preview contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_MUTATION_PREVIEW_CONTRACT_FAILED", "Feedback mutation preview doğrulanamadı");
     }
     return reply.send(checked.data);
   });

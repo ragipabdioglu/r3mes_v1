@@ -147,6 +147,29 @@ export type KnowledgeFeedbackApplyRecordCreateResponse = {
   nextSafeAction: "run_feedback_eval_gate";
 };
 
+export type KnowledgeFeedbackApplyMutationPreviewResponse = {
+  record: KnowledgeFeedbackApplyRecordItem;
+  previewSteps: Array<{
+    stepId: string;
+    kind: KnowledgeFeedbackApplyPlanResponse["steps"][number]["kind"];
+    targetCollectionId: string | null;
+    expectedCollectionId: string | null;
+    queryHash: string | null;
+    mutationPath: "query_scoped_collection_adjustment" | "missing_source_review" | "answer_quality_eval";
+    simulatedCurrentScore: number | null;
+    scoreDelta: number;
+    simulatedNextScore: number | null;
+    effect: "boost" | "penalty" | "review_only";
+    reversible: true;
+    rollback: string;
+    rationale: string;
+  }>;
+  mutationApplied: false;
+  applyAllowed: false;
+  blockedReasons: string[];
+  generatedAt: string;
+};
+
 function authHeaders(auth: R3mesWalletAuthHeaders): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -254,6 +277,21 @@ export async function createKnowledgeFeedbackApplyRecord(
   );
   if (!res.ok) throw new Error(`Feedback apply record create ${res.status}`);
   return (await res.json()) as KnowledgeFeedbackApplyRecordCreateResponse;
+}
+
+export async function fetchKnowledgeFeedbackMutationPreview(
+  recordId: string,
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeFeedbackApplyMutationPreviewResponse> {
+  const res = await fetch(
+    `${getBackendUrl()}/v1/feedback/knowledge/apply-records/${encodeURIComponent(recordId)}/mutation-preview`,
+    {
+      cache: "no-store",
+      headers: authHeaders(auth),
+    },
+  );
+  if (!res.ok) throw new Error(`Feedback mutation preview ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackApplyMutationPreviewResponse;
 }
 
 export async function reviewKnowledgeFeedbackProposal(
