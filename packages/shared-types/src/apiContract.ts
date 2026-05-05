@@ -174,6 +174,11 @@ export interface KnowledgeFeedbackProposalGenerateResponse {
   generatedCount: number;
 }
 
+export interface KnowledgeFeedbackProposalListResponse {
+  data: KnowledgeFeedbackProposalItem[];
+  nextCursor: string | null;
+}
+
 export interface KnowledgeFeedbackProposalReviewResponse {
   proposal: KnowledgeFeedbackProposalItem;
 }

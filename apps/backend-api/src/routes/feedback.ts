@@ -7,6 +7,7 @@ import {
   safeParseKnowledgeFeedbackCreateResponse,
   safeParseKnowledgeFeedbackProposalGenerateResponse,
   safeParseKnowledgeFeedbackProposalImpactResponse,
+  safeParseKnowledgeFeedbackProposalListResponse,
   safeParseKnowledgeFeedbackProposalReviewResponse,
   safeParseKnowledgeFeedbackSummaryResponse,
   type KnowledgeFeedbackCreateResponse,
@@ -16,6 +17,7 @@ import {
   type KnowledgeFeedbackProposalImpactItem,
   type KnowledgeFeedbackProposalImpactResponse,
   type KnowledgeFeedbackProposalItem,
+  type KnowledgeFeedbackProposalListResponse,
   type KnowledgeFeedbackProposalReviewResponse,
   type KnowledgeFeedbackSummaryResponse,
 } from "@r3mes/shared-types";
@@ -263,6 +265,38 @@ function buildImpact(proposal: KnowledgeFeedbackProposalItem): {
 }
 
 export async function registerFeedbackRoutes(app: FastifyInstance) {
+  app.get("/v1/feedback/knowledge/proposals", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const user = await ensureUser(wallet);
+    const query = req.query as Record<string, unknown>;
+    const status =
+      query.status === "PENDING" || query.status === "APPROVED" || query.status === "REJECTED"
+        ? query.status
+        : undefined;
+    const limit = parsePositiveInt(query.limit, 50, 200);
+    const rows = await prisma.knowledgeFeedbackProposal.findMany({
+      where: {
+        userId: user.id,
+        ...(status ? { status } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+    });
+    const response: KnowledgeFeedbackProposalListResponse = {
+      data: rows.slice(0, limit).map(toProposalItem),
+      nextCursor: rows.length > limit ? rows[limit]?.id ?? null : null,
+    };
+    const checked = safeParseKnowledgeFeedbackProposalListResponse(response);
+    if (!checked.success) {
+      req.log.error({ err: checked.error }, "Knowledge feedback proposal list contract failed");
+      return sendApiError(reply, 500, "FEEDBACK_PROPOSAL_LIST_CONTRACT_FAILED", "Feedback proposal listesi doğrulanamadı");
+    }
+    return reply.send(checked.data);
+  });
+
   app.get("/v1/feedback/knowledge/summary", { preHandler: walletAuthPreHandler }, async (req, reply) => {
     const wallet = req.verifiedWalletAddress;
     if (!wallet) {

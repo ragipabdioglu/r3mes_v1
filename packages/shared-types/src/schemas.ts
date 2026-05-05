@@ -17,6 +17,7 @@ import type {
   KnowledgeFeedbackProposalImpactItem,
   KnowledgeFeedbackProposalImpactResponse,
   KnowledgeFeedbackProposalItem,
+  KnowledgeFeedbackProposalListResponse,
   KnowledgeFeedbackProposalReviewResponse,
   KnowledgeFeedbackSummaryResponse,
   KnowledgeDocumentListItem,
@@ -215,6 +216,12 @@ export const KnowledgeFeedbackProposalGenerateResponseSchema: z.ZodType<Knowledg
     generatedCount: z.number().int().nonnegative(),
   });
 
+export const KnowledgeFeedbackProposalListResponseSchema: z.ZodType<KnowledgeFeedbackProposalListResponse> =
+  z.object({
+    data: z.array(KnowledgeFeedbackProposalItemSchema),
+    nextCursor: z.string().nullable(),
+  });
+
 export const KnowledgeFeedbackProposalReviewResponseSchema: z.ZodType<KnowledgeFeedbackProposalReviewResponse> =
   z.object({
     proposal: KnowledgeFeedbackProposalItemSchema,
@@ -363,6 +370,12 @@ export function safeParseKnowledgeFeedbackProposalGenerateResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeFeedbackProposalGenerateResponse> {
   return KnowledgeFeedbackProposalGenerateResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeFeedbackProposalListResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeFeedbackProposalListResponse> {
+  return KnowledgeFeedbackProposalListResponseSchema.safeParse(input);
 }
 
 export function safeParseKnowledgeFeedbackProposalReviewResponse(

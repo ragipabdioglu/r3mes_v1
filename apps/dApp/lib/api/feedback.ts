@@ -21,6 +21,65 @@ export type KnowledgeFeedbackPayload = {
   metadata?: Record<string, unknown> | null;
 };
 
+export type KnowledgeFeedbackProposalStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type KnowledgeFeedbackProposalAction =
+  | "BOOST_SOURCE"
+  | "PENALIZE_SOURCE"
+  | "REVIEW_MISSING_SOURCE"
+  | "REVIEW_ANSWER_QUALITY";
+
+export type KnowledgeFeedbackProposalItem = {
+  id: string;
+  action: KnowledgeFeedbackProposalAction;
+  status: KnowledgeFeedbackProposalStatus;
+  collectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  confidence: number;
+  reason: string;
+  evidence: Record<string, unknown>;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type KnowledgeFeedbackAggregateItem = {
+  key: string;
+  collectionId: string | null;
+  expectedCollectionId: string | null;
+  queryHash: string | null;
+  total: number;
+  goodSourceCount: number;
+  wrongSourceCount: number;
+  missingSourceCount: number;
+  badAnswerCount: number;
+  goodAnswerCount: number;
+  negativeRate: number;
+  suggestedAction: KnowledgeFeedbackProposalAction | null;
+};
+
+export type KnowledgeFeedbackSummaryResponse = {
+  data: KnowledgeFeedbackAggregateItem[];
+  totalFeedback: number;
+  generatedAt: string;
+};
+
+export type KnowledgeFeedbackProposalImpactResponse = {
+  proposal: KnowledgeFeedbackProposalItem;
+  impact: {
+    proposalId: string;
+    action: KnowledgeFeedbackProposalAction;
+    targetCollectionId: string | null;
+    expectedCollectionId: string | null;
+    queryHash: string | null;
+    estimatedScoreDelta: number;
+    riskLevel: "low" | "medium" | "high";
+    wouldAutoApply: false;
+    rationale: string[];
+  };
+  nextSafeAction: "review_only" | "run_eval_before_apply" | "needs_more_feedback";
+};
+
 function authHeaders(auth: R3mesWalletAuthHeaders): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -28,6 +87,78 @@ function authHeaders(auth: R3mesWalletAuthHeaders): Record<string, string> {
     "X-Message": auth["X-Message"],
     "X-Wallet-Address": auth["X-Wallet-Address"],
   };
+}
+
+export async function fetchKnowledgeFeedbackSummary(
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeFeedbackSummaryResponse> {
+  const url = new URL("/v1/feedback/knowledge/summary", getBackendUrl());
+  const res = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Feedback summary ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackSummaryResponse;
+}
+
+export async function fetchKnowledgeFeedbackProposals(
+  auth: R3mesWalletAuthHeaders,
+  status: KnowledgeFeedbackProposalStatus | "all" = "PENDING",
+): Promise<KnowledgeFeedbackProposalItem[]> {
+  const url = new URL("/v1/feedback/knowledge/proposals", getBackendUrl());
+  url.searchParams.set("limit", "50");
+  if (status !== "all") url.searchParams.set("status", status);
+  const res = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Feedback proposals ${res.status}`);
+  const json = (await res.json()) as { data?: KnowledgeFeedbackProposalItem[] };
+  return Array.isArray(json.data) ? json.data : [];
+}
+
+export async function generateKnowledgeFeedbackProposals(
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeFeedbackProposalItem[]> {
+  const res = await fetch(`${getBackendUrl()}/v1/feedback/knowledge/proposals/generate`, {
+    method: "POST",
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Feedback proposal generate ${res.status}`);
+  const json = (await res.json()) as { data?: KnowledgeFeedbackProposalItem[] };
+  return Array.isArray(json.data) ? json.data : [];
+}
+
+export async function fetchKnowledgeFeedbackProposalImpact(
+  proposalId: string,
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeFeedbackProposalImpactResponse> {
+  const res = await fetch(
+    `${getBackendUrl()}/v1/feedback/knowledge/proposals/${encodeURIComponent(proposalId)}/impact`,
+    {
+      cache: "no-store",
+      headers: authHeaders(auth),
+    },
+  );
+  if (!res.ok) throw new Error(`Feedback proposal impact ${res.status}`);
+  return (await res.json()) as KnowledgeFeedbackProposalImpactResponse;
+}
+
+export async function reviewKnowledgeFeedbackProposal(
+  proposalId: string,
+  decision: "approve" | "reject",
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeFeedbackProposalItem> {
+  const res = await fetch(
+    `${getBackendUrl()}/v1/feedback/knowledge/proposals/${encodeURIComponent(proposalId)}/${decision}`,
+    {
+      method: "POST",
+      headers: authHeaders(auth),
+    },
+  );
+  if (!res.ok) throw new Error(`Feedback proposal review ${res.status}`);
+  const json = (await res.json()) as { proposal: KnowledgeFeedbackProposalItem };
+  return json.proposal;
 }
 
 export async function postKnowledgeFeedback(

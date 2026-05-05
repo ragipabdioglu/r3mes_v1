@@ -21,6 +21,7 @@ vi.mock("./lib/prisma.js", () => ({
     },
     knowledgeFeedbackProposal: {
       create: vi.fn(),
+      findMany: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
     },
@@ -204,6 +205,47 @@ describe("knowledge feedback routes", () => {
           expectedCollectionId: "kc_expected",
           queryHash: "hash_1",
         }),
+      }),
+    );
+    await app.close();
+  });
+
+  it("lists feedback proposals for review", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackProposal.findMany).mockResolvedValue([
+      {
+        id: "proposal_list_1",
+        action: "PENALIZE_SOURCE",
+        status: "PENDING",
+        collectionId: "kc_wrong",
+        expectedCollectionId: "kc_expected",
+        queryHash: "hash_1",
+        confidence: 1,
+        reason: "wrong source cluster",
+        evidence: { wrongSourceCount: 2, total: 2 },
+        reviewedAt: null,
+        createdAt: new Date("2026-05-05T12:00:00.000Z"),
+        updatedAt: new Date("2026-05-05T12:00:00.000Z"),
+      },
+    ] as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/feedback/knowledge/proposals?status=PENDING",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { data?: Array<{ id?: string; status?: string }>; nextCursor?: string | null };
+    expect(body.data).toHaveLength(1);
+    expect(body.data?.[0]).toMatchObject({ id: "proposal_list_1", status: "PENDING" });
+    expect(body.nextCursor).toBeNull();
+    expect(prisma.knowledgeFeedbackProposal.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: "user_1", status: "PENDING" }),
+        take: 51,
       }),
     );
     await app.close();
