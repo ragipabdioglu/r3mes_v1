@@ -33,6 +33,7 @@
     "eval:collection-smoke": "pnpm run eval:generate-collection-smoke && node scripts/run-grounded-response-eval.mjs --file artifacts/evals/generated-collection-smoke/golden.jsonl --out artifacts/evals/generated-collection-smoke/latest.json",
     "eval:generate-feedback-regression": "node --env-file=.env scripts/generate-feedback-regression-eval.mjs",
     "eval:feedback-regression": "pnpm run eval:generate-feedback-regression && node scripts/run-grounded-response-eval.mjs --file artifacts/evals/feedback-regression/golden.jsonl --out artifacts/evals/feedback-regression/latest.json",
+    "eval:feedback-gate": "node --env-file=.env scripts/run-feedback-eval-gate.mjs",
     "smoke:embedding-provider": "node --env-file=.env scripts/smoke-embedding-provider.mjs",
     "smoke:reranker-provider": "node --env-file=.env scripts/smoke-reranker-provider.mjs",
     "smoke:quality-providers": "node scripts/smoke-quality-providers.mjs",
