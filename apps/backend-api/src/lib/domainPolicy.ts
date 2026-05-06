@@ -28,8 +28,12 @@ export function inferAnswerDomain(opts: {
   evidence: EvidenceExtractorOutput | null;
   contextText: string;
   routePlan?: DomainRoutePlan | null;
+  selectedCollectionDomain?: AnswerDomain | null;
 }): AnswerDomain {
-  if (opts.routePlan && opts.routePlan.confidence !== "low") {
+  if (opts.selectedCollectionDomain) {
+    return opts.selectedCollectionDomain;
+  }
+  if (opts.routePlan && opts.routePlan.confidence === "high") {
     return opts.routePlan.domain;
   }
 

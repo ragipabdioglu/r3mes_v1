@@ -1,4 +1,5 @@
 import { prisma } from "./prisma.js";
+import type { AnswerDomain } from "./answerSchema.js";
 import { cosineSimilarity, embedKnowledgeText, getKnowledgeEmbeddingDimensions } from "./knowledgeEmbedding.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { extractQuerySignals, routeQuery, type DomainRoutePlan } from "./queryRouter.js";
@@ -159,6 +160,63 @@ export function readKnowledgeCollectionSourceQuality(
   collection: KnowledgeCollectionAccessItem,
 ): "structured" | "inferred" | "thin" | null {
   return readMetadataProfile(collection.autoMetadata)?.sourceQuality ?? null;
+}
+
+function normalizeProfileDomain(value: string): AnswerDomain | null {
+  const normalized = normalize(value);
+  if (!normalized) return null;
+  if (["medical", "health", "saglik", "saglık", "sağlik", "sağlık"].includes(normalized)) return "medical";
+  if (["legal", "law", "hukuk", "adalet"].includes(normalized)) return "legal";
+  if (["technical", "tech", "teknik", "devops", "software", "yazilim", "yazılım"].includes(normalized)) return "technical";
+  if (["education", "egitim", "eğitim", "okul", "meb", "school"].includes(normalized)) return "education";
+  if (["finance", "financial", "finans", "ekonomi"].includes(normalized)) return "finance";
+  if (["general", "genel"].includes(normalized)) return "general";
+  return null;
+}
+
+export function inferKnowledgeCollectionAnswerDomain(opts: {
+  collections: KnowledgeCollectionAccessItem[];
+  usedCollectionIds?: string[];
+}): AnswerDomain | null {
+  const usedIds = new Set((opts.usedCollectionIds ?? []).filter(Boolean));
+  const scopedCollections = usedIds.size > 0
+    ? opts.collections.filter((collection) => usedIds.has(collection.id))
+    : opts.collections;
+  const collectionCounts = new Map<AnswerDomain, number>();
+  const fallbackCounts = new Map<AnswerDomain, number>();
+
+  for (const collection of scopedCollections) {
+    const collectionProfile = readMetadataProfile(collection.autoMetadata);
+    const collectionDomains = unique([
+      collectionProfile?.domain ?? "",
+      ...(collectionProfile?.domains ?? []),
+    ])
+      .map(normalizeProfileDomain)
+      .filter((domain): domain is AnswerDomain => Boolean(domain) && domain !== "general");
+    for (const domain of collectionDomains) {
+      collectionCounts.set(domain, (collectionCounts.get(domain) ?? 0) + 1);
+    }
+
+    const documentDomains = unique(
+      (collection.documents ?? []).flatMap((document) => {
+        const profile = readMetadataProfile(document.autoMetadata);
+        return [profile?.domain ?? "", ...(profile?.domains ?? [])];
+      }),
+    )
+      .map(normalizeProfileDomain)
+      .filter((domain): domain is AnswerDomain => Boolean(domain) && domain !== "general");
+
+    for (const domain of documentDomains) {
+      fallbackCounts.set(domain, (fallbackCounts.get(domain) ?? 0) + 1);
+    }
+  }
+
+  const counts = collectionCounts.size > 0 ? collectionCounts : fallbackCounts;
+  if (counts.size === 0) return null;
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const [bestDomain, bestCount] = ranked[0];
+  const secondCount = ranked[1]?.[1] ?? 0;
+  return bestCount > secondCount ? bestDomain : null;
 }
 
 function numberArray(input: unknown): number[] | undefined {
@@ -943,7 +1001,11 @@ export function buildKnowledgeRouteDecision(opts: {
   };
 }
 
-const collectionMetadataInclude = {
+const collectionMetadataSelect = {
+  id: true,
+  name: true,
+  visibility: true,
+  autoMetadata: true,
   owner: { select: { walletAddress: true } },
   documents: {
     select: {
@@ -975,7 +1037,7 @@ export async function resolveAccessibleKnowledgeCollections(opts: {
       ],
       ...(requestedCollectionIds.length > 0 ? { id: { in: requestedCollectionIds } } : {}),
     },
-    include: collectionMetadataInclude,
+    select: collectionMetadataSelect,
   });
 
   return accessible;
@@ -993,7 +1055,7 @@ export async function resolveSuggestibleKnowledgeCollections(opts: {
         ...(opts.includePublic !== false ? [{ visibility: "PUBLIC" as const }] : []),
       ],
     },
-    include: collectionMetadataInclude,
+    select: collectionMetadataSelect,
     orderBy: { updatedAt: "desc" },
     take: opts.limit ?? 50,
   });

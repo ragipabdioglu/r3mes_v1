@@ -18,6 +18,7 @@ import {
   buildKnowledgeRouteDecision,
   collectionHasSpecificRouteSupport,
   explainCollectionRouteSuggestion,
+  inferKnowledgeCollectionAnswerDomain,
   rankMetadataRouteCandidates,
   rankSuggestedKnowledgeCollections,
   readKnowledgeCollectionSourceQuality,
@@ -825,12 +826,20 @@ function stripSourcePrefix(value: string): string {
 }
 
 function stripDocumentScaffold(value: string): string {
-  return value
+  const cleaned = value
     .replace(/^#+\s*Page\s+\d+\s*/giu, "")
     .replace(/^#+\s*XML Text Fallback\s*/giu, "")
     .replace(/^#+\s*word\/[^\s]+\s*/giu, "")
+    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9()[\]\s_-]{8,})\s+\d+\s*[•\-–:]\s*/u, "")
+    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9()[\]\s_-]{8,})\s+\d+\s+/u, "")
     .replace(/^\s*(?:[A-ZÇĞİÖŞÜ0-9()[\]\s_-]{24,}?)\s+(?=(Bu|Bu\s+ilaç|Eğer|Eller|Okul|Öğrenci|Hasta|Veli|Kaynak|Amaç)\b)/u, "")
     .trim();
+  const letters = cleaned.match(/\p{L}/gu) ?? [];
+  const uppercaseLetters = cleaned.match(/\p{Lu}/gu) ?? [];
+  if (letters.length >= 6 && uppercaseLetters.length / letters.length > 0.85 && cleaned.length <= 140) {
+    return "";
+  }
+  return cleaned;
 }
 
 function isSourceIdentifierLike(value: string): boolean {
@@ -1392,6 +1401,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         evidence: retrieval.evidence,
         contextText: retrieval.contextText,
         routePlan,
+        selectedCollectionDomain: inferKnowledgeCollectionAnswerDomain({
+          collections: accessibleCollections,
+          usedCollectionIds: retrieval.sources.map((source) => source.collectionId),
+        }),
       });
       const domainPolicy = getDomainPolicy(answerDomain);
       const groundedComposerMode = getGroundedComposerMode();

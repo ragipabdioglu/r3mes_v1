@@ -616,6 +616,51 @@ describe("collectionHasSpecificRouteSupport", () => {
   });
 });
 
+describe("inferKnowledgeCollectionAnswerDomain", () => {
+  it("prefers collection-level profile domain over noisy document-level terms", async () => {
+    const { inferKnowledgeCollectionAnswerDomain } = await import("./knowledgeAccess.js");
+
+    const domain = inferKnowledgeCollectionAnswerDomain({
+      usedCollectionIds: ["education-parents"],
+      collections: [
+        {
+          id: "education-parents",
+          name: "Veli bilgilendirme rehberi",
+          visibility: "PRIVATE",
+          autoMetadata: {
+            profile: {
+              domains: ["education"],
+              subtopics: ["okul_yonetimi"],
+              keywords: ["veli", "okul", "rehber"],
+              entities: [],
+              summary: "Velilere yönelik okul bilgilendirme rehberi.",
+              sampleQuestions: [],
+            },
+          },
+          documents: [
+            {
+              title: "Hastalık belirtisi bilgilendirmesi",
+              autoMetadata: {
+                profile: {
+                  domains: ["medical"],
+                  subtopics: ["belirti"],
+                  keywords: ["ateş", "öksürük"],
+                  entities: [],
+                  summary: "Rehber içinde hastalık belirtisi geçen okul bilgilendirme bölümü.",
+                  sampleQuestions: [],
+                },
+              },
+              chunks: [{ content: "Ateş veya öksürük belirtisi varsa okul idaresine bilgi verilir." }],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(domain).toBe("education");
+  });
+});
+
 describe("buildKnowledgeRouteDecision", () => {
   it("returns strict when selected sources produce grounded evidence", async () => {
     const { buildKnowledgeRouteDecision } = await import("./knowledgeAccess.js");

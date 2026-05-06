@@ -106,4 +106,27 @@ describe("buildAnswerSpec", () => {
     expect(spec.assessment).toBe("Bu ilaçların ortak özelliği kanın pıhtılaşmasını azaltmasıdır.");
     expect(spec.action).toBe("Cerrahi işlem öncesi hekime bilgi verilmelidir.");
   });
+
+  it("removes repeated document headers from extracted facts", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "education",
+      groundingConfidence: "high",
+      userQuery: "Veli ateş ve öksürük durumunda ne yapmalı?",
+      evidence: evidence({
+        answerIntent: "steps",
+        directAnswerFacts: [],
+        supportingContext: [],
+        usableFacts: [
+          "VELİ BİLGİLENDİRME REHBERİ 15 • Doğru ve güvenilir kaynaklardan bilgi edinerek öğrencimizi bilinçlendiriniz.",
+          "VELİ BİLGİLENDİRME REHBERİ 13 ÖNEMSEYİNİZ!",
+        ],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.assessment).toBe("Doğru ve güvenilir kaynaklardan bilgi edinerek öğrencimizi bilinçlendiriniz.");
+    expect(spec.facts).not.toContain("ÖNEMSEYİNİZ!");
+    expect(spec.facts).not.toContain("VELİ BİLGİLENDİRME REHBERİ 13 ÖNEMSEYİNİZ!");
+  });
 });
