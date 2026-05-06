@@ -29,6 +29,7 @@
     "eval:retrieval-quality": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/retrieval-quality/golden.jsonl --out artifacts/evals/retrieval-quality/latest.json",
     "eval:realistic-rag": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/realistic-rag/golden.jsonl --out artifacts/evals/realistic-rag/latest.json",
     "eval:real-world-stress": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/real-world-stress/golden.jsonl --out artifacts/evals/real-world-stress/latest.json",
+    "eval:profile-health": "node --env-file=.env scripts/run-knowledge-profile-health-eval.mjs",
     "eval:generate-collection-smoke": "node --env-file=.env scripts/generate-collection-smoke-eval.mjs",
     "eval:collection-smoke": "pnpm run eval:generate-collection-smoke && node scripts/run-grounded-response-eval.mjs --file artifacts/evals/generated-collection-smoke/golden.jsonl --out artifacts/evals/generated-collection-smoke/latest.json",
     "eval:generate-feedback-regression": "node --env-file=.env scripts/generate-feedback-regression-eval.mjs",

@@ -195,6 +195,27 @@ async function readArtifactSummary(artifactsRoot, suite) {
   }
 }
 
+async function readOptionalEvalArtifact(artifactsRoot, name) {
+  const file = join(artifactsRoot, name, "latest.json");
+  try {
+    const [raw, stats] = await Promise.all([readFile(file, "utf8"), stat(file)]);
+    const parsed = JSON.parse(raw);
+    return {
+      name,
+      path: file,
+      updatedAt: stats.mtime.toISOString(),
+      summary: parsed.summary ?? null,
+    };
+  } catch {
+    return {
+      name,
+      path: file,
+      updatedAt: null,
+      summary: null,
+    };
+  }
+}
+
 function createEmptyCoverage() {
   return REQUIRED_BUCKETS.reduce((acc, bucket) => {
     acc[bucket] = {
@@ -385,6 +406,37 @@ function summarizeRouterQualityArtifacts(artifacts) {
   return aggregate;
 }
 
+function summarizeProfileHealthArtifact(artifact) {
+  const summary = artifact?.summary;
+  if (!summary) {
+    return {
+      observed: false,
+      status: "missing_artifact",
+      path: artifact?.path ?? null,
+      updatedAt: null,
+      total: 0,
+      ok: false,
+      failures: ["missing_profile_health_artifact"],
+    };
+  }
+  return {
+    observed: true,
+    status: summary.ok === true ? "pass" : "fail",
+    path: artifact.path,
+    updatedAt: artifact.updatedAt,
+    total: summary.total ?? 0,
+    ok: summary.ok === true,
+    failures: summary.failures ?? [],
+    averageScore: summary.averageScore ?? null,
+    usableRatio: summary.usableRatio ?? null,
+    weakRatio: summary.weakRatio ?? null,
+    levelCounts: summary.levelCounts ?? {},
+    sourceQualityCounts: summary.sourceQualityCounts ?? {},
+    warningCounts: summary.warningCounts ?? {},
+    weakCollections: summary.weakCollections ?? [],
+  };
+}
+
 async function main() {
   const opts = parseArgs();
   const suites = await listSuites(opts.evalRoot);
@@ -433,12 +485,17 @@ async function main() {
     suite: suite.name,
     ...(suite.latestArtifact ?? { path: null, updatedAt: null, summary: null }),
   }));
+  const profileHealthArtifact = opts.includeArtifacts
+    ? await readOptionalEvalArtifact(opts.artifactsRoot, "profile-health")
+    : null;
   const readiness = scoreReadiness({ totalCases, coverage, artifacts });
   const routerQuality = summarizeRouterQualityArtifacts(artifacts);
+  const profileHealth = summarizeProfileHealthArtifact(profileHealthArtifact);
   const report = {
     generatedAt: new Date().toISOString(),
     readiness,
     routerQuality,
+    profileHealth,
     requiredBuckets: REQUIRED_BUCKETS,
     coverage,
     suites: suiteReports,
@@ -455,6 +512,11 @@ async function main() {
       routerQuality.observedSuites < suiteReports.length
         ? `Regenerate grounded eval artifacts to populate routerQuality summaries (${routerQuality.observedSuites}/${suiteReports.length} suites observed).`
         : "Router quality summaries are present for all grounded eval artifacts.",
+      profileHealth.observed
+        ? profileHealth.ok
+          ? "Profile health eval is passing."
+          : `Profile health eval is failing: ${profileHealth.failures.join(", ")}.`
+        : "Run pnpm run eval:profile-health to populate profile health readiness.",
     ],
   };
 
