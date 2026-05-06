@@ -19,6 +19,7 @@ import {
 } from "../lib/knowledgeAutoMetadata.js";
 import { parseKnowledgeCard } from "../lib/knowledgeCard.js";
 import { formatVectorLiteral, getKnowledgeEmbeddingDimensions, embedKnowledgeText } from "../lib/knowledgeEmbedding.js";
+import { scoreKnowledgeProfileHealth } from "../lib/knowledgeProfileHealth.js";
 import { normalizeKnowledgeChunkContent } from "../lib/knowledgeNormalize.js";
 import { chunkKnowledgeText, isSupportedKnowledgeFilename, parseKnowledgeBuffer } from "../lib/knowledgeText.js";
 import { embedTextForQdrant } from "../lib/qdrantEmbedding.js";
@@ -75,9 +76,13 @@ function summarizeCollectionMetadata(
   profileConfidence: "low" | "medium" | "high" | null;
   profileVersion: number | null;
   lastProfiledAt: string | null;
+  profileHealthScore: number | null;
+  profileHealthLevel: "healthy" | "usable" | "weak" | null;
+  profileHealthWarnings: string[];
 } {
   const collectionMetadata = readKnowledgeAutoMetadata(collectionAutoMetadata);
   if (collectionMetadata) {
+    const health = scoreKnowledgeProfileHealth(collectionAutoMetadata);
     const profile = collectionMetadata.profile;
     if (profile) {
       return {
@@ -92,6 +97,9 @@ function summarizeCollectionMetadata(
         profileConfidence: profile.confidence ?? null,
         profileVersion: profile.profileVersion ?? profile.version ?? null,
         lastProfiledAt: profile.lastProfiledAt ?? null,
+        profileHealthScore: health.score,
+        profileHealthLevel: health.level,
+        profileHealthWarnings: health.warnings,
       };
     }
     return {
@@ -102,6 +110,9 @@ function summarizeCollectionMetadata(
       profileConfidence: null,
       profileVersion: null,
       lastProfiledAt: null,
+      profileHealthScore: health.score,
+      profileHealthLevel: health.level,
+      profileHealthWarnings: health.warnings,
     };
   }
 
@@ -148,6 +159,9 @@ function summarizeCollectionMetadata(
     profileConfidence: null,
     profileVersion: null,
     lastProfiledAt: null,
+    profileHealthScore: null,
+    profileHealthLevel: null,
+    profileHealthWarnings: [],
   };
 }
 
@@ -243,6 +257,9 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           profileConfidence: metadata.profileConfidence,
           profileVersion: metadata.profileVersion,
           lastProfiledAt: metadata.lastProfiledAt,
+          profileHealthScore: metadata.profileHealthScore,
+          profileHealthLevel: metadata.profileHealthLevel,
+          profileHealthWarnings: metadata.profileHealthWarnings,
           publishedAt: row.publishedAt?.toISOString() ?? null,
           createdAt: row.createdAt.toISOString(),
           updatedAt: row.updatedAt.toISOString(),
