@@ -14,6 +14,7 @@ vi.mock("./prisma.js", () => ({
 describe("feedback shadow runtime", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    delete process.env.R3MES_FEEDBACK_RUNTIME_MODE;
   });
 
   it("reports eligible shadow adjustments without changing runtime", async () => {
@@ -39,6 +40,8 @@ describe("feedback shadow runtime", () => {
     });
 
     expect(report.runtimeAffected).toBe(false);
+    expect(report.runtimeMode).toBe("shadow");
+    expect(report.adjustedCandidateCollectionIds).toEqual(["kc_a", "kc_b"]);
     expect(report.activeAdjustmentCount).toBe(1);
     expect(report.promotedCandidateCount).toBe(1);
     expect(report.currentTopCandidateId).toBe("kc_a");
@@ -49,6 +52,34 @@ describe("feedback shadow runtime", () => {
       recommendation: "eligible_for_shadow_runtime",
       totalScoreDelta: 0.2,
     });
+  });
+
+  it("can expose eval-gated adjustments as active ordering when explicitly enabled", async () => {
+    process.env.R3MES_FEEDBACK_RUNTIME_MODE = "active";
+    const { prisma } = await import("./prisma.js");
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.findMany).mockResolvedValue([
+      {
+        id: "adj_1",
+        collectionId: "kc_b",
+        scoreDelta: 0.2,
+        applyRecord: {
+          status: "APPLIED",
+          gateReport: { ok: true },
+        },
+      },
+    ] as never);
+
+    const { evaluateFeedbackShadowRuntime } = await import("./feedbackShadowRuntime.js");
+    const report = await evaluateFeedbackShadowRuntime({
+      walletAddress: "0xabc",
+      query: "başım ağrıyor",
+      candidateCollectionIds: ["kc_a", "kc_b"],
+    });
+
+    expect(report.runtimeMode).toBe("active");
+    expect(report.runtimeAffected).toBe(true);
+    expect(report.adjustedCandidateCollectionIds).toEqual(["kc_b", "kc_a"]);
   });
 
   it("keeps adjustments passive when eval gate has not passed", async () => {

@@ -4,6 +4,8 @@ import { prisma } from "./prisma.js";
 
 const PROMOTION_MAX_ABS_DELTA = 0.35;
 
+export type FeedbackRuntimeMode = "shadow" | "active";
+
 export interface FeedbackShadowRuntimeImpact {
   collectionId: string;
   totalScoreDelta: number;
@@ -16,15 +18,22 @@ export interface FeedbackShadowRuntimeImpact {
 
 export interface FeedbackShadowRuntimeReport {
   enabled: boolean;
-  runtimeAffected: false;
+  runtimeMode: FeedbackRuntimeMode;
+  runtimeAffected: boolean;
   queryHash: string | null;
   candidateCollectionIds: string[];
+  adjustedCandidateCollectionIds: string[];
   activeAdjustmentCount: number;
   promotedCandidateCount: number;
   currentTopCandidateId: string | null;
   shadowTopCandidateId: string | null;
   wouldChangeTopCandidate: boolean;
   impacts: FeedbackShadowRuntimeImpact[];
+}
+
+function runtimeMode(): FeedbackRuntimeMode {
+  const raw = (process.env.R3MES_FEEDBACK_RUNTIME_MODE ?? "shadow").trim().toLowerCase();
+  return raw === "active" ? "active" : "shadow";
 }
 
 function hashQuery(query: string): string {
@@ -51,11 +60,14 @@ export async function evaluateFeedbackShadowRuntime(opts: {
   const candidateCollectionIds = uniqueStrings(opts.candidateCollectionIds).slice(0, 25);
   const query = opts.query.trim();
   const queryHash = query ? hashQuery(query) : null;
+  const mode = runtimeMode();
   const empty: FeedbackShadowRuntimeReport = {
     enabled: true,
+    runtimeMode: mode,
     runtimeAffected: false,
     queryHash,
     candidateCollectionIds,
+    adjustedCandidateCollectionIds: candidateCollectionIds,
     activeAdjustmentCount: 0,
     promotedCandidateCount: 0,
     currentTopCandidateId: candidateCollectionIds[0] ?? null,
@@ -145,9 +157,15 @@ export async function evaluateFeedbackShadowRuntime(opts: {
   });
   const currentTopCandidateId = candidateCollectionIds[0] ?? null;
   const shadowTopCandidateId = shadowRanked[0] ?? null;
+  const runtimeAffected =
+    mode === "active" &&
+    impacts.some((impact) => impact.recommendation === "eligible_for_shadow_runtime") &&
+    shadowRanked.join("\u0000") !== candidateCollectionIds.join("\u0000");
 
   return {
     ...empty,
+    runtimeAffected,
+    adjustedCandidateCollectionIds: runtimeAffected ? shadowRanked : candidateCollectionIds,
     activeAdjustmentCount: rows.length,
     promotedCandidateCount: impacts.filter((impact) => impact.recommendation === "eligible_for_shadow_runtime").length,
     currentTopCandidateId,

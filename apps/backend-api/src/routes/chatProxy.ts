@@ -629,11 +629,14 @@ function summarizeSourceSelectionForTrace(
     },
     shadowRuntime: sourceSelection.shadowRuntime
       ? {
+          runtimeMode: sourceSelection.shadowRuntime.runtimeMode,
+          runtimeAffected: sourceSelection.shadowRuntime.runtimeAffected,
           activeAdjustmentCount: sourceSelection.shadowRuntime.activeAdjustmentCount,
           promotedCandidateCount: sourceSelection.shadowRuntime.promotedCandidateCount,
           wouldChangeTopCandidate: sourceSelection.shadowRuntime.wouldChangeTopCandidate,
           currentTopCandidateId: sourceSelection.shadowRuntime.currentTopCandidateId,
           shadowTopCandidateId: sourceSelection.shadowRuntime.shadowTopCandidateId,
+          adjustedCandidateCollectionIds: sourceSelection.shadowRuntime.adjustedCandidateCollectionIds.slice(0, 5),
           topImpacts: sourceSelection.shadowRuntime.impacts.slice(0, 3).map((impact) => ({
             collectionId: impact.collectionId,
             totalScoreDelta: impact.totalScoreDelta,
@@ -642,6 +645,38 @@ function summarizeSourceSelectionForTrace(
           })),
         }
       : undefined,
+  };
+}
+
+function applyFeedbackRuntimeToSourceSelection(
+  sourceSelection: ChatRetrievalDebug["sourceSelection"],
+  shadowRuntime: FeedbackShadowRuntimeReport,
+): ChatRetrievalDebug["sourceSelection"] {
+  if (!shadowRuntime.runtimeAffected || shadowRuntime.adjustedCandidateCollectionIds.length === 0) {
+    return {
+      ...sourceSelection,
+      shadowRuntime,
+    };
+  }
+  const rank = new Map(shadowRuntime.adjustedCandidateCollectionIds.map((id, index) => [id, index]));
+  const order = (id: string | null | undefined) => rank.get(id ?? "") ?? Number.MAX_SAFE_INTEGER;
+  const orderByFeedback = <T extends { id: string }>(items: T[]): T[] =>
+    [...items].sort((a, b) => order(a.id) - order(b.id));
+  const orderedSuggestedIds = [...sourceSelection.routeDecision.suggestedCollectionIds]
+    .sort((a, b) => order(a) - order(b));
+  return {
+    ...sourceSelection,
+    suggestedCollections: orderByFeedback(sourceSelection.suggestedCollections),
+    metadataRouteCandidates: orderByFeedback(sourceSelection.metadataRouteCandidates),
+    routeDecision: {
+      ...sourceSelection.routeDecision,
+      suggestedCollectionIds: orderedSuggestedIds,
+      reasons: [
+        ...sourceSelection.routeDecision.reasons,
+        "Feedback runtime aktif; eval gate geçmiş query-scoped adjustment candidate sıralamasına uygulandı.",
+      ],
+    },
+    shadowRuntime,
   };
 }
 
@@ -1483,10 +1518,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         query: retrievalQuery,
         candidateCollectionIds: shadowCandidateCollectionIds,
       });
-      sourceSelection = {
-        ...sourceSelection,
-        shadowRuntime,
-      };
+      sourceSelection = applyFeedbackRuntimeToSourceSelection(sourceSelection, shadowRuntime);
       const answerDomain = inferAnswerDomain({
         userQuery: retrievalQuery,
         evidence: retrieval.evidence,
@@ -1515,6 +1547,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const domainPolicy = getDomainPolicy(answerDomain);
       chatTrace.finish(shadowRuntimeTrace, "ok", {
         name: "feedback_shadow_runtime",
+        runtimeMode: shadowRuntime.runtimeMode,
         activeAdjustmentCount: shadowRuntime.activeAdjustmentCount,
         promotedCandidateCount: shadowRuntime.promotedCandidateCount,
         wouldChangeTopCandidate: shadowRuntime.wouldChangeTopCandidate,
