@@ -64,6 +64,15 @@ export interface EvidenceExtractorOutput {
   missingInfo: string[];
 }
 
+export interface EvidenceExtractorBudget {
+  directFactLimit: number;
+  supportingFactLimit: number;
+  riskFactLimit: number;
+  notSupportedLimit: number;
+  usableFactLimit: number;
+  sourceIdLimit: number;
+}
+
 export interface EvidenceExtractorCardInput {
   sourceId: string;
   title: string;
@@ -113,6 +122,23 @@ function unique(values: string[]): string[] {
     out.push(value);
   }
   return out;
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function getEvidenceExtractorBudget(): EvidenceExtractorBudget {
+  return {
+    directFactLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_DIRECT_FACT_LIMIT, 3),
+    supportingFactLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_SUPPORTING_FACT_LIMIT, 2),
+    riskFactLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_RISK_FACT_LIMIT, 3),
+    notSupportedLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_NOT_SUPPORTED_LIMIT, 4),
+    usableFactLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT, 5),
+    sourceIdLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_SOURCE_ID_LIMIT, 8),
+  };
 }
 
 function hasAny(text: string, terms: string[]): boolean {
@@ -826,6 +852,7 @@ export async function runQueryPlannerSkill(
 export function buildDeterministicEvidenceExtraction(
   input: EvidenceExtractorInput,
 ): EvidenceExtractorOutput {
+  const budget = getEvidenceExtractorBudget();
   const usableFacts: string[] = [];
   const directAnswerFacts: string[] = [];
   const supportingContext: string[] = [];
@@ -932,14 +959,14 @@ export function buildDeterministicEvidenceExtraction(
   return {
     answerIntent: intentResolution.intent,
     intentResolution,
-    directAnswerFacts: unique(directAnswerFacts).slice(0, 3),
-    supportingContext: unique(supportingContext).slice(0, 2),
-    riskFacts: unique(redFlags).slice(0, 3),
-    notSupported: unique([...uncertainOrUnusable, ...missingInfo]).slice(0, 4),
-    usableFacts: unique(usableFacts).slice(0, 5),
-    uncertainOrUnusable: unique(uncertainOrUnusable).slice(0, 4),
-    redFlags: unique(redFlags).slice(0, 4),
-    sourceIds: unique(sourceIds).slice(0, 8),
+    directAnswerFacts: unique(directAnswerFacts).slice(0, budget.directFactLimit),
+    supportingContext: unique(supportingContext).slice(0, budget.supportingFactLimit),
+    riskFacts: unique(redFlags).slice(0, budget.riskFactLimit),
+    notSupported: unique([...uncertainOrUnusable, ...missingInfo]).slice(0, budget.notSupportedLimit),
+    usableFacts: unique(usableFacts).slice(0, budget.usableFactLimit),
+    uncertainOrUnusable: unique(uncertainOrUnusable).slice(0, budget.notSupportedLimit),
+    redFlags: unique(redFlags).slice(0, budget.riskFactLimit + 1),
+    sourceIds: unique(sourceIds).slice(0, budget.sourceIdLimit),
     missingInfo,
   };
 }

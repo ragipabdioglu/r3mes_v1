@@ -17,7 +17,7 @@ import {
 import { embedTextForQdrant } from "./qdrantEmbedding.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
-import { runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
+import { getEvidenceExtractorBudget, runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 
 export interface HybridKnowledgeChunk {
@@ -68,6 +68,21 @@ export interface HybridRetrievedKnowledgeContext {
     finalCandidateCount: number;
     alignment: AlignmentDiagnostics;
     reranker: RerankDiagnostics;
+    budget: {
+      contextMode: "compact" | "detailed";
+      requestedSourceLimit: number;
+      finalSourceLimit: number;
+      finalSourceCount: number;
+      contextTextChars: number;
+      evidenceDirectFactLimit: number;
+      evidenceSupportingFactLimit: number;
+      evidenceRiskFactLimit: number;
+      evidenceUsableFactLimit: number;
+      evidenceDirectFactCount: number;
+      evidenceSupportingFactCount: number;
+      evidenceRiskFactCount: number;
+      evidenceUsableFactCount: number;
+    };
     retrievalMode: "true_hybrid";
   };
 }
@@ -165,6 +180,31 @@ function isStrictRouteScope(routePlan?: DomainRoutePlan | null): boolean {
 function getRagContextMode(): "compact" | "detailed" {
   const raw = (process.env.R3MES_RAG_CONTEXT_MODE ?? "compact").trim().toLowerCase();
   return raw === "detailed" ? "detailed" : "compact";
+}
+
+function buildBudgetDiagnostics(opts: {
+  requestedSourceLimit: number;
+  finalSourceLimit: number;
+  finalSourceCount: number;
+  contextText?: string;
+  evidence?: EvidenceExtractorOutput | null;
+}): HybridRetrievedKnowledgeContext["diagnostics"]["budget"] {
+  const evidenceBudget = getEvidenceExtractorBudget();
+  return {
+    contextMode: getRagContextMode(),
+    requestedSourceLimit: opts.requestedSourceLimit,
+    finalSourceLimit: opts.finalSourceLimit,
+    finalSourceCount: opts.finalSourceCount,
+    contextTextChars: opts.contextText?.length ?? 0,
+    evidenceDirectFactLimit: evidenceBudget.directFactLimit,
+    evidenceSupportingFactLimit: evidenceBudget.supportingFactLimit,
+    evidenceRiskFactLimit: evidenceBudget.riskFactLimit,
+    evidenceUsableFactLimit: evidenceBudget.usableFactLimit,
+    evidenceDirectFactCount: opts.evidence?.directAnswerFacts.length ?? 0,
+    evidenceSupportingFactCount: opts.evidence?.supportingContext.length ?? 0,
+    evidenceRiskFactCount: opts.evidence?.riskFacts.length ?? 0,
+    evidenceUsableFactCount: opts.evidence?.usableFacts.length ?? 0,
+  };
 }
 
 function buildRerankCandidateText(candidate: AlignableKnowledgeCandidate, maxWords: number): string {
@@ -548,6 +588,7 @@ function renderDetailedEvidenceBrief(
   evidence: EvidenceExtractorOutput,
   opts: { groundingConfidence: GroundingConfidence; lowGroundingConfidence: boolean },
 ): string {
+  const budget = getEvidenceExtractorBudget();
   const section = (title: string, items: string[]): string => {
     const clean = items.map((item) => item.trim()).filter(Boolean);
     return clean.length > 0 ? [title, ...clean.map((item) => `- ${item}`)].join("\n") : "";
@@ -555,11 +596,11 @@ function renderDetailedEvidenceBrief(
   return [
     `GROUNDING DURUMU: ${opts.groundingConfidence}${opts.lowGroundingConfidence ? " (düşük güven; kesin konuşma)" : ""}`,
     `CEVAP NIYETI: ${evidence.answerIntent}`,
-    section("DOGRUDAN CEVAP KANITLARI:", evidence.directAnswerFacts.slice(0, 4)),
-    section("DESTEKLEYICI BAGLAM:", evidence.supportingContext.slice(0, 3)),
-    section("BELIRSIZ / KULLANILAMAYAN:", evidence.notSupported.slice(0, 4)),
-    section("RED FLAGS:", evidence.riskFacts.slice(0, 3)),
-    section("KAYNAK KIMLIKLARI:", evidence.sourceIds.slice(0, 4)),
+    section("DOGRUDAN CEVAP KANITLARI:", evidence.directAnswerFacts.slice(0, budget.directFactLimit)),
+    section("DESTEKLEYICI BAGLAM:", evidence.supportingContext.slice(0, budget.supportingFactLimit)),
+    section("BELIRSIZ / KULLANILAMAYAN:", evidence.notSupported.slice(0, budget.notSupportedLimit)),
+    section("RED FLAGS:", evidence.riskFacts.slice(0, budget.riskFactLimit)),
+    section("KAYNAK KIMLIKLARI:", evidence.sourceIds.slice(0, budget.sourceIdLimit)),
   ].filter(Boolean).join("\n\n");
 }
 
@@ -571,7 +612,8 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   routePlan?: DomainRoutePlan | null;
 }): Promise<HybridRetrievedKnowledgeContext> {
   const { query, evidenceQuery = query, accessibleCollectionIds, routePlan = null } = opts;
-  const limit = finalSourceLimit(opts.limit ?? 3);
+  const requestedSourceLimit = opts.limit ?? 3;
+  const limit = finalSourceLimit(requestedSourceLimit);
   if (accessibleCollectionIds.length === 0) {
     return {
       contextText: "",
@@ -588,6 +630,11 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         finalCandidateCount: 0,
         alignment: emptyAlignmentDiagnostics(),
         reranker: emptyRerankDiagnostics(),
+        budget: buildBudgetDiagnostics({
+          requestedSourceLimit,
+          finalSourceLimit: limit,
+          finalSourceCount: 0,
+        }),
         retrievalMode: "true_hybrid",
       },
     };
@@ -624,6 +671,11 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         finalCandidateCount: 0,
         alignment: emptyAlignmentDiagnostics(),
         reranker: emptyRerankDiagnostics(),
+        budget: buildBudgetDiagnostics({
+          requestedSourceLimit,
+          finalSourceLimit: limit,
+          finalSourceCount: 0,
+        }),
         retrievalMode: "true_hybrid",
       },
     };
@@ -654,6 +706,11 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         reranker: emptyRerankDiagnostics({
           inputCandidateCount: candidatesForRerank.length,
         }),
+        budget: buildBudgetDiagnostics({
+          requestedSourceLimit,
+          finalSourceLimit: limit,
+          finalSourceCount: 0,
+        }),
         retrievalMode: "true_hybrid",
       },
     };
@@ -674,6 +731,11 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         finalCandidateCount: 0,
         alignment: alignedPreRanked.diagnostics,
         reranker: emptyRerankDiagnostics(),
+        budget: buildBudgetDiagnostics({
+          requestedSourceLimit,
+          finalSourceLimit: limit,
+          finalSourceCount: 0,
+        }),
         retrievalMode: "true_hybrid",
       },
     };
@@ -727,6 +789,11 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         finalCandidateCount: 0,
         alignment: finalAlignmentDiagnostics,
         reranker: rerankRun.diagnostics,
+        budget: buildBudgetDiagnostics({
+          requestedSourceLimit,
+          finalSourceLimit: limit,
+          finalSourceCount: 0,
+        }),
         retrievalMode: "true_hybrid",
       },
     };
@@ -776,6 +843,12 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         finalCandidateCount: 0,
         alignment: scopedOutAlignmentDiagnostics,
         reranker: rerankRun.diagnostics,
+        budget: buildBudgetDiagnostics({
+          requestedSourceLimit,
+          finalSourceLimit: limit,
+          finalSourceCount: 0,
+          evidence: evidenceRun.output,
+        }),
         retrievalMode: "true_hybrid",
       },
     };
@@ -800,8 +873,9 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
             },
           );
 
+  const contextText = finalCandidates.length > 0 ? brief : "";
   return {
-    contextText: finalCandidates.length > 0 ? brief : "",
+    contextText,
     sources,
     lowGroundingConfidence,
     groundingConfidence,
@@ -815,6 +889,13 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       finalCandidateCount: finalCandidates.length,
       alignment: finalAlignmentDiagnostics,
       reranker: rerankRun.diagnostics,
+      budget: buildBudgetDiagnostics({
+        requestedSourceLimit,
+        finalSourceLimit: limit,
+        finalSourceCount: finalCandidates.length,
+        contextText,
+        evidence: evidenceRun.output,
+      }),
       retrievalMode: "true_hybrid",
     },
   };

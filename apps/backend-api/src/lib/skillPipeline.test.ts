@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildDeterministicEvidenceExtraction,
   buildDeterministicQueryPlan,
+  getEvidenceExtractorBudget,
   resolveAnswerIntent,
   runEvidenceExtractorSkill,
   runQueryPlannerSkill,
@@ -63,6 +64,18 @@ describe("skill pipeline evidence extractor", () => {
     expect(noSource.primarySignal).toBe("no_source");
     expect(noSource.intent).toBe("unknown");
     expect(noSource.reasons).toEqual(expect.arrayContaining(["no directly usable evidence was found"]));
+  });
+
+  it("reads evidence extractor budgets from config", () => {
+    vi.stubEnv("R3MES_EVIDENCE_DIRECT_FACT_LIMIT", "2");
+    vi.stubEnv("R3MES_EVIDENCE_USABLE_FACT_LIMIT", "3");
+
+    expect(getEvidenceExtractorBudget()).toMatchObject({
+      directFactLimit: 2,
+      usableFactLimit: 3,
+    });
+
+    vi.unstubAllEnvs();
   });
 
   it("infers action intent from preparation questions before generic risk wording", () => {

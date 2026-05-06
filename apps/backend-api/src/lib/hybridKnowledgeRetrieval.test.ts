@@ -142,6 +142,12 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.contextText).toBe("");
     expect(result.sources).toEqual([]);
     expect(result.lowGroundingConfidence).toBe(true);
+    expect(result.diagnostics.budget).toMatchObject({
+      requestedSourceLimit: 3,
+      finalSourceLimit: 3,
+      finalSourceCount: 0,
+      evidenceUsableFactLimit: expect.any(Number),
+    });
 
     findMany.mockRestore();
     qdrant.mockRestore();

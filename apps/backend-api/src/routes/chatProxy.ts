@@ -568,6 +568,7 @@ function summarizeRetrievalDiagnostics(diagnostics?: Record<string, unknown>): R
     "alignmentFastFailed",
     "rerankerMode",
     "rerankerCandidateCount",
+    "budget",
   ];
   return Object.fromEntries(keys.map((key) => [key, diagnostics[key]]).filter(([, value]) => value !== undefined));
 }
