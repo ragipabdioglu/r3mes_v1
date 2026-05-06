@@ -317,6 +317,24 @@ function shouldSkipSourceSuggestions(opts: {
   );
 }
 
+function shouldRunRetrievalBackedSuggestionProbe(opts: {
+  retrievalQuery: string;
+  skipSourceSuggestions: boolean;
+  requestedCollectionIds: string[];
+  retrievalSources: ChatSourceCitation[];
+  groundingConfidence: "high" | "medium" | "low";
+}): boolean {
+  if (!opts.retrievalQuery || opts.skipSourceSuggestions) return false;
+  if (
+    opts.requestedCollectionIds.length > 0 &&
+    opts.retrievalSources.length === 0 &&
+    opts.groundingConfidence === "low"
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function shouldUseMiniValidator(stream: boolean, hasRetrieval: boolean): boolean {
   if (stream) return false;
   if (!hasRetrieval) return false;
@@ -1407,17 +1425,6 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         diagnostics: summarizeRetrievalDiagnostics(retrieval.retrievalDiagnostics ?? undefined),
       });
 
-      const answerDomain = inferAnswerDomain({
-        userQuery: retrievalQuery,
-        evidence: retrieval.evidence,
-        contextText: retrieval.contextText,
-        routePlan,
-        selectedCollectionDomain: inferKnowledgeCollectionAnswerDomain({
-          collections: accessibleCollections,
-          usedCollectionIds: retrieval.sources.map((source) => source.collectionId),
-        }),
-      });
-      const domainPolicy = getDomainPolicy(answerDomain);
       const groundedComposerMode = getGroundedComposerMode();
       const responseMode = getChatResponseMode();
       const skipSourceSuggestions = shouldSkipSourceSuggestions({
@@ -1425,8 +1432,15 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         retrievalSources: retrieval.sources,
         groundingConfidence: retrieval.groundingConfidence,
       });
+      const runSuggestionProbe = shouldRunRetrievalBackedSuggestionProbe({
+        retrievalQuery,
+        skipSourceSuggestions,
+        requestedCollectionIds,
+        retrievalSources: retrieval.sources,
+        groundingConfidence: retrieval.groundingConfidence,
+      });
       const suggestionProbeTrace = chatTrace.start("suggestion_probe");
-      const retrievalSuggestedCollectionIds = retrievalQuery && !skipSourceSuggestions
+      const retrievalSuggestedCollectionIds = runSuggestionProbe
         ? await resolveRetrievalBackedSuggestionIds({
             query: plannedRetrievalQuery,
             evidenceQuery: retrievalQuery,
@@ -1438,9 +1452,13 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             ]),
           })
         : [];
-      chatTrace.finish(suggestionProbeTrace, retrievalQuery && !skipSourceSuggestions ? "ok" : "skipped", {
+      chatTrace.finish(suggestionProbeTrace, runSuggestionProbe ? "ok" : "skipped", {
         suggestedCollectionCount: retrievalSuggestedCollectionIds.length,
-        reason: skipSourceSuggestions ? "selected source already returned high-confidence evidence" : undefined,
+        reason: skipSourceSuggestions
+          ? "selected source already returned high-confidence evidence"
+          : runSuggestionProbe
+            ? undefined
+            : "metadata-only suggestion path",
       });
       let sourceSelection = buildSourceSelectionSummary({
         query: plannedRetrievalQuery,
@@ -1469,6 +1487,32 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         ...sourceSelection,
         shadowRuntime,
       };
+      const answerDomain = inferAnswerDomain({
+        userQuery: retrievalQuery,
+        evidence: retrieval.evidence,
+        contextText: retrieval.contextText,
+        routePlan: sourceSelection.routeDecision.primaryDomain
+          ? {
+              ...(routePlan ?? {
+                subtopics: [],
+                riskLevel: "low",
+                retrievalHints: [],
+                mustIncludeTerms: [],
+                mustExcludeTerms: [],
+                confidence: "medium",
+              }),
+              domain: sourceSelection.routeDecision.primaryDomain,
+              confidence: sourceSelection.routeDecision.mode === "suggest" ? "high" : routePlan?.confidence ?? "medium",
+            }
+          : routePlan,
+        selectedCollectionDomain: retrieval.sources.length > 0
+          ? inferKnowledgeCollectionAnswerDomain({
+              collections: accessibleCollections,
+              usedCollectionIds: retrieval.sources.map((source) => source.collectionId),
+            })
+          : null,
+      });
+      const domainPolicy = getDomainPolicy(answerDomain);
       chatTrace.finish(shadowRuntimeTrace, "ok", {
         name: "feedback_shadow_runtime",
         activeAdjustmentCount: shadowRuntime.activeAdjustmentCount,

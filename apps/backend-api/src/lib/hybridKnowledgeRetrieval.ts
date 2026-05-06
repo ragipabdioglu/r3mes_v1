@@ -237,6 +237,12 @@ function uniqueTokens(values: string[]): string[] {
   return [...new Set(values.map((value) => normalize(value)).filter(Boolean))];
 }
 
+const ROUTE_DOMAIN_TAGS = new Set(["medical", "legal", "finance", "technical", "education", "general"]);
+
+function explicitCardDomains(card: KnowledgeCard): string[] {
+  return uniqueTokens([card.topic, ...card.tags]).filter((token) => ROUTE_DOMAIN_TAGS.has(token));
+}
+
 function candidateKey(chunk: HybridKnowledgeChunk): string {
   return chunk.id || `${chunk.documentId}:${chunk.chunkIndex}`;
 }
@@ -305,6 +311,14 @@ function metadataText(value: unknown): string {
 
 export function candidateMatchesRouteScope(card: KnowledgeCard, chunk: HybridKnowledgeChunk, routePlan?: DomainRoutePlan | null): boolean {
   if (!routePlan || routePlan.confidence === "low") return true;
+  const cardDomains = explicitCardDomains(card);
+  if (
+    cardDomains.length > 0 &&
+    !cardDomains.includes(normalize(routePlan.domain)) &&
+    routePlan.domain !== "general"
+  ) {
+    return false;
+  }
   const metadataHaystack = normalize([
     metadataText(chunk.autoMetadata),
     metadataText(chunk.document.autoMetadata),

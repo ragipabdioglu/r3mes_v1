@@ -189,6 +189,31 @@ describe("true hybrid retrieval helpers", () => {
     expect(candidateMatchesRouteScope(pediatric.card, pediatric.chunk, routePlan)).toBe(true);
   });
 
+  it("drops chunks with explicit card domain tags that contradict the query route", () => {
+    const routePlan = {
+      domain: "technical" as const,
+      subtopics: ["migration"],
+      riskLevel: "high" as const,
+      retrievalHints: ["veritabanı migration", "yedek rollback staging"],
+      mustIncludeTerms: ["migration", "yedek", "rollback", "staging"],
+      mustExcludeTerms: [],
+      confidence: "high" as const,
+    };
+    const legal = candidate({
+      id: "legal-rent",
+      title: "kira depozitosu",
+      content: "Kira depozitosu için yazılı başvuru ve belgeler saklanmalıdır.",
+    });
+    legal.card.tags = ["legal", "kira", "depozito"];
+    legal.chunk.autoMetadata = {
+      domain: "technical",
+      subtopics: ["migration"],
+      keywords: ["yedek", "rollback", "staging"],
+    };
+
+    expect(candidateMatchesRouteScope(legal.card, legal.chunk, routePlan)).toBe(false);
+  });
+
   it("pre-ranks by query/route relevance before expensive model rerank", () => {
     const ranked = preRankHybridKnowledgeCandidates({
       query: "Production veritabanında migration çalıştırmadan önce ne yapmalıyım?",
