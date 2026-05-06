@@ -250,12 +250,38 @@ async function main() {
     ragQualityGates: await readJsonIfExists("artifacts/evals/rag-quality-gates/latest.json"),
     collectionSuggestion: await readJsonIfExists("artifacts/evals/collection-suggestion/latest.json"),
   };
+  const approvedWithoutFeedbackCases = approvedCount > 0 && feedbackCaseCount === 0;
+  if (approvedWithoutFeedbackCases) {
+    checks.push({
+      name: "feedback_case_coverage",
+      command: "generated feedback golden coverage check",
+      ok: false,
+      durationMs: 0,
+      error: "approved feedback proposals exist, but no feedback-derived eval cases were generated",
+      remediation: "Submit feedback with metadata.redactedQuery/evalQuery, then regenerate the feedback regression golden file.",
+    });
+  } else {
+    checks.push({
+      name: "feedback_case_coverage",
+      command: "generated feedback golden coverage check",
+      ok: true,
+      durationMs: 0,
+      approvedProposalCount: approvedCount,
+      feedbackCaseCount,
+    });
+  }
   const ok = checks.every((check) => check.ok === true);
   const report = {
     ok,
     applyAllowed: ok && approvedCount > 0,
+    reason: ok
+      ? "feedback eval gate passed"
+      : approvedWithoutFeedbackCases
+        ? "approved feedback proposals require at least one feedback-derived eval case"
+        : "one or more feedback eval gate checks failed",
     approvedProposalCount: approvedCount,
     feedbackCaseCount,
+    feedbackCaseCoverageOk: !approvedWithoutFeedbackCases,
     checks,
     summaries: {
       feedbackRegression: evalSummaries.feedbackRegression?.summary ?? null,

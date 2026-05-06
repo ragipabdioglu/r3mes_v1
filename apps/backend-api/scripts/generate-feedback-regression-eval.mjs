@@ -64,6 +64,16 @@ function expectedSeverity(kind) {
   return kind === "GOOD_SOURCE" || kind === "GOOD_ANSWER" ? ["pass", "warn"] : ["warn", "rewrite"];
 }
 
+function expectedIntent(metadata) {
+  const value = metadata.expectedIntent ?? metadata.answerIntent;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value)) {
+    const values = value.filter((item) => typeof item === "string" && item.trim());
+    return values.length > 0 ? values : null;
+  }
+  return null;
+}
+
 function caseFromFeedback(row) {
   const metadata = metadataObject(row.metadata);
   const query = readEvalQuery(metadata);
@@ -89,6 +99,7 @@ function caseFromFeedback(row) {
     ...(collectionIds.length > 0 ? { collectionIds } : {}),
     includePublic: metadata.includePublic === true,
     expectedRetrievalMode: "true_hybrid",
+    ...(expectedIntent(metadata) ? { expectedIntent: expectedIntent(metadata) } : {}),
     mustPassSafety: false,
     expectedSafetySeverity: expectedSeverity(row.kind),
     mustNotHaveLowLanguageQuality: true,
@@ -100,6 +111,10 @@ function caseFromFeedback(row) {
       ...base,
       ...(expectedCollectionIds.length > 0 ? { expectedSuggestedCollectionIds: expectedCollectionIds } : {}),
       ...(rejectedCollectionIds.length > 0 ? { expectedRejectedCollectionIds: rejectedCollectionIds } : {}),
+      expectedRouteDecisionMode: "suggest",
+      expectedConfidence: ["low"],
+      expectedFallbackMode: "source_suggestion",
+      expectedSafetyRailIds: ["SUGGEST_MODE_NO_GROUNDED_SOURCES"],
       maxSources: 0,
       mustHaveSources: false,
       minEvidenceFacts: 0,
@@ -110,6 +125,10 @@ function caseFromFeedback(row) {
     return {
       ...base,
       ...(expectedCollectionIds.length > 0 ? { expectedSuggestedCollectionIds: expectedCollectionIds } : {}),
+      expectedRouteDecisionMode: expectedCollectionIds.length > 0 ? "suggest" : undefined,
+      expectedConfidence: ["low"],
+      expectedFallbackMode: "source_suggestion",
+      expectedSafetyRailIds: ["SUGGEST_MODE_NO_GROUNDED_SOURCES"],
       maxSources: 0,
       mustHaveSources: false,
       minEvidenceFacts: 0,
@@ -120,6 +139,7 @@ function caseFromFeedback(row) {
     return {
       ...base,
       expectedSafetySeverity: ["warn", "rewrite"],
+      forbiddenSafetyRailIds: ["LOW_LANGUAGE_QUALITY"],
       mustHaveSources: collectionIds.length > 0,
       minEvidenceFacts: collectionIds.length > 0 ? 1 : 0,
       maxSources: Number(metadata.maxSources ?? 3),
@@ -129,6 +149,7 @@ function caseFromFeedback(row) {
   return {
     ...base,
     expectedConfidence: ["medium", "high"],
+    expectedRouteDecisionMode: collectionIds.length > 0 ? "strict" : undefined,
     forbiddenSafetyRailIds: ["MISSING_SOURCES", "NO_USABLE_FACTS", "SOURCE_METADATA_MISMATCH", "LOW_LANGUAGE_QUALITY"],
     ...(collectionIds.length > 0 ? { expectedUsedCollectionIds: collectionIds } : {}),
     mustHaveSources: collectionIds.length > 0,
@@ -152,9 +173,20 @@ async function main() {
 
   const cases = [];
   const seen = new Set();
+  const skippedWithoutQuery = [];
   for (const row of rows) {
     const testCase = caseFromFeedback(row);
-    if (!testCase || seen.has(testCase.id)) continue;
+    if (!testCase) {
+      skippedWithoutQuery.push({
+        id: row.id,
+        kind: row.kind,
+        queryHash: row.queryHash,
+        collectionId: row.collectionId,
+        expectedCollectionId: row.expectedCollectionId,
+      });
+      continue;
+    }
+    if (seen.has(testCase.id)) continue;
     seen.add(testCase.id);
     cases.push(testCase);
   }
@@ -165,6 +197,8 @@ async function main() {
     outFile,
     feedbackRows: rows.length,
     generatedCases: cases.length,
+    skippedWithoutSafeQuery: skippedWithoutQuery.length,
+    skippedPreview: skippedWithoutQuery.slice(0, 10),
     note: "Only feedback rows with metadata.evalQuery/redactedQuery/safeQuery become eval cases.",
   }, null, 2));
 }
