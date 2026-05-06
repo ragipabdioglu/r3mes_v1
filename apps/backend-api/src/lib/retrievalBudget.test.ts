@@ -40,6 +40,11 @@ describe("resolveRetrievalBudget", () => {
 
     expect(decision.mode).toBe("deep_rag");
     expect(decision.sourceLimit).toBeGreaterThan(2);
+    expect(decision.reasons).toEqual(expect.arrayContaining([
+      "low-confidence route",
+      "general-domain route",
+      "auto/public search without explicit selected collection",
+    ]));
   });
 
   it("keeps normal budget for routed questions without explicit selected fast path", () => {
@@ -64,6 +69,7 @@ describe("resolveRetrievalBudget", () => {
   it("allows source limits to be tuned from env", () => {
     vi.stubEnv("R3MES_RAG_FAST_SOURCE_LIMIT", "1");
     vi.stubEnv("R3MES_RAG_DEEP_SOURCE_LIMIT", "5");
+    vi.stubEnv("R3MES_RAG_DEEP_QUERY_TERMS", "kapsamlı");
 
     expect(resolveRetrievalBudget({
       requestedCollectionIds: ["one"],
@@ -83,6 +89,23 @@ describe("resolveRetrievalBudget", () => {
       includePublic: true,
       routePlan: null,
     }).sourceLimit).toBe(5);
+
+    const deepByTerm = resolveRetrievalBudget({
+      requestedCollectionIds: ["one"],
+      includePublic: false,
+      query: "Bu konuyu kapsamlı açıkla",
+      routePlan: {
+        domain: "legal",
+        subtopics: ["sozlesme"],
+        riskLevel: "medium",
+        retrievalHints: [],
+        mustIncludeTerms: [],
+        mustExcludeTerms: [],
+        confidence: "medium",
+      },
+    });
+    expect(deepByTerm).toMatchObject({ mode: "deep_rag", sourceLimit: 5 });
+    expect(deepByTerm.reasons).toContain("deep-query term matched: kapsamli");
 
     vi.unstubAllEnvs();
   });

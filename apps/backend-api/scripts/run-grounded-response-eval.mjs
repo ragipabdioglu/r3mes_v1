@@ -830,6 +830,37 @@ function averageField(results, field) {
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3));
 }
 
+function percentile(values, ratio) {
+  const sorted = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
+  return Number(sorted[index].toFixed(3));
+}
+
+function summarizeLatencyByBudget(results) {
+  const groups = new Map();
+  for (const result of results) {
+    const mode = result.budgetMode ?? "missing";
+    const latency = Number(result.latencyMs);
+    if (!Number.isFinite(latency)) continue;
+    const values = groups.get(mode) ?? [];
+    values.push(latency);
+    groups.set(mode, values);
+  }
+  return Object.fromEntries(
+    [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([mode, values]) => [
+      mode,
+      {
+        count: values.length,
+        avgMs: Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3)),
+        p50Ms: percentile(values, 0.5),
+        p95Ms: percentile(values, 0.95),
+        maxMs: Number(Math.max(...values).toFixed(3)),
+      },
+    ]),
+  );
+}
+
 function summarizeBudgetQuality(results) {
   const casesWithBudget = results.filter((result) => result.budgetMode);
   const expectedBudgetCases = results.filter((result) => result.expectedBudgetMode);
@@ -857,6 +888,7 @@ function summarizeBudgetQuality(results) {
       evidenceRiskFacts: averageField(casesWithBudget, "budgetEvidenceRiskFactCount"),
       evidenceUsableFacts: averageField(casesWithBudget, "budgetEvidenceUsableFactCount"),
     },
+    latencyByBudgetMode: summarizeLatencyByBudget(casesWithBudget),
     expectations: {
       budgetMode: {
         total: expectedBudgetCases.length,
