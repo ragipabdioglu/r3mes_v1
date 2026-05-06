@@ -91,3 +91,25 @@ External parser env'i yoksa PDF/DOCX desteklenmez. Bu bilinçli davranıştır; 
 - Sample DOCX: `external-document-parser-v1`, `clean`, score `77`, `chunkCount=1`, tablo Markdown olarak çıktı.
 
 Bu sonuç bridge sözleşmesinin çalıştığını gösterir. Bir sonraki kalite eşiği gerçek kullanıcı PDF/DOCX dosyalarıyla OCR, tablo ve çok sayfalı belge testidir.
+
+## Gerçek İnternet Corpus POC
+
+2026-05-06 tarihinde gerçek kurum PDF/DOCX dosyaları `artifacts/real-ingestion-corpus/` altına indirildi. Dosyalar repo'ya commit edilmez; kaynak linkleri ve smoke sonucu burada tutulur.
+
+| Dosya | Kaynak | Tür | Sonuç |
+| --- | --- | --- | --- |
+| `who-patient-safety-course01.pdf` | WHO, Course 01: What is patient safety | PDF | `clean`, score `87`, `chunkCount=15` |
+| `uhsussex-headaches-ae-leaflet-2025.pdf` | University Hospitals Sussex, Headaches A&E leaflet | PDF | `clean`, score `81`, `chunkCount=6` |
+| `lambeth-safeguarding-childminders.docx` | Lambeth Council, sample safeguarding policy | DOCX | `clean`, score `87`, `chunkCount=34` |
+| `medway-mental-wellbeing-stress-policy.docx` | Medway Council, mental wellbeing and stress policy template | DOCX | `clean`, score `87`, `chunkCount=18` |
+| `birmingham-safeguarding-chronology-sheet.docx` | Birmingham City Council, safeguarding file chronology sheet | DOCX | `clean`, score `87`, `chunkCount=3` |
+
+Kaynak sayfaları:
+
+- `https://www.who.int/publications/m/item/course-01-what-is-patient-safety`
+- `https://www.uhsussex.nhs.uk/resources/headaches-emergency-department-leaflet/`
+- `https://www.lambeth.gov.uk/childminders/safeguarding-children-prevent-duty/sample-safeguarding-policy`
+- `https://www.medway.gov.uk/downloads/file/5856/mental-wellbeing-and-stress-policy-template`
+- `https://www.birmingham.gov.uk/downloads/file/3460/safeguarding_file_chronology_sheet`
+
+Bu POC sırasında Windows ortamında PDF text output'u `cp1254` stdout encoding'e takılabildiği için bridge stdout/stderr UTF-8'e sabitlendi.
