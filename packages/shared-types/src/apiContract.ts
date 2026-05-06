@@ -30,6 +30,7 @@ export interface AdapterListResponse {
 }
 
 export type KnowledgeVisibility = "PRIVATE" | "PUBLIC";
+export type KnowledgeParseQualityLevel = "clean" | "usable" | "noisy";
 
 export interface KnowledgeCollectionListItem {
   id: string;
@@ -64,6 +65,9 @@ export interface KnowledgeDocumentListItem {
   parseStatus: string;
   storageCid: string | null;
   chunkCount: number;
+  parseQualityScore?: number | null;
+  parseQualityLevel?: KnowledgeParseQualityLevel | null;
+  parseQualityWarnings?: string[];
   inferredTopic?: string | null;
   inferredTags?: string[];
   createdAt: string;
@@ -88,6 +92,9 @@ export interface KnowledgeUploadAcceptedResponse {
   parseStatus: string;
   storageCid: string | null;
   chunkCount: number;
+  parseQualityScore?: number | null;
+  parseQualityLevel?: KnowledgeParseQualityLevel | null;
+  parseQualityWarnings?: string[];
 }
 
 export interface ChatSourceCitation {

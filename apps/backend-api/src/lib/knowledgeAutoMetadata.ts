@@ -5,6 +5,7 @@ import { embedKnowledgeText } from "./knowledgeEmbedding.js";
 import type { KnowledgeChunkDraft } from "./knowledgeText.js";
 import { routeQuery } from "./queryRouter.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
+import type { KnowledgeParseQuality } from "./knowledgeParseQuality.js";
 
 export type KnowledgeRiskLevel = "low" | "medium" | "high";
 
@@ -19,6 +20,7 @@ export interface KnowledgeAutoMetadata {
   summary: string;
   questionsAnswered: string[];
   sourceQuality: "structured" | "inferred" | "thin";
+  parseQuality?: KnowledgeParseQuality;
   profile?: KnowledgeCollectionProfile;
 }
 

@@ -1,6 +1,7 @@
 export type KnowledgeVisibility = "PRIVATE" | "PUBLIC";
 
 export type KnowledgeParseStatus = "PENDING" | "READY" | "FAILED";
+export type KnowledgeParseQualityLevel = "clean" | "usable" | "noisy";
 
 export type KnowledgeCollectionListItem = {
   id: string;
@@ -35,6 +36,9 @@ export type KnowledgeDocumentDetail = {
   parseStatus: KnowledgeParseStatus;
   storageCid: string | null;
   chunkCount: number;
+  parseQualityScore?: number | null;
+  parseQualityLevel?: KnowledgeParseQualityLevel | null;
+  parseQualityWarnings?: string[];
   inferredTopic?: string | null;
   inferredTags?: string[];
   createdAt: string;
@@ -59,6 +63,9 @@ export type KnowledgeUploadAcceptedResponse = {
   parseStatus: KnowledgeParseStatus;
   storageCid: string | null;
   chunkCount: number;
+  parseQualityScore?: number | null;
+  parseQualityLevel?: KnowledgeParseQualityLevel | null;
+  parseQualityWarnings?: string[];
 };
 
 export type KnowledgeVisibilityMutationResponse = {

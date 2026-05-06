@@ -19,6 +19,7 @@ import {
 } from "../lib/knowledgeAutoMetadata.js";
 import { parseKnowledgeCard } from "../lib/knowledgeCard.js";
 import { formatVectorLiteral, getKnowledgeEmbeddingDimensions, embedKnowledgeText } from "../lib/knowledgeEmbedding.js";
+import { scoreKnowledgeParseQuality, type KnowledgeParseQuality } from "../lib/knowledgeParseQuality.js";
 import { scoreKnowledgeProfileHealth } from "../lib/knowledgeProfileHealth.js";
 import { normalizeKnowledgeChunkContent } from "../lib/knowledgeNormalize.js";
 import { chunkKnowledgeText, isSupportedKnowledgeFilename, parseKnowledgeBuffer } from "../lib/knowledgeText.js";
@@ -181,12 +182,40 @@ function readKnowledgeAutoMetadata(value: unknown): KnowledgeAutoMetadata | null
     summary: typeof record.summary === "string" ? record.summary : "",
     questionsAnswered: Array.isArray(record.questionsAnswered) ? record.questionsAnswered.filter((item): item is string => typeof item === "string") : [],
     sourceQuality: record.sourceQuality === "structured" || record.sourceQuality === "inferred" || record.sourceQuality === "thin" ? record.sourceQuality : "thin",
+    parseQuality: readKnowledgeParseQuality(record.parseQuality),
     profile: profileRecord as KnowledgeAutoMetadata["profile"],
   };
 }
 
 function toPrismaJson(value: KnowledgeAutoMetadata): Prisma.InputJsonValue {
   return value as unknown as Prisma.InputJsonValue;
+}
+
+function readKnowledgeParseQuality(value: unknown): KnowledgeParseQuality | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Partial<KnowledgeParseQuality>;
+  if (typeof record.score !== "number") return undefined;
+  if (record.level !== "clean" && record.level !== "usable" && record.level !== "noisy") return undefined;
+  return {
+    score: Math.max(0, Math.min(100, Math.round(record.score))),
+    level: record.level,
+    warnings: Array.isArray(record.warnings)
+      ? record.warnings.filter((item): item is string => typeof item === "string")
+      : [],
+    signals: record.signals && typeof record.signals === "object"
+      ? record.signals as KnowledgeParseQuality["signals"]
+      : {
+          textLength: 0,
+          chunkCount: 0,
+          averageChunkChars: 0,
+          replacementCharRatio: 0,
+          mojibakeMarkerCount: 0,
+          controlCharRatio: 0,
+          symbolRatio: 0,
+          shortLineRatio: 0,
+          structureSignalCount: 0,
+        },
+  };
 }
 
 export async function registerKnowledgeRoutes(app: FastifyInstance) {
@@ -324,6 +353,9 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           parseStatus: doc.parseStatus,
           storageCid: doc.storageCid,
           chunkCount: doc._count.chunks,
+          parseQualityScore: docMetadata?.parseQuality?.score ?? null,
+          parseQualityLevel: docMetadata?.parseQuality?.level ?? null,
+          parseQualityWarnings: docMetadata?.parseQuality?.warnings ?? [],
           inferredTopic: docMetadata?.subtopics[0] ?? chunkMetadata?.subtopics[0] ?? card?.topic ?? null,
           inferredTags: [
             ...(docMetadata ? [docMetadata.domain, ...docMetadata.subtopics, ...docMetadata.keywords] : []),
@@ -403,6 +435,12 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
     if (chunks.length === 0) {
       return sendApiError(reply, 400, "EMPTY_DOCUMENT", "Yüklenen knowledge dosyasında kullanılabilir içerik yok");
     }
+    const parseQuality = scoreKnowledgeParseQuality({
+      filename: fileName,
+      sourceType: parsed.sourceType,
+      text: parsed.text,
+      chunks,
+    });
     const chunksWithMetadata = chunks.map((chunk) => ({
       ...chunk,
       autoMetadata: inferKnowledgeAutoMetadata({
@@ -414,6 +452,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
     if (!documentAutoMetadata) {
       return sendApiError(reply, 400, "EMPTY_DOCUMENT_METADATA", "Yüklenen knowledge dosyası için metadata üretilemedi");
     }
+    documentAutoMetadata.parseQuality = parseQuality;
 
     const ipfsApi = process.env.IPFS_API_URL ?? "http://127.0.0.1:5001";
     const storageCid = await ipfsAddBuffer(ipfsApi, fileBuf, fileName);
@@ -541,6 +580,9 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       parseStatus: "READY",
       storageCid,
       chunkCount: chunks.length,
+      parseQualityScore: parseQuality.score,
+      parseQualityLevel: parseQuality.level,
+      parseQualityWarnings: parseQuality.warnings,
     };
 
     const validated = safeParseKnowledgeUploadAcceptedResponse(payload);

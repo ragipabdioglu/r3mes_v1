@@ -86,6 +86,7 @@ export const AdapterListResponseSchema: z.ZodType<AdapterListResponse> = z.objec
 });
 
 export const KnowledgeVisibilitySchema = z.enum(["PRIVATE", "PUBLIC"]);
+export const KnowledgeParseQualityLevelSchema = z.enum(["clean", "usable", "noisy"]);
 
 export const KnowledgeCollectionListItemSchema: z.ZodType<KnowledgeCollectionListItem> = z.object({
   id: z.string().min(1),
@@ -120,6 +121,9 @@ export const KnowledgeDocumentListItemSchema: z.ZodType<KnowledgeDocumentListIte
   parseStatus: z.string().min(1),
   storageCid: z.string().nullable(),
   chunkCount: z.number().int().nonnegative(),
+  parseQualityScore: z.number().min(0).max(100).nullable().optional(),
+  parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
+  parseQualityWarnings: z.array(z.string()).optional(),
   inferredTopic: z.string().nullable().optional(),
   inferredTags: z.array(z.string()).optional(),
   createdAt: z.string().min(1),
@@ -144,6 +148,9 @@ export const KnowledgeUploadAcceptedResponseSchema: z.ZodType<KnowledgeUploadAcc
   parseStatus: z.string().min(1),
   storageCid: z.string().nullable(),
   chunkCount: z.number().int().nonnegative(),
+  parseQualityScore: z.number().min(0).max(100).nullable().optional(),
+  parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
+  parseQualityWarnings: z.array(z.string()).optional(),
 });
 
 export const ChatSourceCitationSchema: z.ZodType<ChatSourceCitation> = z.object({

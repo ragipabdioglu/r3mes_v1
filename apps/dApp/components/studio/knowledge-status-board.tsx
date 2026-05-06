@@ -168,6 +168,19 @@ function statusTone(status: KnowledgeDocumentDetail["parseStatus"]): string {
   return "text-amber-100 bg-amber-500/10 ring-amber-500/30";
 }
 
+function parseQualityTone(level: KnowledgeDocumentDetail["parseQualityLevel"]): string {
+  if (level === "clean") return "text-emerald-100 bg-emerald-500/10 ring-emerald-500/30";
+  if (level === "usable") return "text-cyan-100 bg-cyan-500/10 ring-cyan-500/30";
+  if (level === "noisy") return "text-amber-100 bg-amber-500/10 ring-amber-500/30";
+  return "text-zinc-300 bg-zinc-800/60 ring-zinc-700";
+}
+
+function parseQualityLabel(doc: KnowledgeDocumentDetail): string {
+  if (!doc.parseQualityLevel) return "Parse quality yok";
+  const score = typeof doc.parseQualityScore === "number" ? ` · ${doc.parseQualityScore}/100` : "";
+  return `${doc.parseQualityLevel}${score}`;
+}
+
 function sortKnowledgeItems(a: KnowledgeCollectionListItem, b: KnowledgeCollectionListItem): number {
   const privateA = a.visibility === "PRIVATE" ? 0 : 1;
   const privateB = b.visibility === "PRIVATE" ? 0 : 1;
@@ -549,6 +562,9 @@ export function KnowledgeStatusBoard() {
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${statusTone(doc.parseStatus)}`}>
                               {doc.parseStatus}
                             </span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${parseQualityTone(doc.parseQualityLevel)}`}>
+                              {parseQualityLabel(doc)}
+                            </span>
                           </div>
                           <dl className="mt-2 grid gap-2 text-[11px] text-zinc-500 sm:grid-cols-3">
                             <div>
@@ -588,6 +604,11 @@ export function KnowledgeStatusBoard() {
                                 </p>
                               ) : null}
                             </div>
+                          ) : null}
+                          {doc.parseQualityWarnings?.length ? (
+                            <p className="mt-2 text-[11px] leading-relaxed text-amber-100/70">
+                              Parse warning: {doc.parseQualityWarnings.slice(0, 4).join(", ")}
+                            </p>
                           ) : null}
                         </li>
                       ))}
