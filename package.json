@@ -30,6 +30,7 @@
     "contract:drift": "pnpm --filter @r3mes/shared-types run contract:drift",
     "test:security-regression": "pnpm --filter @r3mes/backend-api run test:security-regression",
     "eval:grounded-suite": "node infrastructure/scripts/run-grounded-eval-suite.mjs",
+    "eval:readiness-baseline": "node infrastructure/scripts/run-production-readiness-baseline.mjs",
     "eval:grounded-stress": "node infrastructure/scripts/run-grounded-stress.mjs",
     "eval:adaptive-rag": "pnpm --filter @r3mes/backend-api run eval:adaptive-rag",
     "eval:realistic-rag": "pnpm --filter @r3mes/backend-api run eval:realistic-rag",

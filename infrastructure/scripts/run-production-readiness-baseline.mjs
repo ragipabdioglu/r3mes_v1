@@ -1,0 +1,342 @@
+import { readdir, readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const defaultEvalRoot = resolve(root, "infrastructure/evals");
+const defaultArtifactsRoot = resolve(root, "artifacts/evals");
+const defaultOut = resolve(root, "artifacts/evals/readiness-baseline/latest.json");
+
+const REQUIRED_BUCKETS = [
+  "wrong_source",
+  "no_source",
+  "private_leak",
+  "dirty_ocr",
+  "typo_normalization",
+  "same_domain_wrong_topic",
+  "multi_domain",
+  "contradiction",
+  "latency",
+  "shadow_runtime",
+];
+
+function argValue(name, fallback) {
+  const index = process.argv.indexOf(name);
+  if (index === -1 || index + 1 >= process.argv.length) return fallback;
+  return process.argv[index + 1];
+}
+
+function hasFlag(name) {
+  return process.argv.includes(name);
+}
+
+function parseArgs() {
+  return {
+    evalRoot: resolve(root, argValue("--eval-root", defaultEvalRoot)),
+    artifactsRoot: resolve(root, argValue("--artifacts-root", defaultArtifactsRoot)),
+    out: resolve(root, argValue("--out", process.env.R3MES_READINESS_BASELINE_OUT || defaultOut)),
+    includeArtifacts: !hasFlag("--no-artifacts"),
+  };
+}
+
+function normalize(value) {
+  return String(value ?? "")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  return value == null ? [] : [value];
+}
+
+function includesAny(haystack, needles) {
+  const text = normalize(haystack);
+  return needles.some((needle) => text.includes(normalize(needle)));
+}
+
+function classifyCase(testCase, suite) {
+  const id = normalize(testCase.id);
+  const bucket = normalize(testCase.bucket);
+  const query = normalize(testCase.query);
+  const suiteName = normalize(suite);
+  const expectedRails = asArray(testCase.expectedSafetyRailIds);
+  const forbiddenRails = asArray(testCase.forbiddenSafetyRailIds);
+  const expectedShadowFields = [
+    testCase.expectedShadowRuntimeAffected,
+    testCase.expectedShadowWouldChangeTopCandidate,
+    testCase.minShadowPromotedCandidates,
+    testCase.expectedShadowImpactCollectionIds,
+  ];
+  const labels = new Set();
+  const reasons = {};
+
+  function mark(label, reason, condition) {
+    if (!condition) return;
+    labels.add(label);
+    reasons[label] = reasons[label] ?? [];
+    reasons[label].push(reason);
+  }
+
+  mark(
+    "wrong_source",
+    "query/source mismatch or rejected source expectation",
+    includesAny(`${id} ${bucket}`, ["wrong", "mismatch", "adversarial", "source_suggestion"]) ||
+      expectedRails.includes("QUERY_SOURCE_MISMATCH") ||
+      expectedRails.includes("SUGGEST_MODE_NO_GROUNDED_SOURCES") ||
+      Array.isArray(testCase.expectedRejectedCollectionIds),
+  );
+  mark(
+    "same_domain_wrong_topic",
+    "same-domain mismatch or alignment fast-fail expectation",
+    testCase.expectedAlignmentFastFailed === true ||
+      expectedRails.includes("QUERY_SOURCE_MISMATCH") ||
+      includesAny(`${id} ${bucket}`, ["same_domain_wrong_topic", "wrong_topic", "wrong-topic"]),
+  );
+  mark(
+    "no_source",
+    "no-source, suggest, or zero-source fallback expectation",
+    testCase.mustHaveSources === false ||
+      Number(testCase.maxSources ?? Number.NaN) === 0 ||
+      includesAny(testCase.expectedFallbackMode, ["no_source", "source_suggestion"]) ||
+      expectedRails.includes("NO_USABLE_FACTS") ||
+      expectedRails.includes("MISSING_SOURCES") ||
+      expectedRails.includes("SUGGEST_MODE_NO_GROUNDED_SOURCES"),
+  );
+  mark(
+    "private_leak",
+    "private scope or visibility protection expectation",
+    includesAny(`${id} ${bucket} ${suiteName}`, ["private", "leak", "visibility"]) ||
+      expectedRails.includes("PRIVATE_SOURCE_SCOPE_MISMATCH") ||
+      forbiddenRails.includes("PRIVATE_SOURCE_SCOPE_MISMATCH"),
+  );
+  mark(
+    "dirty_ocr",
+    "dirty/noisy document expectation",
+    includesAny(`${id} ${bucket} ${query}`, ["dirty", "ocr", "noisy", "kirli", "bozuk"]),
+  );
+  mark(
+    "typo_normalization",
+    "typo, ascii Turkish, or informal wording expectation",
+    includesAny(`${id} ${bucket} ${query}`, ["typo", "ascii", "agriyo", "kasigim", "maliyim", "bozuk türkçe", "bozuk turkce"]),
+  );
+  mark(
+    "multi_domain",
+    "multi-domain suite, bucket, or collection expectation",
+    includesAny(`${id} ${bucket} ${suiteName}`, ["multi-domain", "multi_domain", "domain-regression"]) ||
+      asArray(testCase.expectedDomain).length > 1,
+  );
+  mark(
+    "contradiction",
+    "contradictory evidence expectation",
+    includesAny(`${id} ${bucket} ${query}`, ["contradiction", "contradictory", "çeliş", "celis"]),
+  );
+  mark(
+    "latency",
+    "latency budget expectation",
+    Number.isFinite(Number(testCase.maxLatencyMs)),
+  );
+  mark(
+    "shadow_runtime",
+    "shadow runtime expectation",
+    expectedShadowFields.some((value) => value !== undefined),
+  );
+
+  return {
+    labels: [...labels].sort(),
+    reasons,
+  };
+}
+
+async function readJsonl(file) {
+  const raw = await readFile(file, "utf8");
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      try {
+        return JSON.parse(line);
+      } catch (error) {
+        throw new Error(`${file}:${index + 1} invalid jsonl: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+}
+
+async function listSuites(evalRoot) {
+  const entries = await readdir(evalRoot, { withFileTypes: true });
+  const suites = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const goldenPath = join(evalRoot, entry.name, "golden.jsonl");
+    try {
+      await stat(goldenPath);
+      suites.push({ name: entry.name, file: goldenPath });
+    } catch {
+      // Skip directories without a golden set.
+    }
+  }
+  return suites.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function readArtifactSummary(artifactsRoot, suite) {
+  const file = join(artifactsRoot, suite, "latest.json");
+  try {
+    const [raw, stats] = await Promise.all([readFile(file, "utf8"), stat(file)]);
+    const parsed = JSON.parse(raw);
+    return {
+      path: file,
+      updatedAt: stats.mtime.toISOString(),
+      summary: parsed.summary ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function createEmptyCoverage() {
+  return REQUIRED_BUCKETS.reduce((acc, bucket) => {
+    acc[bucket] = {
+      caseCount: 0,
+      suites: {},
+      examples: [],
+    };
+    return acc;
+  }, {});
+}
+
+function scoreReadiness({ totalCases, coverage, artifacts }) {
+  const coveredBuckets = REQUIRED_BUCKETS.filter((bucket) => coverage[bucket]?.caseCount > 0);
+  const missingBuckets = REQUIRED_BUCKETS.filter((bucket) => coverage[bucket]?.caseCount === 0);
+  const suitesWithArtifacts = artifacts.filter((artifact) => artifact.summary).length;
+  const failedArtifactSuites = artifacts.filter((artifact) => Number(artifact.summary?.failed ?? 0) > 0);
+  const passRates = artifacts
+    .map((artifact) => Number(artifact.summary?.passRate ?? Number.NaN))
+    .filter((value) => Number.isFinite(value));
+  const averagePassRate =
+    passRates.length === 0
+      ? null
+      : Number((passRates.reduce((sum, value) => sum + value, 0) / passRates.length).toFixed(3));
+  const coverageScore = Number((coveredBuckets.length / REQUIRED_BUCKETS.length).toFixed(3));
+  const artifactScore =
+    artifacts.length === 0 ? 0 : Number((suitesWithArtifacts / artifacts.length).toFixed(3));
+  const status =
+    missingBuckets.length === 0 && failedArtifactSuites.length === 0 && totalCases >= 100
+      ? "ready_for_controlled_adaptive_work"
+      : "baseline_has_gaps";
+  const blockers = [
+    ...(totalCases < 100 ? [`eval_case_target:${totalCases}<100`] : []),
+    ...missingBuckets.map((bucket) => `missing_bucket:${bucket}`),
+    ...failedArtifactSuites.map((artifact) => `failing_latest_artifact:${artifact.suite}`),
+  ];
+
+  return {
+    status,
+    blockers,
+    totalCases,
+    requiredCaseTarget: 100,
+    coverageScore,
+    artifactScore,
+    averagePassRate,
+    coveredBuckets,
+    missingBuckets,
+    failedArtifactSuites: failedArtifactSuites.map((artifact) => ({
+      suite: artifact.suite,
+      failed: artifact.summary.failed,
+      passRate: artifact.summary.passRate,
+    })),
+  };
+}
+
+async function main() {
+  const opts = parseArgs();
+  const suites = await listSuites(opts.evalRoot);
+  const coverage = createEmptyCoverage();
+  const suiteReports = [];
+  let totalCases = 0;
+
+  for (const suite of suites) {
+    const cases = await readJsonl(suite.file);
+    const bucketCounts = {};
+    const classifiedCounts = {};
+    totalCases += cases.length;
+
+    for (const testCase of cases) {
+      const bucket = testCase.bucket ?? "default";
+      bucketCounts[bucket] = (bucketCounts[bucket] ?? 0) + 1;
+      const classification = classifyCase(testCase, suite.name);
+      for (const label of classification.labels) {
+        classifiedCounts[label] = (classifiedCounts[label] ?? 0) + 1;
+        coverage[label].caseCount += 1;
+        coverage[label].suites[suite.name] = (coverage[label].suites[suite.name] ?? 0) + 1;
+        if (coverage[label].examples.length < 5) {
+          coverage[label].examples.push({
+            suite: suite.name,
+            id: testCase.id,
+            bucket,
+            query: testCase.query,
+            reasons: classification.reasons[label] ?? [],
+          });
+        }
+      }
+    }
+
+    const artifact = opts.includeArtifacts ? await readArtifactSummary(opts.artifactsRoot, suite.name) : null;
+    suiteReports.push({
+      name: suite.name,
+      file: suite.file,
+      caseCount: cases.length,
+      buckets: bucketCounts,
+      classifiedCoverage: classifiedCounts,
+      latestArtifact: artifact,
+    });
+  }
+
+  const artifacts = suiteReports.map((suite) => ({
+    suite: suite.name,
+    ...(suite.latestArtifact ?? { path: null, updatedAt: null, summary: null }),
+  }));
+  const readiness = scoreReadiness({ totalCases, coverage, artifacts });
+  const report = {
+    generatedAt: new Date().toISOString(),
+    readiness,
+    requiredBuckets: REQUIRED_BUCKETS,
+    coverage,
+    suites: suiteReports,
+    nextActions: [
+      readiness.missingBuckets.length > 0
+        ? `Add eval cases for missing buckets: ${readiness.missingBuckets.join(", ")}.`
+        : "All required readiness buckets have at least one case.",
+      totalCases < 100
+        ? `Expand total eval cases from ${totalCases} to at least 100 before promoting adaptive runtime changes.`
+        : "Eval case target reached.",
+      readiness.failedArtifactSuites.length > 0
+        ? "Fix failing latest eval artifacts or regenerate baseline after code/data changes."
+        : "No failing latest eval artifacts detected.",
+    ],
+  };
+
+  await mkdir(dirname(opts.out), { recursive: true });
+  await writeFile(opts.out, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+
+  console.log(`wrote ${opts.out}`);
+  console.log(
+    JSON.stringify(
+      {
+        status: readiness.status,
+        totalCases: readiness.totalCases,
+        coverageScore: readiness.coverageScore,
+        missingBuckets: readiness.missingBuckets,
+        suites: suiteReports.length,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});
