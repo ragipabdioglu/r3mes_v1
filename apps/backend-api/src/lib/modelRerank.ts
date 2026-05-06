@@ -263,6 +263,7 @@ function buildDiagnostics<TChunk>(opts: {
   inputCandidateCount: number;
   deterministicCandidateCount: number;
   modelCandidateCount: number;
+  candidateLimit?: number;
   returned: Array<RerankCandidate<TChunk>>;
   modelScores?: { raw: number[]; normalized: number[] };
 }): RerankDiagnostics {
@@ -275,7 +276,7 @@ function buildDiagnostics<TChunk>(opts: {
     deterministicCandidateCount: opts.deterministicCandidateCount,
     modelCandidateCount: opts.modelCandidateCount,
     returnedCandidateCount: opts.returned.length,
-    candidateLimit: getCandidateLimit(),
+    candidateLimit: opts.candidateLimit ?? getCandidateLimit(),
     modelWeight: getModelWeight(),
     timeoutMs: getTimeoutMs(),
     topCandidates: traceCandidates(opts.returned, opts.modelScores),
@@ -357,7 +358,8 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
     };
   }
 
-  const candidateLimit = Math.min(getCandidateLimit(), deterministic.length);
+  const requestedLimit = Math.max(1, Math.min(limit, deterministic.length));
+  const candidateLimit = Math.min(getCandidateLimit(), deterministic.length, requestedLimit);
   const modelPool = deterministic.slice(0, candidateLimit);
   const documents = modelPool.map((candidate) => buildRerankerDocumentText(candidate));
 
@@ -390,6 +392,7 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
         inputCandidateCount: candidates.length,
         deterministicCandidateCount: deterministic.length,
         modelCandidateCount: modelPool.length,
+        candidateLimit,
         returned,
       }),
     };
@@ -407,6 +410,7 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
         inputCandidateCount: candidates.length,
         deterministicCandidateCount: deterministic.length,
         modelCandidateCount: modelPool.length,
+        candidateLimit,
         returned,
       }),
     };

@@ -17,7 +17,6 @@ import { retrieveKnowledgeContextTrueHybrid } from "../lib/hybridKnowledgeRetrie
 import {
   buildKnowledgeRouteDecision,
   collectionHasSpecificRouteSupport,
-  explainCollectionRouteSuggestion,
   inferKnowledgeCollectionAnswerDomain,
   rankMetadataRouteCandidates,
   rankSuggestedKnowledgeCollections,
@@ -162,6 +161,22 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
+function candidateQualityLabel(candidate: KnowledgeMetadataRouteCandidate): string {
+  if (candidate.sourceQuality === "structured") return "structured profile";
+  if (candidate.sourceQuality === "inferred") return "inferred profile";
+  if (candidate.sourceQuality === "thin") return "thin profile, temkinli öneri";
+  return "metadata profile";
+}
+
+function explainMetadataCandidateSuggestion(candidate: KnowledgeMetadataRouteCandidate): string {
+  const quality = candidateQualityLabel(candidate);
+  const score = Math.round(candidate.score);
+  if (candidate.matchedTerms.length > 0) {
+    return `Profile eşleşmesi (${quality}, skor ${score}): ${candidate.matchedTerms.slice(0, 4).join(", ")}.`;
+  }
+  return `${candidate.reason} (${quality}, skor ${score}).`;
+}
+
 function buildSourceSelectionSummary(opts: {
   query: string;
   requestedCollectionIds: string[];
@@ -186,15 +201,6 @@ function buildSourceSelectionSummary(opts: {
         ? "public"
         : "none";
   const excluded = new Set([...usedCollectionIds, ...opts.requestedCollectionIds]);
-  const rankedSuggestedCollections = opts.skipSuggestions
-    ? []
-    : rankSuggestedKnowledgeCollections({
-        collections: opts.suggestibleCollections,
-        routePlan: opts.routePlan,
-        query: opts.query,
-        excludedIds: excluded,
-        limit: 8,
-      });
   const retrievalSuggestedIds = opts.retrievalSuggestedCollectionIds ?? [];
   const metadataRouteCandidates = opts.skipSuggestions
     ? []
@@ -203,8 +209,18 @@ function buildSourceSelectionSummary(opts: {
         routePlan: opts.routePlan,
         query: opts.query,
         excludedIds: new Set(opts.requestedCollectionIds),
-        limit: 5,
+        limit: 8,
       });
+  const metadataCandidateById = new Map(metadataRouteCandidates.map((candidate) => [candidate.id, candidate]));
+  const rankedSuggestedCollections = metadataRouteCandidates
+    .filter((candidate) => !excluded.has(candidate.id))
+    .map((candidate) => {
+      const collection = opts.suggestibleCollections.find((item) => item.id === candidate.id);
+      return collection ? { collection, candidate } : null;
+    })
+    .filter((item): item is { collection: KnowledgeCollectionAccessItem; candidate: KnowledgeMetadataRouteCandidate } =>
+      Boolean(item),
+    );
   const thinProfileCollectionIds = uniqueStrings([
     ...metadataRouteCandidates
       .filter((candidate) => candidate.sourceQuality === "thin")
@@ -216,24 +232,27 @@ function buildSourceSelectionSummary(opts: {
   ]);
   const suggestedCollections = [...rankedSuggestedCollections]
     .sort((a, b) => {
-      const aRetrieval = retrievalSuggestedIds.includes(a.id) ? 0 : 1;
-      const bRetrieval = retrievalSuggestedIds.includes(b.id) ? 0 : 1;
+      const aRetrieval = retrievalSuggestedIds.includes(a.collection.id) ? 0 : 1;
+      const bRetrieval = retrievalSuggestedIds.includes(b.collection.id) ? 0 : 1;
       if (aRetrieval !== bRetrieval) return aRetrieval - bRetrieval;
+      if (b.candidate.score !== a.candidate.score) return b.candidate.score - a.candidate.score;
       return 0;
     })
     .slice(0, 3)
-    .map((collection) => ({
+    .map(({ collection, candidate }) => ({
       id: collection.id,
       name: collection.name,
       reason: retrievalSuggestedIds.includes(collection.id)
-        ? `${explainCollectionRouteSuggestion(collection, opts.routePlan, opts.query)} Retrieval probe bu kaynaktan kanıt buldu.`
-        : explainCollectionRouteSuggestion(collection, opts.routePlan, opts.query),
+        ? `${explainMetadataCandidateSuggestion(candidate)} Retrieval probe bu kaynaktan kanıt buldu.`
+        : explainMetadataCandidateSuggestion(candidate),
     }));
   const usedCollectionsMatchRoute =
     !opts.routePlan?.domain ||
     opts.routePlan.domain === "general" ||
     usedCollectionIds.some((id) => {
       const collection = opts.suggestibleCollections.find((item) => item.id === id);
+      const candidate = metadataCandidateById.get(id);
+      if (candidate && candidate.sourceQuality !== "thin" && candidate.score >= 70) return true;
       return collection ? collectionHasSpecificRouteSupport(collection, opts.routePlan, opts.query) : false;
     });
   const warning =
@@ -1495,6 +1514,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             ? undefined
             : "metadata-only suggestion path",
       });
+      const metadataSelectionTrace = chatTrace.start("source_selection");
       let sourceSelection = buildSourceSelectionSummary({
         query: plannedRetrievalQuery,
         requestedCollectionIds,
@@ -1505,6 +1525,11 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         routePlan,
         retrievalSuggestedCollectionIds,
         skipSuggestions: skipSourceSuggestions,
+      });
+      chatTrace.finish(metadataSelectionTrace, "ok", {
+        name: "metadata_route_selection",
+        suggestedCollectionCount: sourceSelection.suggestedCollections.length,
+        metadataRouteCandidateCount: sourceSelection.metadataRouteCandidates.length,
       });
       const shadowCandidateCollectionIds = uniqueStrings([
         ...sourceSelection.usedCollectionIds,

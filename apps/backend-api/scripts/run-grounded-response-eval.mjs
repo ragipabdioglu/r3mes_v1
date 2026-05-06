@@ -133,6 +133,7 @@ function scoreCase(testCase, response) {
   const sources = Array.isArray(response?.sources) ? response.sources : [];
   const safetyGate = response?.safety_gate;
   const retrievalDebug = response?.retrieval_debug;
+  const chatTrace = response?.chat_trace;
   const evidence = retrievalDebug?.evidence;
   const failures = [];
   const minSources = Number(testCase.minSources ?? (testCase.mustHaveSources ? 1 : 0));
@@ -630,6 +631,16 @@ function scoreCase(testCase, response) {
         }
       : null,
     latencyMs: response?._latencyMs ?? null,
+    traceTotalDurationMs: Number.isFinite(Number(chatTrace?.totalDurationMs)) ? Number(chatTrace.totalDurationMs) : null,
+    traceStageDurations: Array.isArray(chatTrace?.stages)
+      ? chatTrace.stages.map((stage) => ({
+          name: stage?.name ?? "unknown",
+          durationMs: Number.isFinite(Number(stage?.durationMs)) ? Number(stage.durationMs) : null,
+          status: stage?.status ?? null,
+          detailName: stage?.detail?.name ?? null,
+          detailReason: stage?.detail?.reason ?? null,
+        }))
+      : [],
     content,
   };
 }

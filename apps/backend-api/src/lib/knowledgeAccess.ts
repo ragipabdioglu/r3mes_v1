@@ -120,16 +120,17 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
 function metadataText(value: unknown): string {
   const profile = readMetadataProfile(value);
   if (!profile) return "";
+  const compact = (input: string, limit: number) => input.slice(0, limit);
   const parts = [
-    ...profile.domains,
-    ...profile.subtopics,
-    ...profile.keywords,
-    ...profile.entities,
-    ...profile.topicPhrases,
-    ...profile.answerableConcepts,
-    profile.summary,
-    profile.profileText ?? "",
-    ...profile.questionsAnswered,
+    ...profile.domains.slice(0, 8),
+    ...profile.subtopics.slice(0, 16),
+    ...profile.keywords.slice(0, 32),
+    ...profile.entities.slice(0, 24),
+    ...profile.topicPhrases.slice(0, 24),
+    ...profile.answerableConcepts.slice(0, 32),
+    compact(profile.summary, 900),
+    compact(profile.profileText ?? "", 1_200),
+    ...profile.questionsAnswered.slice(0, 12),
   ];
   return parts.join(" ");
 }
@@ -149,7 +150,7 @@ function collectionMetadataProfiles(collection: KnowledgeCollectionAccessItem): 
   return [
     readMetadataProfile(collection.autoMetadata),
     ...(collection.documents ?? []).map((document) => readMetadataProfile(document.autoMetadata)),
-  ].filter((item): item is KnowledgeMetadataProfile => Boolean(item));
+  ].filter((item): item is KnowledgeMetadataProfile => Boolean(item)).slice(0, 6);
 }
 
 function normalize(text: string): string {
@@ -871,15 +872,21 @@ export function rankMetadataRouteCandidates(opts: {
   limit?: number;
 }): KnowledgeMetadataRouteCandidate[] {
   const excludedIds = opts.excludedIds ?? new Set<string>();
-  return opts.collections
-    .filter((collection) => !excludedIds.has(collection.id))
+  const limit = opts.limit ?? 5;
+  const candidatePool = opts.collections.filter((collection) => !excludedIds.has(collection.id));
+  const domainScopedPool =
+    opts.routePlan && opts.routePlan.domain !== "general" && opts.routePlan.confidence !== "low"
+      ? candidatePool.filter((collection) => collectionHasMetadataDomainSupport(collection, opts.routePlan!.domain))
+      : [];
+  const scoringPool = domainScopedPool.length >= Math.min(limit, 3) ? domainScopedPool : candidatePool;
+  return scoringPool
     .map((collection) =>
       adaptiveMetadataCandidate(collection, opts.routePlan, opts.query),
     )
     .filter((candidate): candidate is KnowledgeMetadataRouteCandidate => Boolean(candidate))
     .filter((candidate) => candidate.score >= 20)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
-    .slice(0, opts.limit ?? 5);
+    .slice(0, limit);
 }
 
 export function buildKnowledgeRouteDecision(opts: {
