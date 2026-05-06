@@ -65,10 +65,12 @@ export function embedTextDeterministicForQdrant(text: string, dimensions = getQd
 
 async function embedWithAiEngine(texts: string[]): Promise<{ vectors: number[][]; model?: string }> {
   const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    parsePositiveInt(process.env.R3MES_EMBEDDING_TIMEOUT_MS, DEFAULT_EMBEDDING_TIMEOUT_MS * Math.max(1, texts.length)),
+  const batchScaledTimeoutMs = DEFAULT_EMBEDDING_TIMEOUT_MS * Math.max(1, texts.length);
+  const timeoutMs = Math.max(
+    parsePositiveInt(process.env.R3MES_EMBEDDING_TIMEOUT_MS, batchScaledTimeoutMs),
+    batchScaledTimeoutMs,
   );
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${getAiEngineBase()}/v1/embeddings`, {
       method: "POST",

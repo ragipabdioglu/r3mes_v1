@@ -83,6 +83,38 @@ async function qdrantPointCount() {
   return null;
 }
 
+async function qdrantFilteredPointCount(filter) {
+  const collection = encodeURIComponent(getQdrantCollectionName());
+  const response = await fetch(`${getQdrantBaseUrl()}/collections/${collection}/points/count`, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ exact: true, filter }),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Qdrant filtered count failed: ${response.status} ${await response.text()}`);
+  }
+  const parsed = await response.json();
+  return typeof parsed?.result?.count === "number" ? parsed.result.count : null;
+}
+
+async function embeddingProviderPointCount() {
+  return qdrantFilteredPointCount({
+    must: [
+      { key: "embeddingProvider", match: { value: requestedEmbeddingProvider } },
+      { key: "embeddingVectorSize", match: { value: getQdrantVectorSize() } },
+    ],
+  });
+}
+
+async function deterministicFallbackPointCount() {
+  return qdrantFilteredPointCount({
+    must: [
+      { key: "embeddingProvider", match: { value: "deterministic" } },
+    ],
+  });
+}
+
 async function chunkStats(afterId = null) {
   const [totalChunks, remainingChunks] = await Promise.all([
     prisma.knowledgeChunk.count(),
@@ -126,9 +158,14 @@ function clearCheckpoint() {
 async function printStatus(startAfter) {
   const stats = await chunkStats(startAfter ?? null);
   const pointCount = verifyCount ? await qdrantPointCount() : null;
+  const providerPointCount = verifyCount ? await embeddingProviderPointCount() : null;
+  const fallbackPointCount = verifyCount ? await deterministicFallbackPointCount() : null;
+  const indexComplete = pointCount == null ? null : pointCount >= stats.totalChunks;
+  const providerMatches =
+    providerPointCount == null ? null : providerPointCount >= stats.totalChunks && (fallbackPointCount ?? 0) === 0;
   const status = {
     phase: "qdrant_reindex_status",
-    ok: true,
+    ok: providerMatches ?? indexComplete ?? true,
     checkpointPath: noCheckpoint ? null : checkpointPath,
     resumeAfter: startAfter ?? null,
     collection: getQdrantCollectionName(),
@@ -136,10 +173,13 @@ async function printStatus(startAfter) {
     requestedEmbeddingProvider,
     requireRealEmbeddings,
     totalChunks: stats.totalChunks,
-    completedChunks: stats.completedChunks,
-    remainingChunks: stats.remainingChunks,
+    completedChunks: indexComplete ? stats.totalChunks : stats.completedChunks,
+    remainingChunks: indexComplete ? 0 : stats.remainingChunks,
     qdrantPointCount: pointCount,
-    countMatches: pointCount == null ? null : pointCount >= stats.totalChunks,
+    countMatches: indexComplete,
+    embeddingProviderPointCount: providerPointCount,
+    deterministicFallbackPointCount: fallbackPointCount,
+    providerMatches,
   };
   console.log(JSON.stringify(status, null, 2));
 }
@@ -232,6 +272,11 @@ async function main() {
           chunkIndex: chunk.chunkIndex,
           title: chunk.document.title,
           ...payloadMetadata,
+          embeddingProvider: diagnostics.actualProvider,
+          embeddingModel: diagnostics.model ?? "",
+          embeddingFallbackUsed: diagnostics.fallbackUsed,
+          embeddingVectorSize: diagnostics.dimension,
+          indexedAt: new Date().toISOString(),
           content: chunk.content,
           createdAt: chunk.createdAt.toISOString(),
         },

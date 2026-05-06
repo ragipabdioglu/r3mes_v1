@@ -35,6 +35,11 @@ export interface QdrantKnowledgePayload {
   collectionLastProfiledAt: string;
   collectionProfileText: string;
   profileSummary: string;
+  embeddingProvider?: string;
+  embeddingModel?: string;
+  embeddingFallbackUsed?: boolean;
+  embeddingVectorSize?: number;
+  indexedAt?: string;
   content: string;
   createdAt: string;
 }
@@ -291,6 +296,8 @@ async function ensureQdrantPayloadIndexes(): Promise<void> {
     { field_name: "metadataConfidence", field_schema: "keyword" },
     { field_name: "collectionProfileVersion", field_schema: "integer" },
     { field_name: "collectionProfileTextHash", field_schema: "keyword" },
+    { field_name: "embeddingProvider", field_schema: "keyword" },
+    { field_name: "embeddingVectorSize", field_schema: "integer" },
   ];
   for (const { field_name, field_schema } of fields) {
     const response = await qdrantFetch(`/collections/${collection}/index?wait=true`, {

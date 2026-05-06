@@ -103,4 +103,31 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
       error: "connection refused",
     });
   });
+
+  it("scales ai-engine timeout with embedding batch size", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "ai-engine");
+    vi.stubEnv("R3MES_QDRANT_VECTOR_SIZE", "4");
+    vi.stubEnv("R3MES_EMBEDDING_TIMEOUT_MS", "1");
+    const fetchMock = vi.fn().mockImplementation((_, init?: RequestInit) => {
+      const signal = init?.signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = embedTextsForQdrantWithDiagnostics(["a", "b"]);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await pending;
+
+    expect(result.diagnostics).toMatchObject({
+      requestedProvider: "ai-engine",
+      actualProvider: "deterministic",
+      fallbackUsed: true,
+    });
+    vi.useRealTimers();
+  });
 });
