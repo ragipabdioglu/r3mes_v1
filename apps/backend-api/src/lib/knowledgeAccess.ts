@@ -34,9 +34,11 @@ export interface KnowledgeCollectionAccessItem {
   id: string;
   name: string;
   visibility: "PRIVATE" | "PUBLIC";
+  updatedAt?: Date | string;
   autoMetadata?: unknown;
   documents?: Array<{
     title: string;
+    updatedAt?: Date | string;
     autoMetadata?: unknown;
     chunks: Array<{ content: string }>;
   }>;
@@ -155,6 +157,95 @@ function collectionMetadataProfiles(collection: KnowledgeCollectionAccessItem): 
 
 function normalize(text: string): string {
   return normalizeConceptText(text);
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const METADATA_ROUTE_CACHE_TTL_MS = parsePositiveInt(process.env.R3MES_METADATA_ROUTE_CACHE_TTL_MS, 60_000);
+const METADATA_ROUTE_CACHE_MAX_ENTRIES = parsePositiveInt(process.env.R3MES_METADATA_ROUTE_CACHE_MAX_ENTRIES, 200);
+
+const metadataRouteCandidateCache = new Map<
+  string,
+  { expiresAt: number; candidates: KnowledgeMetadataRouteCandidate[] }
+>();
+
+function collectionProfileVersion(value: unknown): string {
+  const profile = readMetadataProfile(value);
+  return [
+    profile?.profileVersion ?? "0",
+    profile?.lastProfiledAt ?? "",
+    profile?.sourceQuality ?? "",
+    profile?.confidence ?? "",
+  ].join(":");
+}
+
+function timestampKey(value: Date | string | undefined): string {
+  if (value instanceof Date) return value.toISOString();
+  return value ? String(value) : "";
+}
+
+function metadataRouteCacheKey(opts: {
+  collections: KnowledgeCollectionAccessItem[];
+  routePlan: DomainRoutePlan | null;
+  query?: string;
+  excludedIds: Set<string>;
+  limit: number;
+}): string {
+  const route = opts.routePlan
+    ? [
+        opts.routePlan.domain,
+        opts.routePlan.confidence,
+        ...opts.routePlan.subtopics,
+        ...opts.routePlan.mustIncludeTerms,
+        ...opts.routePlan.retrievalHints,
+      ].join("|")
+    : "no-route";
+  const collectionSignature = opts.collections
+    .map((collection) => [
+      collection.id,
+      timestampKey(collection.updatedAt),
+      collectionProfileVersion(collection.autoMetadata),
+      ...(collection.documents ?? []).slice(0, 6).map((document) => [
+        document.title,
+        timestampKey(document.updatedAt),
+        collectionProfileVersion(document.autoMetadata),
+      ].join("~")),
+    ].join("~"))
+    .sort()
+    .join(";");
+  const excluded = [...opts.excludedIds].sort().join(",");
+  return [
+    normalize(opts.query ?? ""),
+    route,
+    excluded,
+    opts.limit,
+    collectionSignature,
+  ].join("||");
+}
+
+function readMetadataRouteCandidateCache(key: string): KnowledgeMetadataRouteCandidate[] | null {
+  const cached = metadataRouteCandidateCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    metadataRouteCandidateCache.delete(key);
+    return null;
+  }
+  return cached.candidates.map((candidate) => ({ ...candidate }));
+}
+
+function writeMetadataRouteCandidateCache(key: string, candidates: KnowledgeMetadataRouteCandidate[]): void {
+  if (METADATA_ROUTE_CACHE_TTL_MS <= 0) return;
+  if (metadataRouteCandidateCache.size >= METADATA_ROUTE_CACHE_MAX_ENTRIES) {
+    const oldestKey = metadataRouteCandidateCache.keys().next().value;
+    if (oldestKey) metadataRouteCandidateCache.delete(oldestKey);
+  }
+  metadataRouteCandidateCache.set(key, {
+    expiresAt: Date.now() + METADATA_ROUTE_CACHE_TTL_MS,
+    candidates: candidates.map((candidate) => ({ ...candidate })),
+  });
 }
 
 export function readKnowledgeCollectionSourceQuality(
@@ -873,13 +964,22 @@ export function rankMetadataRouteCandidates(opts: {
 }): KnowledgeMetadataRouteCandidate[] {
   const excludedIds = opts.excludedIds ?? new Set<string>();
   const limit = opts.limit ?? 5;
+  const cacheKey = metadataRouteCacheKey({
+    collections: opts.collections,
+    routePlan: opts.routePlan,
+    query: opts.query,
+    excludedIds,
+    limit,
+  });
+  const cached = readMetadataRouteCandidateCache(cacheKey);
+  if (cached) return cached;
   const candidatePool = opts.collections.filter((collection) => !excludedIds.has(collection.id));
   const domainScopedPool =
     opts.routePlan && opts.routePlan.domain !== "general" && opts.routePlan.confidence !== "low"
       ? candidatePool.filter((collection) => collectionHasMetadataDomainSupport(collection, opts.routePlan!.domain))
       : [];
   const scoringPool = domainScopedPool.length >= Math.min(limit, 3) ? domainScopedPool : candidatePool;
-  return scoringPool
+  const candidates = scoringPool
     .map((collection) =>
       adaptiveMetadataCandidate(collection, opts.routePlan, opts.query),
     )
@@ -887,6 +987,8 @@ export function rankMetadataRouteCandidates(opts: {
     .filter((candidate) => candidate.score >= 20)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
     .slice(0, limit);
+  writeMetadataRouteCandidateCache(cacheKey, candidates);
+  return candidates;
 }
 
 export function buildKnowledgeRouteDecision(opts: {
@@ -1012,11 +1114,13 @@ const collectionMetadataSelect = {
   id: true,
   name: true,
   visibility: true,
+  updatedAt: true,
   autoMetadata: true,
   owner: { select: { walletAddress: true } },
   documents: {
     select: {
       title: true,
+      updatedAt: true,
       autoMetadata: true,
       chunks: {
         select: { content: true },
