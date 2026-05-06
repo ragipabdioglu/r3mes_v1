@@ -37,7 +37,8 @@
     "eval:adaptive-rag": "pnpm --filter @r3mes/backend-api run eval:adaptive-rag",
     "eval:realistic-rag": "pnpm --filter @r3mes/backend-api run eval:realistic-rag",
     "eval:collection-smoke": "pnpm --filter @r3mes/backend-api run eval:collection-smoke",
-    "knowledge:quality-refresh": "pnpm --filter @r3mes/backend-api run knowledge:quality-refresh"
+    "knowledge:quality-refresh": "pnpm --filter @r3mes/backend-api run knowledge:quality-refresh",
+    "smoke:document-parser": "pnpm --filter @r3mes/backend-api run smoke:document-parser"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

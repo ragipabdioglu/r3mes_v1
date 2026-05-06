@@ -39,6 +39,7 @@
     "smoke:embedding-provider": "node --env-file=.env scripts/smoke-embedding-provider.mjs",
     "smoke:reranker-provider": "node --env-file=.env scripts/smoke-reranker-provider.mjs",
     "smoke:quality-providers": "node scripts/smoke-quality-providers.mjs",
+    "smoke:document-parser": "pnpm exec tsc -p tsconfig.json && node --env-file=.env scripts/smoke-document-parser.mjs",
     "lora:scale": "node scripts/set-llama-lora-scale.mjs",
     "seed:legal-basic-demo": "node --env-file=.env scripts/seed-legal-basic-demo.mjs",
     "seed:legal-divorce-demo": "node --env-file=.env scripts/seed-legal-divorce-demo.mjs",
