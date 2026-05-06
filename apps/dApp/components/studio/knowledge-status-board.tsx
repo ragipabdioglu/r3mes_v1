@@ -90,11 +90,66 @@ function ReadinessBadge({ item }: { item: KnowledgeCollectionListItem }) {
   );
 }
 
+function profileHealthState(item: KnowledgeCollectionListItem): {
+  label: string;
+  hint: string;
+  className: string;
+} {
+  const score = item.profileHealthScore;
+  const scoreText = typeof score === "number" ? ` · ${score}/100` : "";
+  if (item.profileHealthLevel === "healthy") {
+    return {
+      label: `Healthy${scoreText}`,
+      hint: "Profile alanları ve embedding sinyalleri güçlü.",
+      className: "bg-emerald-500/15 text-emerald-100 ring-emerald-500/35",
+    };
+  }
+  if (item.profileHealthLevel === "usable") {
+    return {
+      label: `Usable${scoreText}`,
+      hint: "Profile kullanılabilir; zayıf sinyal varsa broad/suggest yolu korur.",
+      className: "bg-cyan-500/10 text-cyan-100 ring-cyan-500/35",
+    };
+  }
+  if (item.profileHealthLevel === "weak") {
+    return {
+      label: `Weak${scoreText}`,
+      hint: "Profile zayıf; strict karar için temkinli davranılır.",
+      className: "bg-amber-500/10 text-amber-100 ring-amber-500/35",
+    };
+  }
+  const fallback = readinessState(item);
+  return {
+    label: `Profile ${fallback.label}`,
+    hint: `${fallback.hint}. Health skoru için backend yeniden başlatılınca native alanlar görünür.`,
+    className: fallback.className,
+  };
+}
+
+function ProfileHealthBadge({ item }: { item: KnowledgeCollectionListItem }) {
+  const state = profileHealthState(item);
+  return (
+    <span
+      title={state.hint}
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${state.className}`}
+    >
+      {state.label}
+    </span>
+  );
+}
+
 function profileSignal(item: KnowledgeCollectionListItem): string {
   const quality = item.sourceQuality ?? "profile";
   const confidence = item.profileConfidence ?? "unknown";
   const version = item.profileVersion ? `v${item.profileVersion}` : "v-";
-  return `${quality} / ${confidence} / ${version}`;
+  const health = item.profileHealthLevel
+    ? ` / ${item.profileHealthLevel}${typeof item.profileHealthScore === "number" ? ` ${item.profileHealthScore}` : ""}`
+    : "";
+  return `${quality} / ${confidence} / ${version}${health}`;
+}
+
+function profileWarnings(item: KnowledgeCollectionListItem): string[] {
+  return (item.profileHealthWarnings ?? []).slice(0, 4);
 }
 
 function isInternalKnowledgeCollection(collection: KnowledgeCollectionListItem): boolean {
@@ -237,6 +292,9 @@ export function KnowledgeStatusBoard() {
   const privateCount = items.filter((item) => item.visibility === "PRIVATE").length;
   const readyCount = items.filter((item) => readinessState(item).label === "Hazır").length;
   const cautiousCount = items.filter((item) => readinessState(item).label === "Temkinli").length;
+  const healthyProfileCount = items.filter((item) => item.profileHealthLevel === "healthy").length;
+  const usableProfileCount = items.filter((item) => item.profileHealthLevel === "usable").length;
+  const weakProfileCount = items.filter((item) => item.profileHealthLevel === "weak").length;
   const documentCount = items.reduce((sum, item) => sum + item.documentCount, 0);
 
   return (
@@ -288,7 +346,9 @@ export function KnowledgeStatusBoard() {
           </p>
           <p className="mt-2 text-2xl font-semibold text-emerald-50">{readyCount}</p>
           <p className="mt-1 text-[11px] text-emerald-100/60">
-            Auto source için güçlü sinyal
+            {healthyProfileCount + usableProfileCount > 0
+              ? `${healthyProfileCount} healthy · ${usableProfileCount} usable`
+              : "Auto source için güçlü sinyal"}
           </p>
         </div>
         <div className="rounded-2xl border border-amber-500/20 bg-amber-950/10 p-3">
@@ -297,7 +357,7 @@ export function KnowledgeStatusBoard() {
           </p>
           <p className="mt-2 text-2xl font-semibold text-amber-50">{cautiousCount}</p>
           <p className="mt-1 text-[11px] text-amber-100/60">
-            Thin/low profile, broad fallback
+            {weakProfileCount > 0 ? `${weakProfileCount} weak profile` : "Thin/low profile, broad fallback"}
           </p>
         </div>
       </div>
@@ -352,6 +412,7 @@ export function KnowledgeStatusBoard() {
                     </p>
                     <VisibilityBadge visibility={item.visibility} />
                     <ReadinessBadge item={item} />
+                    <ProfileHealthBadge item={item} />
                   </div>
                   <p className="truncate font-mono text-[11px] text-zinc-500">
                     {shortId(item.id)}
@@ -359,6 +420,11 @@ export function KnowledgeStatusBoard() {
                   <p className="text-[11px] leading-relaxed text-zinc-500">
                     {readinessState(item).hint}
                   </p>
+                  {profileWarnings(item).length > 0 ? (
+                    <p className="text-[11px] leading-relaxed text-amber-100/70">
+                      Profile warning: {profileWarnings(item).join(", ")}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="flex flex-wrap gap-2">

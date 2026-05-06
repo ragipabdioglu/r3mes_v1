@@ -15,6 +15,9 @@ export type KnowledgeCollectionListItem = {
   profileConfidence?: "low" | "medium" | "high" | null;
   profileVersion?: number | null;
   lastProfiledAt?: string | null;
+  profileHealthScore?: number | null;
+  profileHealthLevel?: "healthy" | "usable" | "weak" | null;
+  profileHealthWarnings?: string[];
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
