@@ -62,6 +62,15 @@ describe("knowledge parser adapters", () => {
     expect(listKnowledgeParserAdapters().some((parser) => parser.extensions.includes(".pdf"))).toBe(true);
   });
 
+  it("keeps Windows paths intact in external parser args", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(process.argv[1])\" \"C:\\Users\\r3mes\\sample parser\\bridge.py\"";
+
+    const parsed = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+
+    expect(parsed.text).toBe("C:\\Users\\r3mes\\sample parser\\bridge.py");
+  });
+
   it("parses configured pdf/docx files through the external command", () => {
     process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
     process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log('# Parsed document\\nSource bytes: '+require('fs').statSync(process.argv[1]).size)\" {input}";

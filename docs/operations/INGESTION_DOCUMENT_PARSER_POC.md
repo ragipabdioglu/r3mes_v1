@@ -23,6 +23,25 @@ R3MES_DOCUMENT_PARSER_TIMEOUT_MS=30000
 
 Alternatif olarak Marker veya başka bir CLI kullanılabilir. Tek zorunlu kural: komutun ilk temiz çıktısı stdout'ta Markdown/text olmalıdır.
 
+## Hafif Yerel Bridge
+
+Repo, ağır parser bağımlılığı taşımaz. Yerel deneme için opsiyonel bridge script'i vardır:
+
+```bash
+python -m venv .venv-doc-parser
+.\.venv-doc-parser\Scripts\python -m pip install pypdf python-docx
+```
+
+Backend env örneği:
+
+```bash
+R3MES_DOCUMENT_PARSER_COMMAND="C:\path\to\R3MES\.venv-doc-parser\Scripts\python.exe"
+R3MES_DOCUMENT_PARSER_ARGS="\"C:\path\to\R3MES\tools\document-parser-bridge.py\" {input}"
+R3MES_DOCUMENT_PARSER_TIMEOUT_MS=30000
+```
+
+Bu bridge production parser değildir; amacı gerçek PDF/DOCX ingestion kalitesini hızlıca ölçmektir. PDF için `pypdf`, DOCX için `python-docx` kullanır. Tablo/OCR ihtiyacı yüksekse Docling/Marker gibi daha güçlü parser'lar aynı env sözleşmesine bağlanmalıdır.
+
 ## Smoke Test
 
 Built-in parser testi:
@@ -63,3 +82,12 @@ Bir parser'ı Studio UI'da PDF/DOCX için görünür yapmadan önce:
 ## Güvenli Varsayılan
 
 External parser env'i yoksa PDF/DOCX desteklenmez. Bu bilinçli davranıştır; kullanıcıya yanlışlıkla bozuk OCR metni indekslemekten daha güvenlidir.
+
+## Yerel POC Sonucu
+
+2026-05-06 tarihinde izole `.venv-doc-parser` içinde `pypdf`, `python-docx` ve test PDF üretimi için `reportlab` ile smoke yapıldı.
+
+- Sample PDF: `external-document-parser-v1`, `clean`, score `77`, `chunkCount=1`.
+- Sample DOCX: `external-document-parser-v1`, `clean`, score `77`, `chunkCount=1`, tablo Markdown olarak çıktı.
+
+Bu sonuç bridge sözleşmesinin çalıştığını gösterir. Bir sonraki kalite eşiği gerçek kullanıcı PDF/DOCX dosyalarıyla OCR, tablo ve çok sayfalı belge testidir.

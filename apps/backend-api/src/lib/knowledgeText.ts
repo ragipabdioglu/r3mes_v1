@@ -111,18 +111,8 @@ function splitCommandLineArgs(value: string): string[] {
   const args: string[] = [];
   let current = "";
   let quote: "\"" | "'" | null = null;
-  let escaped = false;
 
   for (const char of value) {
-    if (escaped) {
-      current += char;
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaped = true;
-      continue;
-    }
     if (quote) {
       if (char === quote) quote = null;
       else current += char;
