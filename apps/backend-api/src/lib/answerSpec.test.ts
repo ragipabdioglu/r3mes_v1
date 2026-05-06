@@ -107,6 +107,50 @@ describe("buildAnswerSpec", () => {
     expect(spec.action).toBe("Cerrahi işlem öncesi hekime bilgi verilmelidir.");
   });
 
+  it("keeps salient medical query context without turning it into a diagnosis", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "medical",
+      groundingConfidence: "high",
+      userQuery: "HPV pozitif çıktı, takip gerekli mi?",
+      evidence: evidence({
+        answerIntent: "reassure",
+        directAnswerFacts: ["clinical-card: Bu sonuç tek başına panik gerektiren bir anlam taşımaz."],
+        supportingContext: [],
+        usableFacts: [],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.action).toContain("hpv");
+    expect(spec.action).toContain("takip");
+    expect(spec.action).toContain("muayene/kontrol");
+    expect(spec.action).toContain("kesin tanı yerine");
+    expect(spec.facts[0]).toContain("hpv");
+  });
+
+  it("removes dirty OCR scaffolding before composing medical facts", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "medical",
+      groundingConfidence: "high",
+      userQuery: "Smear temiz ama kasık ağrım var, ne yapmalıyım?",
+      evidence: evidence({
+        answerIntent: "steps",
+        directAnswerFacts: [
+          "dirty-note: PDF COPY >>> Kadın doğum poliklinik notu / tarama sonucu TABLO - bulgu - yorum smear: normal gorunuyor - yakınma: ara ara kasık ağrısı OCR HATASI: kasik agriyo.",
+        ],
+        supportingContext: [],
+        usableFacts: [],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.assessment).not.toContain("PDF COPY");
+    expect(spec.assessment).not.toContain("OCR HATASI");
+    expect(spec.assessment).toContain("smear");
+  });
+
   it("removes repeated document headers from extracted facts", () => {
     const spec = buildAnswerSpec({
       answerDomain: "education",

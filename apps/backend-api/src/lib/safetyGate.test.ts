@@ -32,6 +32,22 @@ describe("deterministic safety gate", () => {
     expect(result.metrics.answerLength).toBeGreaterThan(40);
   });
 
+  it("does not treat explicit medical uncertainty as risky treatment advice", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "Kesin tanı veya tedavi önermek doğru olmaz; yakınma sürüyorsa uygun bir sağlık profesyoneliyle görüşün. Soruda belirtilen HPV ve takip bilgisi kesin tanı yerine muayene/kontrol bağlamında değerlendirilmelidir.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
+        user_query: "HPV pozitif çıktı, takip gerekli mi?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+    });
+
+    expect(result.blockedReasons).not.toContain("RISKY_CERTAINTY_OR_TREATMENT");
+  });
+
   it("blocks risky certainty and returns a safe fallback", () => {
     const result = evaluateSafetyGate({
       answerText: "Bu kesin kanserdir, hemen tedaviye başla.",

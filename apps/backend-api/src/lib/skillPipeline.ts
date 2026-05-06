@@ -307,6 +307,10 @@ function normalizeTableLine(line: string): string {
 
 function normalizeDocumentScaffoldFragment(value: string): string {
   const cleaned = value
+    .replace(/\bPDF\s+COPY\s*>{2,}\s*/giu, "")
+    .replace(/\bOCR\s+HATASI\s*:?\s*/giu, "")
+    .replace(/\bTABLO\s*[-:]\s*/giu, "")
+    .replace(/\s*-\s*bulgu\s*-\s*yorum\s*/giu, "; ")
     .replace(/^#+\s*Page\s+\d+\s*/giu, "")
     .replace(/^#+\s*XML Text Fallback\s*/giu, "")
     .replace(/^#+\s*word\/[^\s]+\s*/giu, "")

@@ -23,6 +23,10 @@ function stripSourcePrefix(value: string): string {
 
 function stripDocumentScaffold(value: string): string {
   const cleaned = value
+    .replace(/\bPDF\s+COPY\s*>{2,}\s*/giu, "")
+    .replace(/\bOCR\s+HATASI\s*:?\s*/giu, "")
+    .replace(/\bTABLO\s*[-:]\s*/giu, "")
+    .replace(/\s*-\s*bulgu\s*-\s*yorum\s*/giu, "; ")
     .replace(/^#+\s*Page\s+\d+\s*/giu, "")
     .replace(/^#+\s*XML Text Fallback\s*/giu, "")
     .replace(/^#+\s*word\/[^\s]+\s*/giu, "")
@@ -96,6 +100,84 @@ const FACT_STOPWORDS = new Set([
   "ve",
   "veya",
 ]);
+
+const MEDICAL_QUERY_CONTEXT_STOPWORDS = new Set([
+  ...FACT_STOPWORDS,
+  "acil",
+  "artık",
+  "artik",
+  "bana",
+  "bende",
+  "bunun",
+  "çıktı",
+  "cikti",
+  "daha",
+  "devam",
+  "ediyor",
+  "etmeli",
+  "etmeliyim",
+  "gerekiyor",
+  "halen",
+  "hala",
+  "hemen",
+  "kötü",
+  "kotu",
+  "miyim",
+  "mıyım",
+  "olmalı",
+  "olmali",
+  "sonuc",
+  "sonuç",
+  "sonucu",
+  "tekrar",
+  "temkinli",
+]);
+
+function medicalQueryContextTerms(query: string, existingText: string): string[] {
+  const existing = normalizeForFactMatch(existingText);
+  const normalizedQuery = normalizeForFactMatch(query);
+  const tokens = normalizedQuery
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !MEDICAL_QUERY_CONTEXT_STOPWORDS.has(token));
+  const prioritized = tokens
+    .map((token, index) => {
+      const canonicalToken =
+        token.startsWith("temiz") ? "temiz"
+        : token.startsWith("takip") ? "takip"
+        : token.startsWith("kasik") || token.startsWith("kasig") ? "kasik"
+        : token.startsWith("kist") ? "kist"
+        : token.startsWith("boyut") ? "boyut"
+        : token.startsWith("smear") ? "smear"
+        : token.startsWith("biyops") ? "biyopsi"
+        : token.startsWith("patoloj") ? "patoloji"
+        : token;
+      let score = 0;
+      if (/^(hpv|asc|ascus|asc-us|smear|biyopsi|patoloji|kist|boyut|takip|kasik|kanama|lekelenme|gebelik|hamile|temiz|muayene)$/u.test(canonicalToken)) score += 20;
+      if (/^(agri|agrisi|agriyor)$/u.test(canonicalToken)) score += 5;
+      if (!existing.includes(canonicalToken)) score += 6;
+      return { token: canonicalToken, index, score };
+    })
+    .filter(({ score }) => score >= 10)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ token }) => token);
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const token of prioritized) {
+    if (seen.has(token)) continue;
+    seen.add(token);
+    terms.push(token);
+    if (terms.length >= 4) break;
+  }
+  return terms;
+}
+
+function medicalQueryContextFact(query: string, existingText: string): string | null {
+  const terms = medicalQueryContextTerms(query, existingText);
+  if (terms.length === 0) return null;
+  const joined = terms.join(", ");
+  return `Soruda belirtilen ${joined} bilgisi kaynak yanıtını yorumlarken korunmalı; bu başlıklar kesin tanı yerine uygun muayene/kontrol bağlamında değerlendirilmelidir.`;
+}
 
 function factTokens(value: string): string[] {
   return normalizeForFactMatch(value)
@@ -177,8 +259,13 @@ export function buildAnswerSpec(opts: {
   ]);
   const facts = cleanValues([...directFacts, ...supportingFacts, ...usableFacts]);
   const contradictionUnknowns = unknowns.filter((item) => /çeliş|celis/u.test(item.toLocaleLowerCase("tr-TR")));
+  const queryContextFact =
+    opts.answerDomain === "medical"
+      ? medicalQueryContextFact(opts.userQuery, [...facts, ...riskFacts, ...unknowns].join(" "))
+      : null;
   const assessment = directFacts[0] ?? usableFacts[0] ?? "Kaynaklarda bu soruya doğrudan sınırlı bilgi bulundu.";
   const action =
+    queryContextFact ??
     firstUsefulFact(supportingFacts, opts.userQuery, [assessment]) ??
     firstUsefulFact(directFacts, opts.userQuery, [assessment]) ??
     firstUsefulFact(usableFacts, opts.userQuery, [assessment]) ??
@@ -206,7 +293,7 @@ export function buildAnswerSpec(opts: {
     summary,
     unknowns: unknowns.slice(0, 4),
     sourceIds: opts.evidence?.sourceIds ?? [],
-    facts: facts.slice(0, 6),
+    facts: cleanValues([queryContextFact ?? "", ...facts]).slice(0, 6),
   };
 }
 

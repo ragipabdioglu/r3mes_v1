@@ -147,6 +147,7 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
       `${policy.answerLabels.action}: ${sentence(action)}`,
       `${policy.answerLabels.caution}: ${sentence(caution)}`,
     );
+    if (relevantFact) lines.push(`Ek kontrol: ${sentence(relevantFact)}`);
     return lines.join("\n");
   }
 
