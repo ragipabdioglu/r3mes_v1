@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 import html
 import sys
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -94,7 +96,40 @@ def parse_docx(path: Path) -> str:
         table_md = markdown_table(rows)
         if table_md:
             sections.append(f"## Table {table_index}\n\n{table_md}")
+
+    parsed = "\n\n".join(sections)
+    xml_fallback = parse_docx_xml_text(path)
+    if len(normalize_text(xml_fallback)) > len(normalize_text(parsed)) * 2:
+        sections.append("## XML Text Fallback")
+        sections.append(xml_fallback)
     return "\n\n".join(sections)
+
+
+def parse_docx_xml_text(path: Path) -> str:
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    parts: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = [
+                name
+                for name in archive.namelist()
+                if name.startswith("word/") and name.endswith(".xml") and not name.endswith(".rels")
+            ]
+            for name in sorted(names):
+                try:
+                    root = ET.fromstring(archive.read(name))
+                except ET.ParseError:
+                    continue
+                texts = [
+                    node.text.strip()
+                    for node in root.findall(".//w:t", namespace)
+                    if node.text and node.text.strip()
+                ]
+                if texts:
+                    parts.append(f"### {name}\n\n" + "\n".join(texts))
+    except zipfile.BadZipFile:
+        return ""
+    return normalize_text("\n\n".join(parts))
 
 
 def main() -> None:

@@ -113,3 +113,27 @@ Kaynak sayfaları:
 - `https://www.birmingham.gov.uk/downloads/file/3460/safeguarding_file_chronology_sheet`
 
 Bu POC sırasında Windows ortamında PDF text output'u `cp1254` stdout encoding'e takılabildiği için bridge stdout/stderr UTF-8'e sabitlendi.
+
+## Türkçe Gerçek Corpus POC
+
+2026-05-06 tarihinde Türkçe kurum PDF/DOCX dosyaları `artifacts/real-ingestion-corpus-tr/` altına indirildi. Dosyalar repo'ya commit edilmez; kaynak linkleri ve smoke sonucu burada tutulur.
+
+| Dosya | Kaynak | Tür | Sonuç |
+| --- | --- | --- | --- |
+| `tr-adalet-aile-ve-miras-hukuku.pdf` | Adalet Bakanlığı, Aile ve Miras Hukuku | PDF | `clean`, score `87`, `chunkCount=388` |
+| `tr-meb-veli-bilgilendirme-rehberi.pdf` | MEB, Veli Bilgilendirme Rehberi | PDF | `clean`, score `87`, `chunkCount=8` |
+| `tr-saglik-verem-bilgilendirme-rehberi.pdf` | Sağlık Bakanlığı, Verem Bilgilendirme Rehberi | PDF | `clean`, score `87`, `chunkCount=54` |
+| `tr-saglik-antikoagulan-hasta-bilgilendirme.docx` | Malatya ESH, Antikoagülan Hasta Bilgilendirme Kartı | DOCX | `clean`, score `81`, `chunkCount=5` |
+| `tr-saglik-hastanin-bilgilendirilmesi-talimat.docx` | Kilis ADSM, Hastanın Bilgilendirilmesi Talimatı | DOCX | `clean`, score `81`, `chunkCount=5` |
+| `tr-saglik-hasta-bilgilendirme-riza-onam.docx` | Kilis ADSM, Hasta Bilgilendirme Rıza Onam Formu | DOCX | `usable`, score `59`, `chunkCount=1`, warning `fragmented_lines` |
+
+Kaynak sayfaları:
+
+- `https://adb.adalet.gov.tr/`
+- `https://ogm.meb.gov.tr/`
+- `https://hsgm.saglik.gov.tr/`
+- `https://kilisadsm.saglik.gov.tr/TR-863574/formlar.html`
+- `https://kilisadsm.saglik.gov.tr/TR-863569/talimatlar.html`
+- `https://malatyaesh.saglik.gov.tr/TR-203681/hasta-yakini-bilgilendirme.html`
+
+Bu POC sırasında bazı DOCX dosyalarında metnin normal paragraph/table yerine XML header/footer veya shape alanlarında kalabildiği görüldü. Bridge, `python-docx` çıktısı çok zayıf kaldığında `word/*.xml` içindeki `w:t` metinlerini yedek kaynak olarak okuyacak şekilde genişletildi. Bu davranış production parser yerine kalite sinyaliyle birlikte POC amaçlıdır; zayıf belge yine `usable/noisy` seviyede kalmalı ve profile health bu sinyali dikkate almalıdır.
