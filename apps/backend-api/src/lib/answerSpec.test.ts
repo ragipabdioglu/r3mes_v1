@@ -151,4 +151,26 @@ describe("buildAnswerSpec", () => {
     expect(spec.assessment).toBe("Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.");
     expect(spec.action).toBe("Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.");
   });
+
+  it("prefers complete duplicate evidence over a clipped duplicate", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "education",
+      groundingConfidence: "high",
+      userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",
+      evidence: evidence({
+        answerIntent: "steps",
+        directAnswerFacts: [
+          "MEB Veli Bilgilendirme Rehberi: Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirere",
+          "MEB Veli Bilgilendirme Rehberi: Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.",
+        ],
+        supportingContext: [],
+        usableFacts: [],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.assessment).toContain("okuluna göndermeyiniz");
+    expect(spec.assessment).not.toMatch(/bilgilendirere(?:\s|$)/u);
+  });
 });

@@ -279,18 +279,56 @@ function normalizeTableLine(line: string): string {
   return cells.join(" - ");
 }
 
+function normalizeDocumentScaffoldFragment(value: string): string {
+  const cleaned = value
+    .replace(/^#+\s*Page\s+\d+\s*/giu, "")
+    .replace(/^#+\s*XML Text Fallback\s*/giu, "")
+    .replace(/^#+\s*word\/[^\s]+\s*/giu, "")
+    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9()[\]\s_-]{8,})\s+\d+\s*[•\-–:]\s*/u, "")
+    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9()[\]\s_-]{8,})\s+\d+\s+/u, "")
+    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ0-9()[\]\s_-]{24,}?)\s+(?=(Bu|Bu\s+ilaç|Eğer|Eller|Okul|Öğrenci|Hasta|Veli|Kaynak|Amaç)\b)/u, "")
+    .trim();
+  const letters = cleaned.match(/\p{L}/gu) ?? [];
+  const uppercaseLetters = cleaned.match(/\p{Lu}/gu) ?? [];
+  if (letters.length >= 6 && uppercaseLetters.length / letters.length > 0.85 && cleaned.length <= 140) return "";
+  return cleaned;
+}
+
+function fragmentQualityScore(value: string): number {
+  const normalized = value.trim();
+  if (!normalized) return -100;
+  const tokenCount = normalizeConceptText(normalized).split(/\s+/).filter((token) => token.length >= 3).length;
+  const actionBonus = /(göndermeyiniz|göndermeyin|bilgilendir|başvur|kontrol|hazır|sakla|denenmel|planlan|yapılmal|edilmel|olmalıdır|olmalidir)/iu.test(normalized)
+    ? 5
+    : 0;
+  const completeBonus = /[.!?]$/u.test(normalized) ? 3 : 0;
+  const incompleteLongPenalty = !/[.!?]$/u.test(normalized) && normalized.length >= 60 ? 10 : 0;
+  const lengthBonus = normalized.length >= 35 && normalized.length <= 260 ? 2 : normalized.length < 20 ? -4 : 0;
+  const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(normalized) ? 8 : 0;
+  const truncationPenalty = /[…]|\.{3}$/u.test(normalized) ? 6 : 0;
+  return tokenCount + actionBonus + completeBonus + lengthBonus - scaffoldPenalty - truncationPenalty - incompleteLongPenalty;
+}
+
 function sentenceFragments(text: string, limit = 2): string[] {
   const normalized = text
     .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/\s+[•]\s+/g, "\n")
     .split(/\n+/)
     .map(normalizeTableLine)
+    .map(normalizeDocumentScaffoldFragment)
     .filter(Boolean)
     .join("\n");
-  return normalized
+  const fragments = normalized
     .split(/(?<=[.!?])\s+|\n+/)
     .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, limit);
+    .map(normalizeDocumentScaffoldFragment)
+    .filter(Boolean);
+  return fragments
+    .map((fragment, index) => ({ fragment, index, score: fragmentQualityScore(fragment) }))
+    .filter(({ score }) => score > -8)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map(({ fragment }) => fragment);
 }
 
 function tokenizeForOverlap(text: string): string[] {
@@ -397,10 +435,19 @@ function evidenceLine(prefix: string, value: string): string {
   return trimmed ? `${prefix}: ${trimmed}` : "";
 }
 
-function compactEvidenceLine(line: string, maxChars = 220): string {
+function compactEvidenceLine(line: string, maxChars = 320): string {
   const normalized = line.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, maxChars - 1).trim()}…`;
+  const clipped = normalized.slice(0, maxChars).trim();
+  const lastPunctuation = Math.max(
+    clipped.lastIndexOf("."),
+    clipped.lastIndexOf("!"),
+    clipped.lastIndexOf("?"),
+  );
+  if (lastPunctuation >= 80) return clipped.slice(0, lastPunctuation + 1).trim();
+  const lastSeparator = Math.max(clipped.lastIndexOf(";"), clipped.lastIndexOf(","));
+  if (lastSeparator >= 80) return clipped.slice(0, lastSeparator).trim();
+  return clipped.replace(/\s+\S*$/, "").trim();
 }
 
 const NEGATION_PATTERNS = [

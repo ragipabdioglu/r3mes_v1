@@ -112,13 +112,14 @@ function factQualityScore(value: string, userQuery: string): number {
     ? 4
     : 0;
   const sentenceBonus = /[.!?]$/u.test(value.trim()) ? 1 : 0;
+  const incompleteLongPenalty = !/[.!?]$/u.test(value.trim()) && value.trim().length >= 60 ? 10 : 0;
   const lengthBonus = value.length >= 45 && value.length <= 260 ? 2 : value.length < 24 ? -4 : 0;
   const truncationPenalty = /[…]|\.{3}$/u.test(value) ? 5 : 0;
   const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(value) ? 6 : 0;
   const genericPenalty = /(doğru ve güvenilir kaynaklardan bilgi edin|kaynakta özel alarm|kaynakta açık dayanak yoksa)/iu.test(value)
     ? 3
     : 0;
-  return overlap * 6 + directActionBonus + sentenceBonus + lengthBonus - truncationPenalty - scaffoldPenalty - genericPenalty;
+  return overlap * 6 + directActionBonus + sentenceBonus + lengthBonus - truncationPenalty - scaffoldPenalty - genericPenalty - incompleteLongPenalty;
 }
 
 function prioritizeFacts(values: string[], userQuery: string): string[] {

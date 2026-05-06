@@ -316,6 +316,28 @@ Rollback planı production migration öncesi gerekli değil, doğrudan migration
     expect(extraction.missingInfo).toEqual([]);
   });
 
+  it("prefers complete actionable document snippets over PDF headings and clipped fragments", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",
+      cards: [
+        {
+          sourceId: "meb-veli",
+          title: "MEB Veli Bilgilendirme Rehberi",
+          rawContent: `## Kullanılabilir Bilgiler
+VELİ BİLGİLENDİRME REHBERİ 13 ÖNEMSEYİNİZ!
+## Page 16 VELİ BİLGİLENDİRME REHBERİ 15 • Doğru ve güvenilir kaynaklardan bilgi edinerek salgın hastalıklar konusunda öğrencimizi bilinçlendiriniz.(*) • Bakanlığımız ve yetkili kurumlarca yapılan açıklamaları takip ediniz.
+Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.`,
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts[0]).toContain("Yüksek ateş");
+    expect(extraction.usableFacts[0]).toContain("okuluna göndermeyiniz");
+    expect(extraction.usableFacts.join(" ")).not.toContain("ÖNEMSEYİNİZ");
+    expect(extraction.usableFacts.join(" ")).not.toContain("…");
+    expect(extraction.usableFacts.join(" ")).not.toMatch(/bilgilendirere(?:\s|$)/u);
+  });
+
   it("extracts evidence from education markdown headings without card-specific labels", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "RAM raporu sonrası BEP planını okulda nasıl konuşmalıyım?",
