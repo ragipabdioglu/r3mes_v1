@@ -94,6 +94,55 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(merged?.profile?.entityEmbedding).toHaveLength(256);
   });
 
+  it("preserves aggregate parse quality while merging collection metadata", () => {
+    const clean = inferKnowledgeAutoMetadata({
+      title: "temiz runbook",
+      content: "Migration öncesinde staging ortamında doğrulama yapılmalı ve yedek alınmalıdır.",
+    });
+    clean.parseQuality = {
+      score: 88,
+      level: "clean",
+      warnings: [],
+      signals: {
+        textLength: 600,
+        chunkCount: 2,
+        averageChunkChars: 300,
+        replacementCharRatio: 0,
+        mojibakeMarkerCount: 0,
+        controlCharRatio: 0,
+        symbolRatio: 0.01,
+        shortLineRatio: 0.1,
+        structureSignalCount: 2,
+      },
+    };
+    const noisy = inferKnowledgeAutoMetadata({
+      title: "bozuk runbook",
+      content: "Migration log kontrolü ve rollback planı doğrulanmalıdır.",
+    });
+    noisy.parseQuality = {
+      score: 34,
+      level: "noisy",
+      warnings: ["mojibake_detected"],
+      signals: {
+        textLength: 500,
+        chunkCount: 1,
+        averageChunkChars: 500,
+        replacementCharRatio: 0.01,
+        mojibakeMarkerCount: 9,
+        controlCharRatio: 0,
+        symbolRatio: 0.04,
+        shortLineRatio: 0.2,
+        structureSignalCount: 1,
+      },
+    };
+
+    const merged = mergeKnowledgeAutoMetadata([clean, noisy]);
+
+    expect(merged?.parseQuality?.level).toBe("noisy");
+    expect(merged?.parseQuality?.score).toBe(61);
+    expect(merged?.parseQuality?.warnings).toContain("mojibake_detected");
+  });
+
   it("builds a weighted collection profile for adaptive routing", () => {
     const legal = inferKnowledgeAutoMetadata({
       title: "boşanma hazırlık",

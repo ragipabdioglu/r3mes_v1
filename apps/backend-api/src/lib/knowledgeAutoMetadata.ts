@@ -115,6 +115,37 @@ function collectionSourceQualityForItems(items: KnowledgeAutoMetadata[]): Knowle
   return "thin";
 }
 
+function aggregateParseQuality(items: KnowledgeAutoMetadata[]): KnowledgeParseQuality | undefined {
+  const qualities = items.map((item) => item.parseQuality).filter((item): item is KnowledgeParseQuality => Boolean(item));
+  if (qualities.length === 0) return undefined;
+  const averageScore = Math.round(qualities.reduce((sum, item) => sum + item.score, 0) / qualities.length);
+  const noisyCount = qualities.filter((item) => item.level === "noisy").length;
+  const usableCount = qualities.filter((item) => item.level === "usable").length;
+  const level: KnowledgeParseQuality["level"] =
+    noisyCount > 0 && noisyCount / qualities.length >= 0.34
+      ? "noisy"
+      : usableCount + noisyCount > 0
+        ? "usable"
+        : "clean";
+  const warnings = unique(qualities.flatMap((item) => item.warnings), 16);
+  return {
+    score: averageScore,
+    level,
+    warnings,
+    signals: {
+      textLength: Math.round(qualities.reduce((sum, item) => sum + item.signals.textLength, 0) / qualities.length),
+      chunkCount: qualities.reduce((sum, item) => sum + item.signals.chunkCount, 0),
+      averageChunkChars: Math.round(qualities.reduce((sum, item) => sum + item.signals.averageChunkChars, 0) / qualities.length),
+      replacementCharRatio: Number((qualities.reduce((sum, item) => sum + item.signals.replacementCharRatio, 0) / qualities.length).toFixed(5)),
+      mojibakeMarkerCount: qualities.reduce((sum, item) => sum + item.signals.mojibakeMarkerCount, 0),
+      controlCharRatio: Number((qualities.reduce((sum, item) => sum + item.signals.controlCharRatio, 0) / qualities.length).toFixed(5)),
+      symbolRatio: Number((qualities.reduce((sum, item) => sum + item.signals.symbolRatio, 0) / qualities.length).toFixed(5)),
+      shortLineRatio: Number((qualities.reduce((sum, item) => sum + item.signals.shortLineRatio, 0) / qualities.length).toFixed(5)),
+      structureSignalCount: Math.round(qualities.reduce((sum, item) => sum + item.signals.structureSignalCount, 0) / qualities.length),
+    },
+  };
+}
+
 function confidenceForProfile(items: KnowledgeAutoMetadata[], sourceQuality: KnowledgeAutoMetadata["sourceQuality"]): KnowledgeCollectionProfile["confidence"] {
   const meaningfulItems = items.filter(hasMeaningfulProfileSignal);
   if (sourceQuality === "structured" && meaningfulItems.length >= 1) return "high";
@@ -517,6 +548,7 @@ export function mergeKnowledgeAutoMetadata(
     summary: compactSummary(items.map((item) => item.summary).filter(Boolean).join(" "), 520),
     questionsAnswered: unique(items.flatMap((item) => item.questionsAnswered), 10),
     sourceQuality: collectionSourceQualityForItems(items),
+    parseQuality: aggregateParseQuality(items),
   };
   return {
     ...mergedBase,

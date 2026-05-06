@@ -21,6 +21,9 @@ export interface KnowledgeProfileHealth {
     hasProfileText: boolean;
     hasSummary: boolean;
     hasLastProfiledAt: boolean;
+    parseQualityScore: number | null;
+    parseQualityLevel: "clean" | "usable" | "noisy" | null;
+    parseQualityWarningCount: number;
   };
 }
 
@@ -47,6 +50,26 @@ function readConfidence(value: unknown): KnowledgeProfileHealth["signals"]["conf
   return value === "high" || value === "medium" || value === "low" ? value : null;
 }
 
+function readParseQuality(value: unknown): {
+  score: number | null;
+  level: "clean" | "usable" | "noisy" | null;
+  warningCount: number;
+} {
+  if (!value || typeof value !== "object") {
+    return { score: null, level: null, warningCount: 0 };
+  }
+  const record = value as Record<string, unknown>;
+  const level = record.level === "clean" || record.level === "usable" || record.level === "noisy" ? record.level : null;
+  const score = typeof record.score === "number" && Number.isFinite(record.score)
+    ? Math.max(0, Math.min(100, Math.round(record.score)))
+    : null;
+  return {
+    score,
+    level,
+    warningCount: stringArray(record.warnings).length,
+  };
+}
+
 function scoreCount(count: number, fullAt: number, points: number): number {
   if (count <= 0) return 0;
   return Math.min(points, (count / fullAt) * points);
@@ -63,6 +86,7 @@ export function scoreKnowledgeProfileHealth(autoMetadata: unknown): KnowledgePro
   const metadata = autoMetadata && typeof autoMetadata === "object" ? autoMetadata as Record<string, unknown> : {};
   const sourceQuality = readSourceQuality(profile?.sourceQuality ?? metadata.sourceQuality);
   const confidence = readConfidence(profile?.confidence);
+  const parseQuality = readParseQuality(metadata.parseQuality);
   const embeddingFields = [
     "profileEmbedding",
     "summaryEmbedding",
@@ -96,10 +120,21 @@ export function scoreKnowledgeProfileHealth(autoMetadata: unknown): KnowledgePro
     hasProfileText: typeof profile?.profileText === "string" && profile.profileText.trim().length > 0,
     hasSummary: typeof profile?.summary === "string" && profile.summary.trim().length > 0,
     hasLastProfiledAt: typeof profile?.lastProfiledAt === "string" && profile.lastProfiledAt.trim().length > 0,
+    parseQualityScore: parseQuality.score,
+    parseQualityLevel: parseQuality.level,
+    parseQualityWarningCount: parseQuality.warningCount,
   };
   const qualityScore = sourceQuality === "structured" ? 18 : sourceQuality === "inferred" ? 11 : sourceQuality === "thin" ? 4 : 0;
   const confidenceScore = confidence === "high" ? 10 : confidence === "medium" ? 6 : confidence === "low" ? 2 : 0;
-  const score = Math.round(Math.max(0, Math.min(100,
+  const parseQualityScore =
+    parseQuality.level === "clean"
+      ? 6
+      : parseQuality.level === "usable"
+        ? 3
+        : parseQuality.level === "noisy"
+          ? -26
+          : 0;
+  const rawScore = Math.round(Math.max(0, Math.min(100,
     (signals.hasProfile ? 8 : 0) +
     qualityScore +
     confidenceScore +
@@ -113,8 +148,10 @@ export function scoreKnowledgeProfileHealth(autoMetadata: unknown): KnowledgePro
     scoreCount(signals.embeddingFieldCount, 5, 10) +
     (signals.hasProfileText ? 5 : 0) +
     (signals.hasSummary ? 4 : 0) +
-    (signals.hasLastProfiledAt ? 3 : 0)
+    (signals.hasLastProfiledAt ? 3 : 0) +
+    parseQualityScore
   )));
+  const score = parseQuality.level === "noisy" ? Math.min(rawScore, 77) : rawScore;
   const warnings: string[] = [];
   if (!signals.hasProfile) warnings.push("missing_profile");
   if (sourceQuality === "thin") warnings.push("thin_source_quality");
@@ -125,6 +162,8 @@ export function scoreKnowledgeProfileHealth(autoMetadata: unknown): KnowledgePro
   if (signals.topicPhraseCount < 4) warnings.push("low_topic_phrase_coverage");
   if (signals.sampleQuestionCount === 0) warnings.push("missing_sample_questions");
   if (!signals.hasSummary) warnings.push("missing_summary");
+  if (parseQuality.level === "noisy") warnings.push("noisy_parse_quality");
+  if (parseQuality.level === "usable" && parseQuality.warningCount > 0) warnings.push("usable_parse_quality_with_warnings");
 
   return {
     score,

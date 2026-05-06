@@ -33,6 +33,22 @@ describe("scoreKnowledgeProfileHealth", () => {
         keywordsEmbedding: [1],
         entityEmbedding: [1],
       },
+      parseQuality: {
+        score: 91,
+        level: "clean",
+        warnings: [],
+        signals: {
+          textLength: 1200,
+          chunkCount: 3,
+          averageChunkChars: 400,
+          replacementCharRatio: 0,
+          mojibakeMarkerCount: 0,
+          controlCharRatio: 0,
+          symbolRatio: 0.01,
+          shortLineRatio: 0.1,
+          structureSignalCount: 3,
+        },
+      },
     });
 
     expect(health.level).toBe("healthy");
@@ -60,5 +76,53 @@ describe("scoreKnowledgeProfileHealth", () => {
       "low_answerable_concept_coverage",
       "missing_sample_questions",
     ]));
+  });
+
+  it("downgrades otherwise rich profiles when parse quality is noisy", () => {
+    const health = scoreKnowledgeProfileHealth({
+      sourceQuality: "structured",
+      profile: {
+        version: 2,
+        profileVersion: 2,
+        domains: ["medical"],
+        subtopics: ["triage", "symptom", "follow-up"],
+        keywords: Array.from({ length: 12 }, (_, index) => `keyword-${index}`),
+        entities: ["baş ağrısı", "ateş", "muayene", "takip", "belirti"],
+        topicPhrases: Array.from({ length: 9 }, (_, index) => `topic phrase ${index}`),
+        answerableConcepts: Array.from({ length: 12 }, (_, index) => `concept ${index}`),
+        negativeHints: [],
+        sampleQuestions: ["Baş ağrısında ne zaman doktora gidilmeli?"],
+        sourceQuality: "structured",
+        confidence: "high",
+        profileText: "Rich but noisy profile",
+        summary: "Sağlık triyaj notları.",
+        lastProfiledAt: "2026-05-06T00:00:00.000Z",
+        profileEmbedding: [1],
+        summaryEmbedding: [1],
+        sampleQuestionsEmbedding: [1],
+        keywordsEmbedding: [1],
+        entityEmbedding: [1],
+      },
+      parseQuality: {
+        score: 34,
+        level: "noisy",
+        warnings: ["mojibake_detected"],
+        signals: {
+          textLength: 900,
+          chunkCount: 2,
+          averageChunkChars: 450,
+          replacementCharRatio: 0.01,
+          mojibakeMarkerCount: 12,
+          controlCharRatio: 0,
+          symbolRatio: 0.04,
+          shortLineRatio: 0.2,
+          structureSignalCount: 2,
+        },
+      },
+    });
+
+    expect(health.level).toBe("usable");
+    expect(health.warnings).toContain("noisy_parse_quality");
+    expect(health.score).toBeLessThan(78);
   });
 });
