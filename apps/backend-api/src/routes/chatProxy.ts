@@ -31,6 +31,7 @@ import { retrieveKnowledgeContext } from "../lib/knowledgeRetrieval.js";
 import { retrieveKnowledgeContextQdrant } from "../lib/qdrantRetrieval.js";
 import { renderGroundedMedicalAnswer } from "../lib/renderMedicalAnswer.js";
 import { buildRouteDecisionLogEvent } from "../lib/routeDecisionLog.js";
+import { resolveRetrievalBudget } from "../lib/retrievalBudget.js";
 import { evaluateSafetyGate } from "../lib/safetyGate.js";
 import type { DomainRoutePlan } from "../lib/queryRouter.js";
 import type { EvidenceExtractorOutput, QueryPlannerOutput } from "../lib/skillPipeline.js";
@@ -1319,6 +1320,12 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
 
       const accessibleCollectionIds = accessibleCollections.map((item) => item.id);
       const retrievalTrace = chatTrace.start("retrieval");
+      const retrievalBudget = resolveRetrievalBudget({
+        routePlan,
+        requestedCollectionIds,
+        includePublic,
+        query: retrievalQuery,
+      });
       const retrieval =
         retrievalQuery && accessibleCollectionIds.length > 0
           ? await (async () => {
@@ -1329,6 +1336,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                   evidenceQuery: retrievalQuery,
                   accessibleCollectionIds,
                   routePlan,
+                  limit: retrievalBudget.sourceLimit,
+                  budgetMode: retrievalBudget.mode,
                 });
                 return {
                   ...hybridRetrieval,
@@ -1394,6 +1403,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         sourceCount: retrieval.sources.length,
         contextLength: retrieval.contextText.length,
         hasEvidence: Boolean(retrieval.evidence),
+        budgetDecision: retrievalBudget,
         diagnostics: summarizeRetrievalDiagnostics(retrieval.retrievalDiagnostics ?? undefined),
       });
 

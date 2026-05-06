@@ -143,6 +143,7 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.sources).toEqual([]);
     expect(result.lowGroundingConfidence).toBe(true);
     expect(result.diagnostics.budget).toMatchObject({
+      budgetMode: "normal_rag",
       requestedSourceLimit: 3,
       finalSourceLimit: 3,
       finalSourceCount: 0,
@@ -224,6 +225,22 @@ describe("true hybrid retrieval helpers", () => {
     expect(ranked).toHaveLength(2);
     expect(ranked[0]?.chunk.id).toBe("tech-1");
     expect(ranked.map((item) => item.chunk.id)).not.toContain("legal-1");
+  });
+
+  it("records caller-provided retrieval budget mode in diagnostics", async () => {
+    const result = await retrieveKnowledgeContextTrueHybrid({
+      query: "test",
+      accessibleCollectionIds: [],
+      limit: 2,
+      budgetMode: "fast_grounded",
+      routePlan: null,
+    });
+
+    expect(result.diagnostics.budget).toMatchObject({
+      budgetMode: "fast_grounded",
+      requestedSourceLimit: 2,
+      finalSourceLimit: 2,
+    });
   });
 
   it("drops same-domain wrong-topic candidates before evidence extraction", () => {

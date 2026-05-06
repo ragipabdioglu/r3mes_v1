@@ -19,6 +19,7 @@ import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStor
 import type { DomainRoutePlan } from "./queryRouter.js";
 import { getEvidenceExtractorBudget, runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
+import type { RetrievalBudgetMode } from "./retrievalBudget.js";
 
 export interface HybridKnowledgeChunk {
   id: string;
@@ -70,6 +71,7 @@ export interface HybridRetrievedKnowledgeContext {
     reranker: RerankDiagnostics;
     budget: {
       contextMode: "compact" | "detailed";
+      budgetMode: RetrievalBudgetMode;
       requestedSourceLimit: number;
       finalSourceLimit: number;
       finalSourceCount: number;
@@ -183,6 +185,7 @@ function getRagContextMode(): "compact" | "detailed" {
 }
 
 function buildBudgetDiagnostics(opts: {
+  budgetMode?: RetrievalBudgetMode;
   requestedSourceLimit: number;
   finalSourceLimit: number;
   finalSourceCount: number;
@@ -192,6 +195,7 @@ function buildBudgetDiagnostics(opts: {
   const evidenceBudget = getEvidenceExtractorBudget();
   return {
     contextMode: getRagContextMode(),
+    budgetMode: opts.budgetMode ?? "normal_rag",
     requestedSourceLimit: opts.requestedSourceLimit,
     finalSourceLimit: opts.finalSourceLimit,
     finalSourceCount: opts.finalSourceCount,
@@ -609,11 +613,13 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   evidenceQuery?: string;
   accessibleCollectionIds: string[];
   limit?: number;
+  budgetMode?: RetrievalBudgetMode;
   routePlan?: DomainRoutePlan | null;
 }): Promise<HybridRetrievedKnowledgeContext> {
   const { query, evidenceQuery = query, accessibleCollectionIds, routePlan = null } = opts;
   const requestedSourceLimit = opts.limit ?? 3;
   const limit = finalSourceLimit(requestedSourceLimit);
+  const budgetMode = opts.budgetMode ?? "normal_rag";
   if (accessibleCollectionIds.length === 0) {
     return {
       contextText: "",
@@ -631,6 +637,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         alignment: emptyAlignmentDiagnostics(),
         reranker: emptyRerankDiagnostics(),
         budget: buildBudgetDiagnostics({
+          budgetMode,
           requestedSourceLimit,
           finalSourceLimit: limit,
           finalSourceCount: 0,
@@ -672,6 +679,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         alignment: emptyAlignmentDiagnostics(),
         reranker: emptyRerankDiagnostics(),
         budget: buildBudgetDiagnostics({
+          budgetMode,
           requestedSourceLimit,
           finalSourceLimit: limit,
           finalSourceCount: 0,
@@ -707,6 +715,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           inputCandidateCount: candidatesForRerank.length,
         }),
         budget: buildBudgetDiagnostics({
+          budgetMode,
           requestedSourceLimit,
           finalSourceLimit: limit,
           finalSourceCount: 0,
@@ -732,6 +741,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         alignment: alignedPreRanked.diagnostics,
         reranker: emptyRerankDiagnostics(),
         budget: buildBudgetDiagnostics({
+          budgetMode,
           requestedSourceLimit,
           finalSourceLimit: limit,
           finalSourceCount: 0,
@@ -790,6 +800,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         alignment: finalAlignmentDiagnostics,
         reranker: rerankRun.diagnostics,
         budget: buildBudgetDiagnostics({
+          budgetMode,
           requestedSourceLimit,
           finalSourceLimit: limit,
           finalSourceCount: 0,
@@ -844,6 +855,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         alignment: scopedOutAlignmentDiagnostics,
         reranker: rerankRun.diagnostics,
         budget: buildBudgetDiagnostics({
+          budgetMode,
           requestedSourceLimit,
           finalSourceLimit: limit,
           finalSourceCount: 0,
@@ -890,6 +902,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       alignment: finalAlignmentDiagnostics,
       reranker: rerankRun.diagnostics,
       budget: buildBudgetDiagnostics({
+        budgetMode,
         requestedSourceLimit,
         finalSourceLimit: limit,
         finalSourceCount: finalCandidates.length,
