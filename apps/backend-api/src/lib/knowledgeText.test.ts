@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   getKnowledgeParserForFilename,
@@ -8,6 +8,16 @@ import {
 } from "./knowledgeText.js";
 
 describe("knowledge parser adapters", () => {
+  const originalParserCommand = process.env.R3MES_DOCUMENT_PARSER_COMMAND;
+  const originalParserArgs = process.env.R3MES_DOCUMENT_PARSER_ARGS;
+
+  afterEach(() => {
+    if (originalParserCommand === undefined) delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
+    else process.env.R3MES_DOCUMENT_PARSER_COMMAND = originalParserCommand;
+    if (originalParserArgs === undefined) delete process.env.R3MES_DOCUMENT_PARSER_ARGS;
+    else process.env.R3MES_DOCUMENT_PARSER_ARGS = originalParserArgs;
+  });
+
   it("lists stable built-in parser adapters", () => {
     expect(listKnowledgeParserAdapters()).toEqual([
       {
@@ -32,11 +42,36 @@ describe("knowledge parser adapters", () => {
   });
 
   it("keeps existing extension support behavior", () => {
+    delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
+    delete process.env.R3MES_DOCUMENT_PARSER_ARGS;
+
     expect(isSupportedKnowledgeFilename("note.txt")).toBe(true);
     expect(isSupportedKnowledgeFilename("note.md")).toBe(true);
     expect(isSupportedKnowledgeFilename("note.json")).toBe(true);
     expect(isSupportedKnowledgeFilename("note.pdf")).toBe(false);
     expect(getKnowledgeParserForFilename("note.pdf")).toBeNull();
+  });
+
+  it("enables pdf/docx only when an external document parser is configured", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log('# Parsed document\\nSource bytes: '+require('fs').statSync(process.argv[1]).size)\" {input}";
+
+    expect(isSupportedKnowledgeFilename("report.pdf")).toBe(true);
+    expect(isSupportedKnowledgeFilename("report.docx")).toBe(true);
+    expect(getKnowledgeParserForFilename("report.pdf")?.id).toBe("external-document-parser-v1");
+    expect(listKnowledgeParserAdapters().some((parser) => parser.extensions.includes(".pdf"))).toBe(true);
+  });
+
+  it("parses configured pdf/docx files through the external command", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log('# Parsed document\\nSource bytes: '+require('fs').statSync(process.argv[1]).size)\" {input}";
+
+    const parsed = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+
+    expect(parsed.sourceType).toBe("MARKDOWN");
+    expect(parsed.parser).toEqual({ id: "external-document-parser-v1", version: 1 });
+    expect(parsed.text).toContain("# Parsed document");
+    expect(parsed.diagnostics.originalBytes).toBeGreaterThan(0);
   });
 
   it("parses text and includes parser diagnostics", () => {

@@ -1,4 +1,10 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON";
+export type KnowledgeParserInputMode = "utf8" | "binary";
 
 export interface ParsedKnowledgeDocument {
   sourceType: KnowledgeSourceType;
@@ -19,6 +25,7 @@ export interface KnowledgeParserAdapter {
   version: number;
   sourceType: KnowledgeSourceType;
   extensions: string[];
+  inputMode: KnowledgeParserInputMode;
   parse(opts: { filename: string; buffer: Buffer; raw: string }): ParsedKnowledgeDocument;
 }
 
@@ -57,6 +64,7 @@ const TEXT_PARSER: KnowledgeParserAdapter = {
   version: 1,
   sourceType: "TEXT",
   extensions: [".txt"],
+  inputMode: "utf8",
   parse: ({ buffer, raw }) =>
     parsedDocument({
       adapter: TEXT_PARSER,
@@ -70,6 +78,7 @@ const MARKDOWN_PARSER: KnowledgeParserAdapter = {
   version: 1,
   sourceType: "MARKDOWN",
   extensions: [".md"],
+  inputMode: "utf8",
   parse: ({ buffer, raw }) =>
     parsedDocument({
       adapter: MARKDOWN_PARSER,
@@ -83,6 +92,7 @@ const JSON_PARSER: KnowledgeParserAdapter = {
   version: 1,
   sourceType: "JSON",
   extensions: [".json"],
+  inputMode: "utf8",
   parse: ({ buffer, raw }) =>
     parsedDocument({
       adapter: JSON_PARSER,
@@ -91,16 +101,110 @@ const JSON_PARSER: KnowledgeParserAdapter = {
     }),
 };
 
-const KNOWLEDGE_PARSERS: KnowledgeParserAdapter[] = [
+const BUILT_IN_KNOWLEDGE_PARSERS: KnowledgeParserAdapter[] = [
   TEXT_PARSER,
   MARKDOWN_PARSER,
   JSON_PARSER,
 ];
 
-const SUPPORTED_EXTENSIONS = new Set(KNOWLEDGE_PARSERS.flatMap((parser) => parser.extensions));
+function splitCommandLineArgs(value: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quote: "\"" | "'" | null = null;
+  let escaped = false;
+
+  for (const char of value) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) args.push(current);
+  return args;
+}
+
+function externalParserTimeoutMs(): number {
+  const value = Number.parseInt(process.env.R3MES_DOCUMENT_PARSER_TIMEOUT_MS ?? "30000", 10);
+  return Number.isFinite(value) && value > 0 ? Math.min(value, 120000) : 30000;
+}
+
+function externalParserArgs(inputPath: string): string[] {
+  const template = process.env.R3MES_DOCUMENT_PARSER_ARGS?.trim() || "{input}";
+  return splitCommandLineArgs(template).map((arg) => arg.replaceAll("{input}", inputPath));
+}
+
+function externalDocumentParser(): KnowledgeParserAdapter | null {
+  const command = process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim();
+  if (!command) return null;
+  return {
+    id: "external-document-parser-v1",
+    version: 1,
+    sourceType: "MARKDOWN",
+    extensions: [".pdf", ".docx"],
+    inputMode: "binary",
+    parse: ({ filename, buffer }) => {
+      const ext = getKnowledgeExtension(filename) || ".bin";
+      const tempDir = mkdtempSync(join(tmpdir(), "r3mes-doc-parse-"));
+      const inputPath = join(tempDir, `input${ext}`);
+      try {
+        writeFileSync(inputPath, buffer);
+        const result = spawnSync(command, externalParserArgs(inputPath), {
+          encoding: "utf8",
+          timeout: externalParserTimeoutMs(),
+          windowsHide: true,
+          maxBuffer: 16 * 1024 * 1024,
+        });
+        if (result.error) {
+          throw result.error;
+        }
+        if (result.status !== 0) {
+          throw new Error(`External document parser failed with exit code ${result.status ?? "unknown"}: ${String(result.stderr ?? "").slice(0, 500)}`);
+        }
+        return parsedDocument({
+          adapter: externalDocumentParser() ?? TEXT_PARSER,
+          text: String(result.stdout ?? ""),
+          originalBytes: buffer.length,
+          warnings: String(result.stderr ?? "").trim()
+            ? [`external_parser_stderr:${String(result.stderr).trim().slice(0, 240)}`]
+            : [],
+        });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  };
+}
+
+function knowledgeParsers(): KnowledgeParserAdapter[] {
+  const external = externalDocumentParser();
+  return external ? [...BUILT_IN_KNOWLEDGE_PARSERS, external] : BUILT_IN_KNOWLEDGE_PARSERS;
+}
 
 export function listKnowledgeParserAdapters(): Array<Pick<KnowledgeParserAdapter, "id" | "version" | "sourceType" | "extensions">> {
-  return KNOWLEDGE_PARSERS.map((parser) => ({
+  return knowledgeParsers().map((parser) => ({
     id: parser.id,
     version: parser.version,
     sourceType: parser.sourceType,
@@ -110,20 +214,21 @@ export function listKnowledgeParserAdapters(): Array<Pick<KnowledgeParserAdapter
 
 export function getKnowledgeParserForFilename(filename: string): KnowledgeParserAdapter | null {
   const ext = getKnowledgeExtension(filename);
-  return KNOWLEDGE_PARSERS.find((parser) => parser.extensions.includes(ext)) ?? null;
+  return knowledgeParsers().find((parser) => parser.extensions.includes(ext)) ?? null;
 }
 
 export function isSupportedKnowledgeFilename(filename: string): boolean {
-  return SUPPORTED_EXTENSIONS.has(getKnowledgeExtension(filename));
+  const ext = getKnowledgeExtension(filename);
+  return knowledgeParsers().some((parser) => parser.extensions.includes(ext));
 }
 
 export function parseKnowledgeBuffer(filename: string, buffer: Buffer): ParsedKnowledgeDocument {
   const parser = getKnowledgeParserForFilename(filename);
   if (!parser) {
-    throw new Error("Desteklenmeyen bilgi dosyası. Yalnızca .txt, .md ve .json kabul edilir.");
+    throw new Error("Desteklenmeyen bilgi dosyası. Yalnızca .txt, .md ve .json kabul edilir; PDF/DOCX için R3MES_DOCUMENT_PARSER_COMMAND gerekir.");
   }
-  const raw = buffer.toString("utf8").trim();
-  if (!raw) {
+  const raw = parser.inputMode === "utf8" ? buffer.toString("utf8").trim() : "";
+  if (parser.inputMode === "utf8" && !raw) {
     throw new Error("Boş bilgi dosyası yüklenemez");
   }
   return parser.parse({ filename, buffer, raw });
