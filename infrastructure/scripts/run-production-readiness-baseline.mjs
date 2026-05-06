@@ -406,6 +406,63 @@ function summarizeRouterQualityArtifacts(artifacts) {
   return aggregate;
 }
 
+function summarizeBudgetQualityArtifacts(artifacts) {
+  const budgetArtifacts = artifacts.filter((artifact) => artifact.summary?.budgetQuality);
+  const aggregate = {
+    observedSuites: budgetArtifacts.length,
+    observedCases: 0,
+    totalCases: 0,
+    coverageRatio: 0,
+    budgetModes: {},
+    contextModes: {},
+    averages: {
+      requestedSourceLimit: 0,
+      finalSourceLimit: 0,
+      finalSourceCount: 0,
+      contextTextChars: 0,
+      evidenceDirectFacts: 0,
+      evidenceSupportingFacts: 0,
+      evidenceRiskFacts: 0,
+      evidenceUsableFacts: 0,
+    },
+    expectations: {
+      budgetMode: { total: 0, matched: 0, mismatches: [] },
+    },
+  };
+  const weightedAverages = {};
+
+  for (const artifact of budgetArtifacts) {
+    const budgetQuality = artifact.summary.budgetQuality;
+    const suiteTotal = Number(artifact.summary.total ?? 0);
+    const observedCases = Number(budgetQuality.observedCases ?? 0);
+    aggregate.totalCases += suiteTotal;
+    aggregate.observedCases += observedCases;
+    mergeCounts(aggregate.budgetModes, budgetQuality.budgetModes);
+    mergeCounts(aggregate.contextModes, budgetQuality.contextModes);
+    for (const [key, value] of Object.entries(budgetQuality.averages ?? {})) {
+      mergeWeightedAverage(weightedAverages, key, value, observedCases);
+    }
+
+    const budgetModeExpectation = budgetQuality.expectations?.budgetMode ?? {};
+    aggregate.expectations.budgetMode.total += Number(budgetModeExpectation.total ?? 0);
+    aggregate.expectations.budgetMode.matched += Number(budgetModeExpectation.matched ?? 0);
+    for (const mismatch of budgetModeExpectation.mismatches ?? []) {
+      aggregate.expectations.budgetMode.mismatches.push({
+        suite: artifact.suite,
+        ...mismatch,
+      });
+    }
+  }
+
+  aggregate.coverageRatio =
+    aggregate.totalCases === 0 ? 0 : Number((aggregate.observedCases / aggregate.totalCases).toFixed(3));
+  aggregate.averages = {
+    ...aggregate.averages,
+    ...finalizeWeightedAverages(weightedAverages),
+  };
+  return aggregate;
+}
+
 function summarizeProfileHealthArtifact(artifact) {
   const summary = artifact?.summary;
   if (!summary) {
@@ -490,11 +547,13 @@ async function main() {
     : null;
   const readiness = scoreReadiness({ totalCases, coverage, artifacts });
   const routerQuality = summarizeRouterQualityArtifacts(artifacts);
+  const budgetQuality = summarizeBudgetQualityArtifacts(artifacts);
   const profileHealth = summarizeProfileHealthArtifact(profileHealthArtifact);
   const report = {
     generatedAt: new Date().toISOString(),
     readiness,
     routerQuality,
+    budgetQuality,
     profileHealth,
     requiredBuckets: REQUIRED_BUCKETS,
     coverage,
@@ -512,6 +571,9 @@ async function main() {
       routerQuality.observedSuites < suiteReports.length
         ? `Regenerate grounded eval artifacts to populate routerQuality summaries (${routerQuality.observedSuites}/${suiteReports.length} suites observed).`
         : "Router quality summaries are present for all grounded eval artifacts.",
+      budgetQuality.observedSuites < suiteReports.length
+        ? `Regenerate grounded eval artifacts to populate budgetQuality summaries (${budgetQuality.observedSuites}/${suiteReports.length} suites observed).`
+        : "Adaptive RAG budget summaries are present for all grounded eval artifacts.",
       profileHealth.observed
         ? profileHealth.ok
           ? "Profile health eval is passing."

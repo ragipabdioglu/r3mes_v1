@@ -200,6 +200,7 @@ function scoreCase(testCase, response) {
   }
 
   const alignment = retrievalDebug?.retrievalDiagnostics?.alignment;
+  const budget = retrievalDebug?.retrievalDiagnostics?.budget;
   if (testCase.expectedAlignmentFastFailed != null) {
     const actualFastFailed = alignment?.fastFailed;
     if (actualFastFailed !== testCase.expectedAlignmentFastFailed) {
@@ -293,6 +294,34 @@ function scoreCase(testCase, response) {
     const actualMode = retrievalDebug?.retrievalMode;
     if (actualMode !== testCase.expectedRetrievalMode) {
       failures.push(`retrieval_mode:${actualMode ?? "missing"}`);
+    }
+  }
+
+  if (testCase.expectedBudgetMode) {
+    const actualBudgetMode = budget?.budgetMode;
+    if (actualBudgetMode !== testCase.expectedBudgetMode) {
+      failures.push(`budget_mode:${actualBudgetMode ?? "missing"}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.minBudgetFinalSourceCount))) {
+    const actual = Number(budget?.finalSourceCount ?? sources.length);
+    if (actual < Number(testCase.minBudgetFinalSourceCount)) {
+      failures.push(`budget_final_sources:${actual}<${Number(testCase.minBudgetFinalSourceCount)}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.maxBudgetFinalSourceCount))) {
+    const actual = Number(budget?.finalSourceCount ?? sources.length);
+    if (actual > Number(testCase.maxBudgetFinalSourceCount)) {
+      failures.push(`budget_final_sources:${actual}>${Number(testCase.maxBudgetFinalSourceCount)}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.maxBudgetContextTextChars))) {
+    const actual = Number(budget?.contextTextChars ?? 0);
+    if (actual > Number(testCase.maxBudgetContextTextChars)) {
+      failures.push(`budget_context_chars:${actual}>${Number(testCase.maxBudgetContextTextChars)}`);
     }
   }
 
@@ -520,6 +549,16 @@ function scoreCase(testCase, response) {
     notSupportedCount: Array.isArray(evidence?.notSupported) ? evidence.notSupported.length : 0,
     alignmentFastFailed: alignment?.fastFailed ?? null,
     alignmentDroppedCandidateCount: alignment?.droppedCandidateCount ?? null,
+    budgetMode: budget?.budgetMode ?? null,
+    budgetContextMode: budget?.contextMode ?? null,
+    budgetRequestedSourceLimit: budget?.requestedSourceLimit ?? null,
+    budgetFinalSourceLimit: budget?.finalSourceLimit ?? null,
+    budgetFinalSourceCount: budget?.finalSourceCount ?? null,
+    budgetContextTextChars: budget?.contextTextChars ?? null,
+    budgetEvidenceDirectFactCount: budget?.evidenceDirectFactCount ?? null,
+    budgetEvidenceSupportingFactCount: budget?.evidenceSupportingFactCount ?? null,
+    budgetEvidenceRiskFactCount: budget?.evidenceRiskFactCount ?? null,
+    budgetEvidenceUsableFactCount: budget?.evidenceUsableFactCount ?? null,
     rerankerMode: reranker?.mode ?? null,
     rerankerFallbackUsed: reranker?.fallbackUsed ?? null,
     rerankerInputCandidateCount: reranker?.inputCandidateCount ?? null,
@@ -571,6 +610,7 @@ function scoreCase(testCase, response) {
       ? testCase.expectedTopMetadataCandidateScoringModes
       : [],
     expectedRouteDecisionMode: testCase.expectedRouteDecisionMode ?? null,
+    expectedBudgetMode: testCase.expectedBudgetMode ?? null,
     expectedUsedCollectionIds: Array.isArray(testCase.expectedUsedCollectionIds) ? testCase.expectedUsedCollectionIds : [],
     expectedSuggestedCollectionIds: Array.isArray(testCase.expectedSuggestedCollectionIds) ? testCase.expectedSuggestedCollectionIds : [],
     shadowRuntime: shadowRuntime
@@ -784,6 +824,49 @@ function summarizeRouterQuality(results) {
   };
 }
 
+function averageField(results, field) {
+  const values = results.map((result) => Number(result[field])).filter(Number.isFinite);
+  if (values.length === 0) return 0;
+  return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3));
+}
+
+function summarizeBudgetQuality(results) {
+  const casesWithBudget = results.filter((result) => result.budgetMode);
+  const expectedBudgetCases = results.filter((result) => result.expectedBudgetMode);
+  const budgetModeMismatches = results
+    .filter((result) => result.expectedBudgetMode && result.budgetMode !== result.expectedBudgetMode)
+    .map((result) => ({
+      id: result.id,
+      bucket: result.bucket,
+      expected: result.expectedBudgetMode,
+      actual: result.budgetMode ?? "missing",
+    }));
+
+  return {
+    observedCases: casesWithBudget.length,
+    coverageRatio: results.length === 0 ? 0 : Number((casesWithBudget.length / results.length).toFixed(3)),
+    budgetModes: results.reduce((acc, result) => increment(acc, result.budgetMode), {}),
+    contextModes: results.reduce((acc, result) => increment(acc, result.budgetContextMode), {}),
+    averages: {
+      requestedSourceLimit: averageField(casesWithBudget, "budgetRequestedSourceLimit"),
+      finalSourceLimit: averageField(casesWithBudget, "budgetFinalSourceLimit"),
+      finalSourceCount: averageField(casesWithBudget, "budgetFinalSourceCount"),
+      contextTextChars: averageField(casesWithBudget, "budgetContextTextChars"),
+      evidenceDirectFacts: averageField(casesWithBudget, "budgetEvidenceDirectFactCount"),
+      evidenceSupportingFacts: averageField(casesWithBudget, "budgetEvidenceSupportingFactCount"),
+      evidenceRiskFacts: averageField(casesWithBudget, "budgetEvidenceRiskFactCount"),
+      evidenceUsableFacts: averageField(casesWithBudget, "budgetEvidenceUsableFactCount"),
+    },
+    expectations: {
+      budgetMode: {
+        total: expectedBudgetCases.length,
+        matched: expectedBudgetCases.length - budgetModeMismatches.length,
+        mismatches: budgetModeMismatches,
+      },
+    },
+  };
+}
+
 async function runCase(opts, testCase) {
   const body = {
     messages: [{ role: "user", content: testCase.query }],
@@ -922,7 +1005,7 @@ async function main() {
     results.push(result);
     const mark = result.ok ? "PASS" : "FAIL";
     console.log(
-      `${mark} ${result.id} bucket=${result.bucket ?? "default"} route=${result.routeDecisionMode ?? "-"} selection=${result.selectionMode ?? "-"} confidence=${result.confidence ?? "-"} sources=${result.sourceCount} facts=${result.factCount} safety=${result.safetyPass} severity=${result.safetySeverity ?? "-"} shadow=${result.shadowRuntime?.promotedCandidateCount ?? 0}/${result.shadowRuntime?.activeAdjustmentCount ?? 0} topChange=${result.shadowRuntime?.wouldChangeTopCandidate === true} latency=${result.latencyMs ?? "-"}ms`,
+      `${mark} ${result.id} bucket=${result.bucket ?? "default"} route=${result.routeDecisionMode ?? "-"} selection=${result.selectionMode ?? "-"} budget=${result.budgetMode ?? "-"} confidence=${result.confidence ?? "-"} sources=${result.sourceCount} facts=${result.factCount} safety=${result.safetyPass} severity=${result.safetySeverity ?? "-"} shadow=${result.shadowRuntime?.promotedCandidateCount ?? 0}/${result.shadowRuntime?.activeAdjustmentCount ?? 0} topChange=${result.shadowRuntime?.wouldChangeTopCandidate === true} latency=${result.latencyMs ?? "-"}ms`,
     );
     if (!result.ok) {
       console.log(`  ${result.failures.join("; ")}`);
@@ -942,6 +1025,7 @@ async function main() {
       return acc;
     }, {}),
     routerQuality: summarizeRouterQuality(results),
+    budgetQuality: summarizeBudgetQuality(results),
     shadowRuntime: {
       observed: results.filter((result) => result.shadowRuntime).length,
       activeAdjustmentCases: results.filter((result) => (result.shadowRuntime?.activeAdjustmentCount ?? 0) > 0).length,
