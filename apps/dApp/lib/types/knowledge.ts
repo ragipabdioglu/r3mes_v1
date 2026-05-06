@@ -68,6 +68,21 @@ export type KnowledgeUploadAcceptedResponse = {
   parseQualityWarnings?: string[];
 };
 
+export type KnowledgeParserCapabilityItem = {
+  id: string;
+  version: number;
+  sourceType: "TEXT" | "MARKDOWN" | "JSON";
+  extensions: string[];
+  inputMode: "utf8" | "binary";
+  available: boolean;
+  kind: "built_in" | "external";
+  reason?: string | null;
+};
+
+export type KnowledgeParserCapabilitiesResponse = {
+  data: KnowledgeParserCapabilityItem[];
+};
+
 export type KnowledgeVisibilityMutationResponse = {
   id: string;
   visibility: KnowledgeVisibility;
@@ -173,4 +188,12 @@ export function isKnowledgeCollectionDetail(
   if (!json || typeof json !== "object") return false;
   const o = json as Record<string, unknown>;
   return typeof o.id === "string" && Array.isArray(o.documents);
+}
+
+export function isKnowledgeParserCapabilitiesResponse(
+  json: unknown,
+): json is KnowledgeParserCapabilitiesResponse {
+  if (!json || typeof json !== "object") return false;
+  const o = json as Record<string, unknown>;
+  return Array.isArray(o.data);
 }

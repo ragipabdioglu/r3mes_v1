@@ -6,6 +6,7 @@ import {
   type KnowledgeUploadAcceptedResponse,
   safeParseKnowledgeDetailResponse,
   safeParseKnowledgeListResponse,
+  safeParseKnowledgeParserCapabilitiesResponse,
   safeParseKnowledgeUploadAcceptedResponse,
 } from "@r3mes/shared-types";
 import { normalizeSuiAddress } from "@mysten/sui/utils";
@@ -22,7 +23,12 @@ import { formatVectorLiteral, getKnowledgeEmbeddingDimensions, embedKnowledgeTex
 import { scoreKnowledgeParseQuality, type KnowledgeParseQuality } from "../lib/knowledgeParseQuality.js";
 import { scoreKnowledgeProfileHealth } from "../lib/knowledgeProfileHealth.js";
 import { normalizeKnowledgeChunkContent } from "../lib/knowledgeNormalize.js";
-import { chunkKnowledgeText, isSupportedKnowledgeFilename, parseKnowledgeBuffer } from "../lib/knowledgeText.js";
+import {
+  chunkKnowledgeText,
+  isSupportedKnowledgeFilename,
+  listKnowledgeParserCapabilities,
+  parseKnowledgeBuffer,
+} from "../lib/knowledgeText.js";
 import { embedTextForQdrant } from "../lib/qdrantEmbedding.js";
 import {
   buildQdrantPayloadMetadata,
@@ -246,6 +252,20 @@ function readKnowledgeParseAdapter(value: unknown): KnowledgeAutoMetadata["parse
 }
 
 export async function registerKnowledgeRoutes(app: FastifyInstance) {
+  app.get("/v1/knowledge/parsers", { preHandler: walletAuthPreHandler }, async (req, reply) => {
+    const wallet = req.verifiedWalletAddress;
+    if (!wallet) {
+      return sendApiError(reply, 401, "UNAUTHORIZED", "Cüzdan doğrulaması gerekli");
+    }
+    const payload = { data: listKnowledgeParserCapabilities() };
+    const validated = safeParseKnowledgeParserCapabilitiesResponse(payload);
+    if (!validated.success) {
+      req.log.error({ issues: validated.error.flatten() }, "KnowledgeParserCapabilitiesResponse contract violation");
+      return sendApiError(reply, 500, "CONTRACT_INVARIANT_VIOLATION", "Knowledge parser capabilities response failed contract validation");
+    }
+    return validated.data;
+  });
+
   app.get("/v1/knowledge", { preHandler: walletAuthPreHandler }, async (req, reply) => {
     const wallet = req.verifiedWalletAddress;
     if (!wallet) {

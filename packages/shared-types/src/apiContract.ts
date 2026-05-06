@@ -97,6 +97,21 @@ export interface KnowledgeUploadAcceptedResponse {
   parseQualityWarnings?: string[];
 }
 
+export interface KnowledgeParserCapabilityItem {
+  id: string;
+  version: number;
+  sourceType: "TEXT" | "MARKDOWN" | "JSON";
+  extensions: string[];
+  inputMode: "utf8" | "binary";
+  available: boolean;
+  kind: "built_in" | "external";
+  reason?: string | null;
+}
+
+export interface KnowledgeParserCapabilitiesResponse {
+  data: KnowledgeParserCapabilityItem[];
+}
+
 export interface ChatSourceCitation {
   collectionId: string;
   documentId: string;

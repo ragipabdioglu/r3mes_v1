@@ -39,6 +39,8 @@ import type {
   KnowledgeFeedbackSummaryResponse,
   KnowledgeDocumentListItem,
   KnowledgeListResponse,
+  KnowledgeParserCapabilitiesResponse,
+  KnowledgeParserCapabilityItem,
   KnowledgeUploadAcceptedResponse,
   NotImplementedOnChainRestResponse,
 } from "./apiContract.js";
@@ -151,6 +153,21 @@ export const KnowledgeUploadAcceptedResponseSchema: z.ZodType<KnowledgeUploadAcc
   parseQualityScore: z.number().min(0).max(100).nullable().optional(),
   parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
   parseQualityWarnings: z.array(z.string()).optional(),
+});
+
+export const KnowledgeParserCapabilityItemSchema: z.ZodType<KnowledgeParserCapabilityItem> = z.object({
+  id: z.string().min(1),
+  version: z.number().int().positive(),
+  sourceType: z.enum(["TEXT", "MARKDOWN", "JSON"]),
+  extensions: z.array(z.string().min(1)),
+  inputMode: z.enum(["utf8", "binary"]),
+  available: z.boolean(),
+  kind: z.enum(["built_in", "external"]),
+  reason: z.string().nullable().optional(),
+});
+
+export const KnowledgeParserCapabilitiesResponseSchema: z.ZodType<KnowledgeParserCapabilitiesResponse> = z.object({
+  data: z.array(KnowledgeParserCapabilityItemSchema),
 });
 
 export const ChatSourceCitationSchema: z.ZodType<ChatSourceCitation> = z.object({
@@ -557,6 +574,12 @@ export function safeParseKnowledgeUploadAcceptedResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeUploadAcceptedResponse> {
   return KnowledgeUploadAcceptedResponseSchema.safeParse(input);
+}
+
+export function safeParseKnowledgeParserCapabilitiesResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeParserCapabilitiesResponse> {
+  return KnowledgeParserCapabilitiesResponseSchema.safeParse(input);
 }
 
 export function parseKnowledgeFeedbackCreateRequest(input: unknown): KnowledgeFeedbackCreateRequest {

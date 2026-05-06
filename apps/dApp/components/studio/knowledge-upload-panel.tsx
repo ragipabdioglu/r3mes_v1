@@ -3,9 +3,9 @@
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { postKnowledgeMultipart } from "@/lib/api/knowledge";
+import { fetchKnowledgeParserCapabilities, postKnowledgeMultipart } from "@/lib/api/knowledge";
 import type { R3mesWalletAuthHeaders } from "@/lib/api/wallet-auth-types";
 import { useR3mesWalletAuth } from "@/lib/hooks/use-r3mes-wallet-auth";
 import { userFacingMutationFailure } from "@/lib/ui/http-messages";
@@ -23,6 +23,7 @@ type UploadState =
   | { kind: "err"; message: string };
 
 const KNOWLEDGE_ACCEPT = ".txt,.md,.json,application/json,text/plain,text/markdown";
+const BUILT_IN_EXTENSIONS = [".txt", ".md", ".json"];
 
 export function KnowledgeUploadPanel() {
   const account = useCurrentAccount();
@@ -31,7 +32,39 @@ export function KnowledgeUploadPanel() {
   const [collectionName, setCollectionName] = useState("");
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [availableExtensions, setAvailableExtensions] = useState<string[]>(BUILT_IN_EXTENSIONS);
   const [state, setState] = useState<UploadState>({ kind: "idle" });
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadParserCapabilities() {
+      if (!account?.address) {
+        setAvailableExtensions(BUILT_IN_EXTENSIONS);
+        return;
+      }
+      try {
+        const auth = await ensureAuthHeaders();
+        const capabilities = await fetchKnowledgeParserCapabilities(auth);
+        if (cancelled) return;
+        const next = capabilities
+          .filter((capability) => capability.available)
+          .flatMap((capability) => capability.extensions)
+          .filter((extension, index, arr) => extension.startsWith(".") && arr.indexOf(extension) === index);
+        setAvailableExtensions(next.length > 0 ? next : BUILT_IN_EXTENSIONS);
+      } catch {
+        if (!cancelled) setAvailableExtensions(BUILT_IN_EXTENSIONS);
+      }
+    }
+    void loadParserCapabilities();
+    return () => {
+      cancelled = true;
+    };
+  }, [account?.address, ensureAuthHeaders]);
+
+  const accept = useMemo(() => {
+    const mimeHints = ["application/json", "text/plain", "text/markdown"];
+    return [...availableExtensions, ...mimeHints].join(",");
+  }, [availableExtensions]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -151,12 +184,15 @@ export function KnowledgeUploadPanel() {
         <p className="mt-2 text-xs leading-relaxed text-zinc-500">
           {knowledgeStudio.dropzoneHelp}
         </p>
+        <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-zinc-600">
+          Desteklenen: {availableExtensions.join(", ")}
+        </p>
         <label className="mt-6 inline-flex cursor-pointer rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500">
           {knowledgeStudio.fileSelectLabel}
           <input
             type="file"
             className="sr-only"
-            accept={KNOWLEDGE_ACCEPT}
+            accept={accept || KNOWLEDGE_ACCEPT}
             onChange={onFileInput}
           />
         </label>

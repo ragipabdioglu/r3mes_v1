@@ -4,6 +4,7 @@ import {
   getKnowledgeParserForFilename,
   isSupportedKnowledgeFilename,
   listKnowledgeParserAdapters,
+  listKnowledgeParserCapabilities,
   parseKnowledgeBuffer,
 } from "./knowledgeText.js";
 
@@ -60,6 +61,26 @@ describe("knowledge parser adapters", () => {
     expect(isSupportedKnowledgeFilename("report.docx")).toBe(true);
     expect(getKnowledgeParserForFilename("report.pdf")?.id).toBe("external-document-parser-v1");
     expect(listKnowledgeParserAdapters().some((parser) => parser.extensions.includes(".pdf"))).toBe(true);
+  });
+
+  it("reports parser capabilities without exposing command details", () => {
+    delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
+    const withoutExternal = listKnowledgeParserCapabilities();
+
+    expect(withoutExternal.some((parser) => parser.id === "plain-text-v1" && parser.available)).toBe(true);
+    expect(withoutExternal.find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
+      available: false,
+      extensions: [".pdf", ".docx"],
+      kind: "external",
+    });
+
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    const withExternal = listKnowledgeParserCapabilities();
+
+    expect(withExternal.find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
+      available: true,
+      reason: null,
+    });
   });
 
   it("keeps Windows paths intact in external parser args", () => {

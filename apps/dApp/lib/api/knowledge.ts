@@ -3,8 +3,10 @@ import type { R3mesWalletAuthHeaders } from "@/lib/api/wallet-auth-types";
 import {
   isKnowledgeCollectionDetail,
   isKnowledgeCollectionListResponse,
+  isKnowledgeParserCapabilitiesResponse,
   type KnowledgeCollectionDetail,
   type KnowledgeCollectionListItem,
+  type KnowledgeParserCapabilityItem,
   type KnowledgeUploadAcceptedResponse,
   type KnowledgeVisibilityMutationResponse,
 } from "@/lib/types/knowledge";
@@ -59,6 +61,22 @@ export async function fetchKnowledgeCollectionDetail(
 
   const json: unknown = await res.json();
   return isKnowledgeCollectionDetail(json) ? json : null;
+}
+
+export async function fetchKnowledgeParserCapabilities(
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeParserCapabilityItem[]> {
+  const res = await fetch(`${getBackendUrl()}/v1/knowledge/parsers`, {
+    cache: "no-store",
+    headers: authHeaders(auth),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Knowledge parsers ${res.status}`);
+  }
+
+  const json: unknown = await res.json();
+  return isKnowledgeParserCapabilitiesResponse(json) ? json.data : [];
 }
 
 export async function postKnowledgeMultipart(

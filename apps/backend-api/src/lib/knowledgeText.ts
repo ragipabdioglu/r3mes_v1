@@ -29,6 +29,17 @@ export interface KnowledgeParserAdapter {
   parse(opts: { filename: string; buffer: Buffer; raw: string }): ParsedKnowledgeDocument;
 }
 
+export interface KnowledgeParserCapability {
+  id: string;
+  version: number;
+  sourceType: KnowledgeSourceType;
+  extensions: string[];
+  inputMode: KnowledgeParserInputMode;
+  available: boolean;
+  kind: "built_in" | "external";
+  reason?: string | null;
+}
+
 export function getKnowledgeExtension(filename: string): string {
   const idx = filename.lastIndexOf(".");
   return idx >= 0 ? filename.slice(idx).toLowerCase() : "";
@@ -200,6 +211,32 @@ export function listKnowledgeParserAdapters(): Array<Pick<KnowledgeParserAdapter
     sourceType: parser.sourceType,
     extensions: [...parser.extensions],
   }));
+}
+
+export function listKnowledgeParserCapabilities(): KnowledgeParserCapability[] {
+  const externalConfigured = Boolean(process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim());
+  return [
+    ...BUILT_IN_KNOWLEDGE_PARSERS.map((parser) => ({
+      id: parser.id,
+      version: parser.version,
+      sourceType: parser.sourceType,
+      extensions: [...parser.extensions],
+      inputMode: parser.inputMode,
+      available: true,
+      kind: "built_in" as const,
+      reason: null,
+    })),
+    {
+      id: "external-document-parser-v1",
+      version: 1,
+      sourceType: "MARKDOWN",
+      extensions: [".pdf", ".docx"],
+      inputMode: "binary",
+      available: externalConfigured,
+      kind: "external",
+      reason: externalConfigured ? null : "R3MES_DOCUMENT_PARSER_COMMAND not configured",
+    },
+  ];
 }
 
 export function getKnowledgeParserForFilename(filename: string): KnowledgeParserAdapter | null {
