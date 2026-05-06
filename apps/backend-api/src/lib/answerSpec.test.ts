@@ -85,4 +85,25 @@ describe("buildAnswerSpec", () => {
     expect(spec.sections[0]).toBe("caution");
     expect(spec.tone).toBe("direct");
   });
+
+  it("strips parser and document scaffold from evidence facts", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "medical",
+      groundingConfidence: "high",
+      userQuery: "Antikoagülan kullanan hasta nelere dikkat etmeli?",
+      evidence: evidence({
+        answerIntent: "explain",
+        directAnswerFacts: [
+          "Antikoagülan Kartı: ANTİKOAGÜLAN ( PIHTI ÖNLEYİCİ ) İLAÇ KULLANAN HASTADA DİKKAT EDİLECEK HUSUSLAR Bu ilaçların ortak özelliği kanın pıhtılaşmasını azaltmasıdır.",
+        ],
+        supportingContext: ["Antikoagülan Kartı: ## Page 2 Cerrahi işlem öncesi hekime bilgi verilmelidir."],
+        usableFacts: [],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.assessment).toBe("Bu ilaçların ortak özelliği kanın pıhtılaşmasını azaltmasıdır.");
+    expect(spec.action).toBe("Cerrahi işlem öncesi hekime bilgi verilmelidir.");
+  });
 });

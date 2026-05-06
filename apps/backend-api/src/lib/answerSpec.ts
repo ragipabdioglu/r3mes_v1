@@ -21,11 +21,24 @@ function stripSourcePrefix(value: string): string {
   return value.replace(/^[^:]{1,120}:\s*/, "").trim();
 }
 
+function stripDocumentScaffold(value: string): string {
+  return value
+    .replace(/^#+\s*Page\s+\d+\s*/giu, "")
+    .replace(/^#+\s*XML Text Fallback\s*/giu, "")
+    .replace(/^#+\s*word\/[^\s]+\s*/giu, "")
+    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ0-9()[\]\s_-]{24,}?)\s+(?=(Bu|Bu\s+ilaç|Eğer|Eller|Okul|Öğrenci|Hasta|Veli|Kaynak|Amaç)\b)/u, "")
+    .trim();
+}
+
 function cleanValues(values: string[] | undefined): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const value of (values ?? []).map(stripSourcePrefix).map((item) => item.trim()).filter(Boolean)) {
-    const key = value.toLocaleLowerCase("tr-TR");
+  for (const value of (values ?? [])
+    .map(stripSourcePrefix)
+    .map(stripDocumentScaffold)
+    .map((item) => item.trim())
+    .filter(Boolean)) {
+    const key = value.toLocaleLowerCase("tr-TR").replace(/\s+/g, " ").slice(0, 220);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(value);

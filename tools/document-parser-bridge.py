@@ -50,11 +50,10 @@ def parse_pdf(path: Path) -> str:
         )
 
     reader = PdfReader(str(path))
-    sections: list[str] = [f"# Parsed PDF: {path.name}"]
+    sections: list[str] = []
     for index, page in enumerate(reader.pages, start=1):
         text = normalize_text(page.extract_text() or "")
         if not text:
-            sections.append(f"## Page {index}\n\n[No extractable text on this page.]")
             continue
         sections.append(f"## Page {index}\n\n{text}")
     return "\n\n".join(sections)
@@ -86,7 +85,7 @@ def parse_docx(path: Path) -> str:
         )
 
     doc = Document(str(path))
-    sections: list[str] = [f"# Parsed DOCX: {path.name}"]
+    sections: list[str] = []
     for paragraph in doc.paragraphs:
         text = normalize_text(paragraph.text)
         if text:

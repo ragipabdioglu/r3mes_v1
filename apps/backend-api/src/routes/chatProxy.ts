@@ -821,7 +821,16 @@ function isThinOrGenericText(value: string): boolean {
 }
 
 function stripSourcePrefix(value: string): string {
-  return value.replace(/^[^:]{1,120}:\s*/, "").trim();
+  return stripDocumentScaffold(value.replace(/^[^:]{1,120}:\s*/, "").trim());
+}
+
+function stripDocumentScaffold(value: string): string {
+  return value
+    .replace(/^#+\s*Page\s+\d+\s*/giu, "")
+    .replace(/^#+\s*XML Text Fallback\s*/giu, "")
+    .replace(/^#+\s*word\/[^\s]+\s*/giu, "")
+    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ0-9()[\]\s_-]{24,}?)\s+(?=(Bu|Bu\s+ilaç|Eğer|Eller|Okul|Öğrenci|Hasta|Veli|Kaynak|Amaç)\b)/u, "")
+    .trim();
 }
 
 function isSourceIdentifierLike(value: string): boolean {
@@ -1054,6 +1063,7 @@ function enrichAnswerWithEvidence(
     return {
       ...answer,
       answer_intent: answer.answer_intent === "unknown" ? evidence.answerIntent : answer.answer_intent,
+      answer: preserveSalientQueryTerms(stripDocumentScaffold(answer.answer), answer.user_query),
       condition_context: isThinOrGenericText(answer.condition_context)
         ? preserveSalientQueryTerms(facts[0] ?? answer.condition_context, answer.user_query)
         : preserveSalientQueryTerms(answer.condition_context, answer.user_query),
