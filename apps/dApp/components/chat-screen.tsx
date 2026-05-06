@@ -54,6 +54,57 @@ type ChatTurn = ChatMessage & {
 
 type KnowledgeDomainFilter = "auto" | "all" | "medical" | "legal" | "technical" | "education" | "finance";
 
+function redactFeedbackEvalQuery(value: string): string {
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/0x[a-f0-9]{16,}/gi, "[wallet]")
+    .replace(/\b(?:\+?\d[\s-]?){7,}\b/g, "[number]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
+function buildFeedbackMetadata(opts: {
+  kind: KnowledgeFeedbackKind;
+  question: string;
+  turn: ChatTurn;
+  selectedCollectionIds: string[];
+  includePublic: boolean;
+}): Record<string, unknown> {
+  const selection = opts.turn.retrievalDebug?.sourceSelection;
+  const routeDecision = selection?.routeDecision;
+  const suggestedCollectionIds = [
+    ...(selection?.suggestedCollections?.map((collection) => collection.id) ?? []),
+    ...(selection?.metadataRouteCandidates?.map((collection) => collection.id) ?? []),
+    ...(routeDecision?.suggestedCollectionIds ?? []),
+  ];
+  const metadata: Record<string, unknown> = {
+    schemaVersion: 2,
+    feedbackKind: opts.kind,
+    sourceCount: opts.turn.sources?.length ?? 0,
+    selectedCollectionIds: opts.selectedCollectionIds.slice(0, 12),
+    usedCollectionIds: selection?.usedCollectionIds?.slice(0, 12) ?? [],
+    suggestedCollectionIds: Array.from(new Set(suggestedCollectionIds)).slice(0, 8),
+    rejectedCollectionIds: routeDecision?.rejectedCollectionIds?.slice(0, 12) ?? [],
+    includePublic: opts.includePublic,
+    routeDecisionMode: routeDecision?.mode ?? null,
+    routeDecisionConfidence: routeDecision?.confidence ?? null,
+    routePrimaryDomain: routeDecision?.primaryDomain ?? selection?.routeDomain ?? null,
+    groundingConfidence: opts.turn.retrievalDebug?.groundingConfidence ?? null,
+    sourceTitles: opts.turn.sources?.slice(0, 3).map((source) => source.title) ?? [],
+  };
+
+  if (getFeedbackEvalQueryEnabled()) {
+    const redactedQuery = redactFeedbackEvalQuery(opts.question);
+    if (redactedQuery.length >= 3) {
+      metadata.redactedQuery = redactedQuery;
+      metadata.evalQuerySource = "client_redacted_v1";
+    }
+  }
+
+  return metadata;
+}
+
 const KNOWLEDGE_DOMAIN_FILTERS: Array<{ id: KnowledgeDomainFilter; label: string }> = [
   { id: "auto", label: "Otomatik" },
   { id: "all", label: "Tümü" },
@@ -705,17 +756,7 @@ export function ChatScreen() {
     try {
       const auth = await ensureAuthHeaders();
       const firstSource = turn.sources?.[0];
-      const metadata: Record<string, unknown> = {
-        sourceCount: turn.sources?.length ?? 0,
-        selectedCollectionIds,
-        includePublic,
-        routeDecisionMode: turn.retrievalDebug?.sourceSelection?.routeDecision?.mode ?? null,
-        routeDecisionConfidence: turn.retrievalDebug?.sourceSelection?.routeDecision?.confidence ?? null,
-        sourceTitles: turn.sources?.slice(0, 3).map((source) => source.title) ?? [],
-      };
-      if (getFeedbackEvalQueryEnabled()) {
-        metadata.redactedQuery = question.slice(0, 500);
-      }
+      const metadata = buildFeedbackMetadata({ kind, question, turn, selectedCollectionIds, includePublic });
 
       await postKnowledgeFeedback(
         {

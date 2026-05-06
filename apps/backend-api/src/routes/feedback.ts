@@ -376,6 +376,35 @@ function asObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+const FEEDBACK_METADATA_STRING_LIMIT = 1000;
+const FEEDBACK_METADATA_ARRAY_LIMIT = 25;
+const FEEDBACK_METADATA_OBJECT_KEYS_LIMIT = 80;
+const FEEDBACK_METADATA_BLOCKED_KEYS = new Set(["query", "rawQuery", "question", "prompt", "messages"]);
+
+function sanitizeFeedbackMetadata(value: unknown, depth = 0): Prisma.InputJsonValue | undefined {
+  if (value === null) return undefined;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "string") return value.slice(0, FEEDBACK_METADATA_STRING_LIMIT);
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, FEEDBACK_METADATA_ARRAY_LIMIT)
+      .map((item) => sanitizeFeedbackMetadata(item, depth + 1))
+      .filter((item): item is Prisma.InputJsonValue => item !== undefined);
+    return items;
+  }
+  if (depth >= 3) return undefined;
+  if (!value || typeof value !== "object") return undefined;
+
+  const out: Record<string, Prisma.InputJsonValue> = {};
+  for (const [key, entry] of Object.entries(value).slice(0, FEEDBACK_METADATA_OBJECT_KEYS_LIMIT)) {
+    if (FEEDBACK_METADATA_BLOCKED_KEYS.has(key)) continue;
+    const safeValue = sanitizeFeedbackMetadata(entry, depth + 1);
+    if (safeValue !== undefined) out[key] = safeValue;
+  }
+  return out;
+}
+
 function summarizeGateReport(value: unknown): KnowledgeFeedbackApplyRecordItem["gateReportSummary"] {
   const report = asObject(value);
   if (!report) return null;
@@ -781,7 +810,7 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
         chunkId: normalizeOptionalString(body.chunkId),
         expectedCollectionId,
         reason: normalizeOptionalString(body.reason),
-        metadata: (body.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
+        metadata: sanitizeFeedbackMetadata(body.metadata),
       },
       select: {
         id: true,

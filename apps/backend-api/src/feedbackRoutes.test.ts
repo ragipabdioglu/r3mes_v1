@@ -90,7 +90,12 @@ describe("knowledge feedback routes", () => {
         documentId: "doc_1",
         traceId: "trace_1",
         reason: "Yanlış konu",
-        metadata: { routeMode: "suggest" },
+        metadata: {
+          routeMode: "suggest",
+          redactedQuery: "Başım ağrıyor ama kasık kaynağı geldi",
+          query: "Bu ham sorgu metadata içinde saklanmamalı",
+          messages: [{ role: "user", content: "saklanmamalı" }],
+        },
       },
     });
 
@@ -106,9 +111,18 @@ describe("knowledge feedback routes", () => {
           traceId: "trace_1",
           reason: "Yanlış konu",
           queryHash: expect.stringMatching(/^[a-f0-9]{16}$/),
+          metadata: expect.objectContaining({
+            routeMode: "suggest",
+            redactedQuery: "Başım ağrıyor ama kasık kaynağı geldi",
+          }),
         }),
       }),
     );
+    const createCall = vi.mocked(prisma.knowledgeFeedback.create).mock.calls[0]?.[0] as {
+      data?: { metadata?: Record<string, unknown> };
+    };
+    expect(createCall.data?.metadata).not.toHaveProperty("query");
+    expect(createCall.data?.metadata).not.toHaveProperty("messages");
     await app.close();
   });
 
