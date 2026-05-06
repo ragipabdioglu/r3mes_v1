@@ -249,6 +249,80 @@ function scoreReadiness({ totalCases, coverage, artifacts }) {
   };
 }
 
+function mergeCounts(target, source) {
+  for (const [key, value] of Object.entries(source ?? {})) {
+    target[key] = (target[key] ?? 0) + Number(value ?? 0);
+  }
+  return target;
+}
+
+function summarizeRouterQualityArtifacts(artifacts) {
+  const routerArtifacts = artifacts.filter((artifact) => artifact.summary?.routerQuality);
+  const aggregate = {
+    observedSuites: routerArtifacts.length,
+    routeDecisionModes: {},
+    routeDecisionConfidences: {},
+    routePrimaryDomains: {},
+    selectionModes: {},
+    metadataCandidateCoverage: {
+      totalCases: 0,
+      casesWithCandidates: 0,
+      ratio: 0,
+      averageCandidateCount: 0,
+      sourceQualities: {},
+    },
+    expectations: {
+      routeDecision: { total: 0, matched: 0, mismatches: [] },
+      usedCollections: { total: 0, matched: 0, mismatches: [] },
+      suggestedCollections: { total: 0, matched: 0, mismatches: [] },
+    },
+  };
+
+  let weightedCandidateCount = 0;
+  for (const artifact of routerArtifacts) {
+    const routerQuality = artifact.summary.routerQuality;
+    const suiteTotal = Number(artifact.summary.total ?? 0);
+    mergeCounts(aggregate.routeDecisionModes, routerQuality.routeDecisionModes);
+    mergeCounts(aggregate.routeDecisionConfidences, routerQuality.routeDecisionConfidences);
+    mergeCounts(aggregate.routePrimaryDomains, routerQuality.routePrimaryDomains);
+    mergeCounts(aggregate.selectionModes, routerQuality.selectionModes);
+    mergeCounts(aggregate.metadataCandidateCoverage.sourceQualities, routerQuality.metadataCandidateCoverage?.sourceQualities);
+
+    const coverage = routerQuality.metadataCandidateCoverage ?? {};
+    aggregate.metadataCandidateCoverage.totalCases += suiteTotal;
+    aggregate.metadataCandidateCoverage.casesWithCandidates += Number(coverage.casesWithCandidates ?? 0);
+    weightedCandidateCount += Number(coverage.averageCandidateCount ?? 0) * suiteTotal;
+
+    for (const key of ["routeDecision", "usedCollections", "suggestedCollections"]) {
+      const expectation = routerQuality.expectations?.[key] ?? {};
+      aggregate.expectations[key].total += Number(expectation.total ?? 0);
+      aggregate.expectations[key].matched += Number(expectation.matched ?? 0);
+      for (const mismatch of expectation.mismatches ?? []) {
+        aggregate.expectations[key].mismatches.push({
+          suite: artifact.suite,
+          ...mismatch,
+        });
+      }
+    }
+  }
+
+  aggregate.metadataCandidateCoverage.ratio =
+    aggregate.metadataCandidateCoverage.totalCases === 0
+      ? 0
+      : Number(
+          (
+            aggregate.metadataCandidateCoverage.casesWithCandidates /
+            aggregate.metadataCandidateCoverage.totalCases
+          ).toFixed(3),
+        );
+  aggregate.metadataCandidateCoverage.averageCandidateCount =
+    aggregate.metadataCandidateCoverage.totalCases === 0
+      ? 0
+      : Number((weightedCandidateCount / aggregate.metadataCandidateCoverage.totalCases).toFixed(3));
+
+  return aggregate;
+}
+
 async function main() {
   const opts = parseArgs();
   const suites = await listSuites(opts.evalRoot);
@@ -298,9 +372,11 @@ async function main() {
     ...(suite.latestArtifact ?? { path: null, updatedAt: null, summary: null }),
   }));
   const readiness = scoreReadiness({ totalCases, coverage, artifacts });
+  const routerQuality = summarizeRouterQualityArtifacts(artifacts);
   const report = {
     generatedAt: new Date().toISOString(),
     readiness,
+    routerQuality,
     requiredBuckets: REQUIRED_BUCKETS,
     coverage,
     suites: suiteReports,
@@ -314,6 +390,9 @@ async function main() {
       readiness.failedArtifactSuites.length > 0
         ? "Fix failing latest eval artifacts or regenerate baseline after code/data changes."
         : "No failing latest eval artifacts detected.",
+      routerQuality.observedSuites < suiteReports.length
+        ? `Regenerate grounded eval artifacts to populate routerQuality summaries (${routerQuality.observedSuites}/${suiteReports.length} suites observed).`
+        : "Router quality summaries are present for all grounded eval artifacts.",
     ],
   };
 

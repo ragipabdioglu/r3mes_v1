@@ -510,6 +510,9 @@ function scoreCase(testCase, response) {
     routeDecisionReasons: routeDecision?.reasons ?? [],
     metadataRouteCandidateIds: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.id) ?? [],
     metadataRouteCandidateQualities: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.sourceQuality) ?? [],
+    expectedRouteDecisionMode: testCase.expectedRouteDecisionMode ?? null,
+    expectedUsedCollectionIds: Array.isArray(testCase.expectedUsedCollectionIds) ? testCase.expectedUsedCollectionIds : [],
+    expectedSuggestedCollectionIds: Array.isArray(testCase.expectedSuggestedCollectionIds) ? testCase.expectedSuggestedCollectionIds : [],
     shadowRuntime: shadowRuntime
       ? {
           runtimeAffected: shadowRuntime.runtimeAffected,
@@ -539,6 +542,89 @@ async function loadCases(file, limit) {
     .filter(Boolean)
     .map((line) => JSON.parse(line));
   return limit > 0 ? rows.slice(0, limit) : rows;
+}
+
+function increment(acc, key, amount = 1) {
+  const safeKey = String(key ?? "missing");
+  acc[safeKey] = (acc[safeKey] ?? 0) + amount;
+  return acc;
+}
+
+function summarizeRouterQuality(results) {
+  const casesWithMetadataCandidates = results.filter((result) => result.metadataRouteCandidateIds.length > 0);
+  const expectedRouteCases = results.filter((result) => result.expectedRouteDecisionMode);
+  const routeExpectationMismatches = results
+    .filter((result) => result.expectedRouteDecisionMode && result.routeDecisionMode !== result.expectedRouteDecisionMode)
+    .map((result) => ({
+      id: result.id,
+      bucket: result.bucket,
+      expected: result.expectedRouteDecisionMode,
+      actual: result.routeDecisionMode ?? "missing",
+    }));
+  const expectedUsedCollectionCases = results.filter((result) => result.expectedUsedCollectionIds.length > 0);
+  const usedCollectionMismatches = results
+    .filter((result) => {
+      if (result.expectedUsedCollectionIds.length === 0) return false;
+      return result.expectedUsedCollectionIds.some((id) => !result.usedCollectionIds.includes(id));
+    })
+    .map((result) => ({
+      id: result.id,
+      bucket: result.bucket,
+      expected: result.expectedUsedCollectionIds,
+      actual: result.usedCollectionIds,
+    }));
+  const expectedSuggestedCollectionCases = results.filter((result) => result.expectedSuggestedCollectionIds.length > 0);
+  const suggestedCollectionMismatches = results
+    .filter((result) => {
+      if (result.expectedSuggestedCollectionIds.length === 0) return false;
+      return result.expectedSuggestedCollectionIds.some((id) => !result.suggestedCollectionIds.includes(id));
+    })
+    .map((result) => ({
+      id: result.id,
+      bucket: result.bucket,
+      expected: result.expectedSuggestedCollectionIds,
+      actual: result.suggestedCollectionIds,
+    }));
+
+  return {
+    routeDecisionModes: results.reduce((acc, result) => increment(acc, result.routeDecisionMode), {}),
+    routeDecisionConfidences: results.reduce((acc, result) => increment(acc, result.routeDecisionConfidence), {}),
+    routePrimaryDomains: results.reduce((acc, result) => increment(acc, result.routePrimaryDomain), {}),
+    selectionModes: results.reduce((acc, result) => increment(acc, result.selectionMode), {}),
+    metadataCandidateCoverage: {
+      casesWithCandidates: casesWithMetadataCandidates.length,
+      ratio: results.length === 0 ? 0 : Number((casesWithMetadataCandidates.length / results.length).toFixed(3)),
+      averageCandidateCount:
+        results.length === 0
+          ? 0
+          : Number(
+              (
+                results.reduce((sum, result) => sum + result.metadataRouteCandidateIds.length, 0) / results.length
+              ).toFixed(3),
+            ),
+      sourceQualities: results.reduce((acc, result) => {
+        for (const quality of result.metadataRouteCandidateQualities) increment(acc, quality);
+        return acc;
+      }, {}),
+    },
+    expectations: {
+      routeDecision: {
+        total: expectedRouteCases.length,
+        matched: expectedRouteCases.length - routeExpectationMismatches.length,
+        mismatches: routeExpectationMismatches,
+      },
+      usedCollections: {
+        total: expectedUsedCollectionCases.length,
+        matched: expectedUsedCollectionCases.length - usedCollectionMismatches.length,
+        mismatches: usedCollectionMismatches,
+      },
+      suggestedCollections: {
+        total: expectedSuggestedCollectionCases.length,
+        matched: expectedSuggestedCollectionCases.length - suggestedCollectionMismatches.length,
+        mismatches: suggestedCollectionMismatches,
+      },
+    },
+  };
 }
 
 async function runCase(opts, testCase) {
@@ -698,6 +784,7 @@ async function main() {
       acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     }, {}),
+    routerQuality: summarizeRouterQuality(results),
     shadowRuntime: {
       observed: results.filter((result) => result.shadowRuntime).length,
       activeAdjustmentCases: results.filter((result) => (result.shadowRuntime?.activeAdjustmentCount ?? 0) > 0).length,
