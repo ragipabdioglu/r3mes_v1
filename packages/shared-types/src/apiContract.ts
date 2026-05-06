@@ -403,10 +403,19 @@ export interface ChatRetrievalDebug {
       id: string;
       name: string;
       score: number;
+      scoreBreakdown?: {
+        finalScore: number;
+        signals: Record<string, number | null>;
+        contributions: Record<string, number>;
+        missingSignals: string[];
+        scoringMode?: "route_profile" | "query_profile";
+        adaptiveBonus?: number;
+      };
       domain: string | null;
       subtopics: string[];
       matchedTerms: string[];
       reason: string;
+      sourceQuality?: "structured" | "inferred" | "thin" | null;
     }>;
     includePublic: boolean;
     routeDomain: "medical" | "legal" | "finance" | "technical" | "education" | "general" | null;

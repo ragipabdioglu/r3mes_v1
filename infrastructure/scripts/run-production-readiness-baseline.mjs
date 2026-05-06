@@ -256,6 +256,27 @@ function mergeCounts(target, source) {
   return target;
 }
 
+function mergeWeightedAverage(target, key, average, weight) {
+  const numericAverage = Number(average ?? 0);
+  const numericWeight = Number(weight ?? 0);
+  if (!Number.isFinite(numericAverage) || !Number.isFinite(numericWeight) || numericWeight <= 0) return;
+  const current = target[key] ?? { weightedSum: 0, weight: 0 };
+  current.weightedSum += numericAverage * numericWeight;
+  current.weight += numericWeight;
+  target[key] = current;
+}
+
+function finalizeWeightedAverages(weighted) {
+  return Object.fromEntries(
+    Object.entries(weighted)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => [
+        key,
+        value.weight <= 0 ? 0 : Number((value.weightedSum / value.weight).toFixed(3)),
+      ]),
+  );
+}
+
 function summarizeRouterQualityArtifacts(artifacts) {
   const routerArtifacts = artifacts.filter((artifact) => artifact.summary?.routerQuality);
   const aggregate = {
@@ -269,7 +290,14 @@ function summarizeRouterQualityArtifacts(artifacts) {
       casesWithCandidates: 0,
       ratio: 0,
       averageCandidateCount: 0,
+      averageTopScore: 0,
+      averageTopMatchedTerms: 0,
       sourceQualities: {},
+      scoringModes: {},
+      topSourceQualities: {},
+      topScoringModes: {},
+      topSignalAverages: {},
+      topContributionAverages: {},
     },
     expectations: {
       routeDecision: { total: 0, matched: 0, mismatches: [] },
@@ -279,6 +307,11 @@ function summarizeRouterQualityArtifacts(artifacts) {
   };
 
   let weightedCandidateCount = 0;
+  let weightedTopScore = 0;
+  let weightedTopMatchedTerms = 0;
+  let topCandidateWeight = 0;
+  const weightedSignals = {};
+  const weightedContributions = {};
   for (const artifact of routerArtifacts) {
     const routerQuality = artifact.summary.routerQuality;
     const suiteTotal = Number(artifact.summary.total ?? 0);
@@ -287,11 +320,24 @@ function summarizeRouterQualityArtifacts(artifacts) {
     mergeCounts(aggregate.routePrimaryDomains, routerQuality.routePrimaryDomains);
     mergeCounts(aggregate.selectionModes, routerQuality.selectionModes);
     mergeCounts(aggregate.metadataCandidateCoverage.sourceQualities, routerQuality.metadataCandidateCoverage?.sourceQualities);
+    mergeCounts(aggregate.metadataCandidateCoverage.scoringModes, routerQuality.metadataCandidateCoverage?.scoringModes);
+    mergeCounts(aggregate.metadataCandidateCoverage.topSourceQualities, routerQuality.metadataCandidateCoverage?.topSourceQualities);
+    mergeCounts(aggregate.metadataCandidateCoverage.topScoringModes, routerQuality.metadataCandidateCoverage?.topScoringModes);
 
     const coverage = routerQuality.metadataCandidateCoverage ?? {};
     aggregate.metadataCandidateCoverage.totalCases += suiteTotal;
-    aggregate.metadataCandidateCoverage.casesWithCandidates += Number(coverage.casesWithCandidates ?? 0);
+    const casesWithCandidates = Number(coverage.casesWithCandidates ?? 0);
+    aggregate.metadataCandidateCoverage.casesWithCandidates += casesWithCandidates;
     weightedCandidateCount += Number(coverage.averageCandidateCount ?? 0) * suiteTotal;
+    weightedTopScore += Number(coverage.averageTopScore ?? 0) * casesWithCandidates;
+    weightedTopMatchedTerms += Number(coverage.averageTopMatchedTerms ?? 0) * casesWithCandidates;
+    topCandidateWeight += casesWithCandidates;
+    for (const [key, value] of Object.entries(coverage.topSignalAverages ?? {})) {
+      mergeWeightedAverage(weightedSignals, key, value, casesWithCandidates);
+    }
+    for (const [key, value] of Object.entries(coverage.topContributionAverages ?? {})) {
+      mergeWeightedAverage(weightedContributions, key, value, casesWithCandidates);
+    }
 
     for (const key of ["routeDecision", "usedCollections", "suggestedCollections"]) {
       const expectation = routerQuality.expectations?.[key] ?? {};
@@ -319,6 +365,12 @@ function summarizeRouterQualityArtifacts(artifacts) {
     aggregate.metadataCandidateCoverage.totalCases === 0
       ? 0
       : Number((weightedCandidateCount / aggregate.metadataCandidateCoverage.totalCases).toFixed(3));
+  aggregate.metadataCandidateCoverage.averageTopScore =
+    topCandidateWeight === 0 ? 0 : Number((weightedTopScore / topCandidateWeight).toFixed(3));
+  aggregate.metadataCandidateCoverage.averageTopMatchedTerms =
+    topCandidateWeight === 0 ? 0 : Number((weightedTopMatchedTerms / topCandidateWeight).toFixed(3));
+  aggregate.metadataCandidateCoverage.topSignalAverages = finalizeWeightedAverages(weightedSignals);
+  aggregate.metadataCandidateCoverage.topContributionAverages = finalizeWeightedAverages(weightedContributions);
 
   return aggregate;
 }

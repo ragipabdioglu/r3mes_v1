@@ -381,6 +381,9 @@ function scoreCase(testCase, response) {
   const routeDecision = retrievalDebug?.sourceSelection?.routeDecision;
   const shadowRuntime = retrievalDebug?.sourceSelection?.shadowRuntime;
   const shadowImpacts = Array.isArray(shadowRuntime?.impacts) ? shadowRuntime.impacts : [];
+  const metadataRouteCandidates = Array.isArray(retrievalDebug?.sourceSelection?.metadataRouteCandidates)
+    ? retrievalDebug.sourceSelection.metadataRouteCandidates
+    : [];
   if (testCase.expectedRouteDecisionMode && routeDecision?.mode !== testCase.expectedRouteDecisionMode) {
     failures.push(`route_decision_mode:${routeDecision?.mode ?? "missing"}`);
   }
@@ -508,8 +511,27 @@ function scoreCase(testCase, response) {
     suggestedCollectionReasons: retrievalDebug?.sourceSelection?.suggestedCollections?.map((collection) => collection.reason) ?? [],
     rejectedCollectionIds: routeDecision?.rejectedCollectionIds ?? [],
     routeDecisionReasons: routeDecision?.reasons ?? [],
-    metadataRouteCandidateIds: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.id) ?? [],
-    metadataRouteCandidateQualities: retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.sourceQuality) ?? [],
+    metadataRouteCandidateIds: metadataRouteCandidates.map((collection) => collection.id).filter(Boolean),
+    metadataRouteCandidateQualities: metadataRouteCandidates.map((collection) => collection.sourceQuality ?? "missing"),
+    metadataRouteCandidateScores: metadataRouteCandidates.map((collection) => Number(collection.score ?? 0)).filter(Number.isFinite),
+    metadataRouteCandidateScoringModes: metadataRouteCandidates
+      .map((collection) => collection.scoreBreakdown?.scoringMode ?? "missing")
+      .filter(Boolean),
+    metadataRouteCandidateTop: metadataRouteCandidates[0]
+      ? {
+          id: metadataRouteCandidates[0].id,
+          score: Number(metadataRouteCandidates[0].score ?? 0),
+          sourceQuality: metadataRouteCandidates[0].sourceQuality ?? null,
+          scoringMode: metadataRouteCandidates[0].scoreBreakdown?.scoringMode ?? null,
+          matchedTermCount: Array.isArray(metadataRouteCandidates[0].matchedTerms)
+            ? metadataRouteCandidates[0].matchedTerms.length
+            : 0,
+          signals: metadataRouteCandidates[0].scoreBreakdown?.signals ?? {},
+          contributions: metadataRouteCandidates[0].scoreBreakdown?.contributions ?? {},
+          adaptiveBonus: metadataRouteCandidates[0].scoreBreakdown?.adaptiveBonus ?? 0,
+          missingSignals: metadataRouteCandidates[0].scoreBreakdown?.missingSignals ?? [],
+        }
+      : null,
     expectedRouteDecisionMode: testCase.expectedRouteDecisionMode ?? null,
     expectedUsedCollectionIds: Array.isArray(testCase.expectedUsedCollectionIds) ? testCase.expectedUsedCollectionIds : [],
     expectedSuggestedCollectionIds: Array.isArray(testCase.expectedSuggestedCollectionIds) ? testCase.expectedSuggestedCollectionIds : [],
@@ -550,8 +572,28 @@ function increment(acc, key, amount = 1) {
   return acc;
 }
 
+function averageNumericRecords(records) {
+  const sums = {};
+  const counts = {};
+  for (const record of records) {
+    if (!record || typeof record !== "object") continue;
+    for (const [key, value] of Object.entries(record)) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) continue;
+      sums[key] = (sums[key] ?? 0) + numeric;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(sums)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, sum]) => [key, Number((sum / Math.max(counts[key] ?? 1, 1)).toFixed(3))]),
+  );
+}
+
 function summarizeRouterQuality(results) {
   const casesWithMetadataCandidates = results.filter((result) => result.metadataRouteCandidateIds.length > 0);
+  const topMetadataCandidates = results.map((result) => result.metadataRouteCandidateTop).filter(Boolean);
   const expectedRouteCases = results.filter((result) => result.expectedRouteDecisionMode);
   const routeExpectationMismatches = results
     .filter((result) => result.expectedRouteDecisionMode && result.routeDecisionMode !== result.expectedRouteDecisionMode)
@@ -606,6 +648,32 @@ function summarizeRouterQuality(results) {
         for (const quality of result.metadataRouteCandidateQualities) increment(acc, quality);
         return acc;
       }, {}),
+      scoringModes: results.reduce((acc, result) => {
+        for (const mode of result.metadataRouteCandidateScoringModes) increment(acc, mode);
+        return acc;
+      }, {}),
+      topSourceQualities: topMetadataCandidates.reduce((acc, candidate) => increment(acc, candidate.sourceQuality), {}),
+      topScoringModes: topMetadataCandidates.reduce((acc, candidate) => increment(acc, candidate.scoringMode), {}),
+      averageTopScore:
+        topMetadataCandidates.length === 0
+          ? 0
+          : Number(
+              (
+                topMetadataCandidates.reduce((sum, candidate) => sum + Number(candidate.score ?? 0), 0) /
+                topMetadataCandidates.length
+              ).toFixed(3),
+            ),
+      averageTopMatchedTerms:
+        topMetadataCandidates.length === 0
+          ? 0
+          : Number(
+              (
+                topMetadataCandidates.reduce((sum, candidate) => sum + Number(candidate.matchedTermCount ?? 0), 0) /
+                topMetadataCandidates.length
+              ).toFixed(3),
+            ),
+      topSignalAverages: averageNumericRecords(topMetadataCandidates.map((candidate) => candidate.signals)),
+      topContributionAverages: averageNumericRecords(topMetadataCandidates.map((candidate) => candidate.contributions)),
     },
     expectations: {
       routeDecision: {
