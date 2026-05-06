@@ -680,8 +680,13 @@ function averageNumericRecords(records) {
   );
 }
 
+function resultArray(result, key) {
+  const value = result?.[key];
+  return Array.isArray(value) ? value : [];
+}
+
 function summarizeRouterQuality(results) {
-  const casesWithMetadataCandidates = results.filter((result) => result.metadataRouteCandidateIds.length > 0);
+  const casesWithMetadataCandidates = results.filter((result) => resultArray(result, "metadataRouteCandidateIds").length > 0);
   const topMetadataCandidates = results.map((result) => result.metadataRouteCandidateTop).filter(Boolean);
   const expectedRouteCases = results.filter((result) => result.expectedRouteDecisionMode);
   const routeExpectationMismatches = results
@@ -692,11 +697,13 @@ function summarizeRouterQuality(results) {
       expected: result.expectedRouteDecisionMode,
       actual: result.routeDecisionMode ?? "missing",
     }));
-  const expectedUsedCollectionCases = results.filter((result) => result.expectedUsedCollectionIds.length > 0);
+  const expectedUsedCollectionCases = results.filter((result) => resultArray(result, "expectedUsedCollectionIds").length > 0);
   const usedCollectionMismatches = results
     .filter((result) => {
-      if (result.expectedUsedCollectionIds.length === 0) return false;
-      return result.expectedUsedCollectionIds.some((id) => !result.usedCollectionIds.includes(id));
+      const expectedUsedCollectionIds = resultArray(result, "expectedUsedCollectionIds");
+      if (expectedUsedCollectionIds.length === 0) return false;
+      const usedCollectionIds = resultArray(result, "usedCollectionIds");
+      return expectedUsedCollectionIds.some((id) => !usedCollectionIds.includes(id));
     })
     .map((result) => ({
       id: result.id,
@@ -704,11 +711,13 @@ function summarizeRouterQuality(results) {
       expected: result.expectedUsedCollectionIds,
       actual: result.usedCollectionIds,
     }));
-  const expectedSuggestedCollectionCases = results.filter((result) => result.expectedSuggestedCollectionIds.length > 0);
+  const expectedSuggestedCollectionCases = results.filter((result) => resultArray(result, "expectedSuggestedCollectionIds").length > 0);
   const suggestedCollectionMismatches = results
     .filter((result) => {
-      if (result.expectedSuggestedCollectionIds.length === 0) return false;
-      return result.expectedSuggestedCollectionIds.some((id) => !result.suggestedCollectionIds.includes(id));
+      const expectedSuggestedCollectionIds = resultArray(result, "expectedSuggestedCollectionIds");
+      if (expectedSuggestedCollectionIds.length === 0) return false;
+      const suggestedCollectionIds = resultArray(result, "suggestedCollectionIds");
+      return expectedSuggestedCollectionIds.some((id) => !suggestedCollectionIds.includes(id));
     })
     .map((result) => ({
       id: result.id,
@@ -716,11 +725,12 @@ function summarizeRouterQuality(results) {
       expected: result.expectedSuggestedCollectionIds,
       actual: result.suggestedCollectionIds,
     }));
-  const expectedTopQualityCases = results.filter((result) => result.expectedTopMetadataCandidateSourceQualities.length > 0);
+  const expectedTopQualityCases = results.filter((result) => resultArray(result, "expectedTopMetadataCandidateSourceQualities").length > 0);
   const topQualityMismatches = results
     .filter((result) => {
-      if (result.expectedTopMetadataCandidateSourceQualities.length === 0) return false;
-      return !result.expectedTopMetadataCandidateSourceQualities.includes(result.metadataRouteCandidateTop?.sourceQuality);
+      const expectedTopMetadataCandidateSourceQualities = resultArray(result, "expectedTopMetadataCandidateSourceQualities");
+      if (expectedTopMetadataCandidateSourceQualities.length === 0) return false;
+      return !expectedTopMetadataCandidateSourceQualities.includes(result.metadataRouteCandidateTop?.sourceQuality);
     })
     .map((result) => ({
       id: result.id,
@@ -728,11 +738,12 @@ function summarizeRouterQuality(results) {
       expected: result.expectedTopMetadataCandidateSourceQualities,
       actual: result.metadataRouteCandidateTop?.sourceQuality ?? "missing",
     }));
-  const forbiddenTopQualityCases = results.filter((result) => result.forbiddenTopMetadataCandidateSourceQualities.length > 0);
+  const forbiddenTopQualityCases = results.filter((result) => resultArray(result, "forbiddenTopMetadataCandidateSourceQualities").length > 0);
   const forbiddenTopQualityViolations = results
     .filter((result) => {
-      if (result.forbiddenTopMetadataCandidateSourceQualities.length === 0) return false;
-      return result.forbiddenTopMetadataCandidateSourceQualities.includes(result.metadataRouteCandidateTop?.sourceQuality);
+      const forbiddenTopMetadataCandidateSourceQualities = resultArray(result, "forbiddenTopMetadataCandidateSourceQualities");
+      if (forbiddenTopMetadataCandidateSourceQualities.length === 0) return false;
+      return forbiddenTopMetadataCandidateSourceQualities.includes(result.metadataRouteCandidateTop?.sourceQuality);
     })
     .map((result) => ({
       id: result.id,
@@ -740,11 +751,12 @@ function summarizeRouterQuality(results) {
       forbidden: result.forbiddenTopMetadataCandidateSourceQualities,
       actual: result.metadataRouteCandidateTop?.sourceQuality ?? "missing",
     }));
-  const expectedTopScoringModeCases = results.filter((result) => result.expectedTopMetadataCandidateScoringModes.length > 0);
+  const expectedTopScoringModeCases = results.filter((result) => resultArray(result, "expectedTopMetadataCandidateScoringModes").length > 0);
   const topScoringModeMismatches = results
     .filter((result) => {
-      if (result.expectedTopMetadataCandidateScoringModes.length === 0) return false;
-      return !result.expectedTopMetadataCandidateScoringModes.includes(result.metadataRouteCandidateTop?.scoringMode);
+      const expectedTopMetadataCandidateScoringModes = resultArray(result, "expectedTopMetadataCandidateScoringModes");
+      if (expectedTopMetadataCandidateScoringModes.length === 0) return false;
+      return !expectedTopMetadataCandidateScoringModes.includes(result.metadataRouteCandidateTop?.scoringMode);
     })
     .map((result) => ({
       id: result.id,
@@ -766,15 +778,15 @@ function summarizeRouterQuality(results) {
           ? 0
           : Number(
               (
-                results.reduce((sum, result) => sum + result.metadataRouteCandidateIds.length, 0) / results.length
+                results.reduce((sum, result) => sum + resultArray(result, "metadataRouteCandidateIds").length, 0) / results.length
               ).toFixed(3),
             ),
       sourceQualities: results.reduce((acc, result) => {
-        for (const quality of result.metadataRouteCandidateQualities) increment(acc, quality);
+        for (const quality of resultArray(result, "metadataRouteCandidateQualities")) increment(acc, quality);
         return acc;
       }, {}),
       scoringModes: results.reduce((acc, result) => {
-        for (const mode of result.metadataRouteCandidateScoringModes) increment(acc, mode);
+        for (const mode of resultArray(result, "metadataRouteCandidateScoringModes")) increment(acc, mode);
         return acc;
       }, {}),
       topSourceQualities: topMetadataCandidates.reduce((acc, candidate) => increment(acc, candidate.sourceQuality), {}),
