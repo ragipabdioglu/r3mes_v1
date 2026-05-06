@@ -21,6 +21,15 @@ export interface KnowledgeAutoMetadata {
   questionsAnswered: string[];
   sourceQuality: "structured" | "inferred" | "thin";
   parseQuality?: KnowledgeParseQuality;
+  parseAdapter?: {
+    id: string;
+    version: number;
+    diagnostics?: {
+      originalBytes: number;
+      normalizedChars: number;
+      warnings: string[];
+    };
+  };
   profile?: KnowledgeCollectionProfile;
 }
 

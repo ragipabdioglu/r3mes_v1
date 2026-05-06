@@ -183,6 +183,7 @@ function readKnowledgeAutoMetadata(value: unknown): KnowledgeAutoMetadata | null
     questionsAnswered: Array.isArray(record.questionsAnswered) ? record.questionsAnswered.filter((item): item is string => typeof item === "string") : [],
     sourceQuality: record.sourceQuality === "structured" || record.sourceQuality === "inferred" || record.sourceQuality === "thin" ? record.sourceQuality : "thin",
     parseQuality: readKnowledgeParseQuality(record.parseQuality),
+    parseAdapter: readKnowledgeParseAdapter(record.parseAdapter),
     profile: profileRecord as KnowledgeAutoMetadata["profile"],
   };
 }
@@ -215,6 +216,32 @@ function readKnowledgeParseQuality(value: unknown): KnowledgeParseQuality | unde
           shortLineRatio: 0,
           structureSignalCount: 0,
         },
+  };
+}
+
+function readKnowledgeParseAdapter(value: unknown): KnowledgeAutoMetadata["parseAdapter"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as {
+    id?: unknown;
+    version?: unknown;
+    diagnostics?: unknown;
+  };
+  if (typeof record.id !== "string" || typeof record.version !== "number") return undefined;
+  const diagnosticsRecord = record.diagnostics && typeof record.diagnostics === "object"
+    ? record.diagnostics as { originalBytes?: unknown; normalizedChars?: unknown; warnings?: unknown }
+    : null;
+  return {
+    id: record.id,
+    version: record.version,
+    diagnostics: diagnosticsRecord
+      ? {
+          originalBytes: typeof diagnosticsRecord.originalBytes === "number" ? diagnosticsRecord.originalBytes : 0,
+          normalizedChars: typeof diagnosticsRecord.normalizedChars === "number" ? diagnosticsRecord.normalizedChars : 0,
+          warnings: Array.isArray(diagnosticsRecord.warnings)
+            ? diagnosticsRecord.warnings.filter((item): item is string => typeof item === "string")
+            : [],
+        }
+      : undefined,
   };
 }
 
@@ -453,6 +480,11 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       return sendApiError(reply, 400, "EMPTY_DOCUMENT_METADATA", "Yüklenen knowledge dosyası için metadata üretilemedi");
     }
     documentAutoMetadata.parseQuality = parseQuality;
+    documentAutoMetadata.parseAdapter = {
+      id: parsed.parser.id,
+      version: parsed.parser.version,
+      diagnostics: parsed.diagnostics,
+    };
 
     const ipfsApi = process.env.IPFS_API_URL ?? "http://127.0.0.1:5001";
     const storageCid = await ipfsAddBuffer(ipfsApi, fileBuf, fileName);

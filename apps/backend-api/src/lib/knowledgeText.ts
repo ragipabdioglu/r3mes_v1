@@ -1,8 +1,25 @@
-const SUPPORTED_EXTENSIONS = new Set([".txt", ".md", ".json"]);
+export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON";
 
 export interface ParsedKnowledgeDocument {
-  sourceType: "TEXT" | "MARKDOWN" | "JSON";
+  sourceType: KnowledgeSourceType;
   text: string;
+  parser: {
+    id: string;
+    version: number;
+  };
+  diagnostics: {
+    originalBytes: number;
+    normalizedChars: number;
+    warnings: string[];
+  };
+}
+
+export interface KnowledgeParserAdapter {
+  id: string;
+  version: number;
+  sourceType: KnowledgeSourceType;
+  extensions: string[];
+  parse(opts: { filename: string; buffer: Buffer; raw: string }): ParsedKnowledgeDocument;
 }
 
 export function getKnowledgeExtension(filename: string): string {
@@ -10,34 +27,106 @@ export function getKnowledgeExtension(filename: string): string {
   return idx >= 0 ? filename.slice(idx).toLowerCase() : "";
 }
 
+function parsedDocument(opts: {
+  adapter: KnowledgeParserAdapter;
+  text: string;
+  originalBytes: number;
+  warnings?: string[];
+}): ParsedKnowledgeDocument {
+  const text = opts.text.trim();
+  if (!text) {
+    throw new Error("Boş bilgi dosyası yüklenemez");
+  }
+  return {
+    sourceType: opts.adapter.sourceType,
+    text,
+    parser: {
+      id: opts.adapter.id,
+      version: opts.adapter.version,
+    },
+    diagnostics: {
+      originalBytes: opts.originalBytes,
+      normalizedChars: text.length,
+      warnings: opts.warnings ?? [],
+    },
+  };
+}
+
+const TEXT_PARSER: KnowledgeParserAdapter = {
+  id: "plain-text-v1",
+  version: 1,
+  sourceType: "TEXT",
+  extensions: [".txt"],
+  parse: ({ buffer, raw }) =>
+    parsedDocument({
+      adapter: TEXT_PARSER,
+      text: raw,
+      originalBytes: buffer.length,
+    }),
+};
+
+const MARKDOWN_PARSER: KnowledgeParserAdapter = {
+  id: "markdown-v1",
+  version: 1,
+  sourceType: "MARKDOWN",
+  extensions: [".md"],
+  parse: ({ buffer, raw }) =>
+    parsedDocument({
+      adapter: MARKDOWN_PARSER,
+      text: raw,
+      originalBytes: buffer.length,
+    }),
+};
+
+const JSON_PARSER: KnowledgeParserAdapter = {
+  id: "json-normalized-v1",
+  version: 1,
+  sourceType: "JSON",
+  extensions: [".json"],
+  parse: ({ buffer, raw }) =>
+    parsedDocument({
+      adapter: JSON_PARSER,
+      text: JSON.stringify(JSON.parse(raw) as unknown, null, 2),
+      originalBytes: buffer.length,
+    }),
+};
+
+const KNOWLEDGE_PARSERS: KnowledgeParserAdapter[] = [
+  TEXT_PARSER,
+  MARKDOWN_PARSER,
+  JSON_PARSER,
+];
+
+const SUPPORTED_EXTENSIONS = new Set(KNOWLEDGE_PARSERS.flatMap((parser) => parser.extensions));
+
+export function listKnowledgeParserAdapters(): Array<Pick<KnowledgeParserAdapter, "id" | "version" | "sourceType" | "extensions">> {
+  return KNOWLEDGE_PARSERS.map((parser) => ({
+    id: parser.id,
+    version: parser.version,
+    sourceType: parser.sourceType,
+    extensions: [...parser.extensions],
+  }));
+}
+
+export function getKnowledgeParserForFilename(filename: string): KnowledgeParserAdapter | null {
+  const ext = getKnowledgeExtension(filename);
+  return KNOWLEDGE_PARSERS.find((parser) => parser.extensions.includes(ext)) ?? null;
+}
+
 export function isSupportedKnowledgeFilename(filename: string): boolean {
   return SUPPORTED_EXTENSIONS.has(getKnowledgeExtension(filename));
 }
 
 export function parseKnowledgeBuffer(filename: string, buffer: Buffer): ParsedKnowledgeDocument {
-  const ext = getKnowledgeExtension(filename);
+  const parser = getKnowledgeParserForFilename(filename);
+  if (!parser) {
+    throw new Error("Desteklenmeyen bilgi dosyası. Yalnızca .txt, .md ve .json kabul edilir.");
+  }
   const raw = buffer.toString("utf8").trim();
   if (!raw) {
     throw new Error("Boş bilgi dosyası yüklenemez");
   }
-
-  if (ext === ".json") {
-    const parsed = JSON.parse(raw) as unknown;
-    return {
-      sourceType: "JSON",
-      text: JSON.stringify(parsed, null, 2),
-    };
-  }
-
-  if (ext === ".md") {
-    return { sourceType: "MARKDOWN", text: raw };
-  }
-
-  if (ext === ".txt") {
-    return { sourceType: "TEXT", text: raw };
-  }
-
-  throw new Error("Desteklenmeyen bilgi dosyası. Yalnızca .txt, .md ve .json kabul edilir.");
+  return parser.parse({ filename, buffer, raw });
 }
 
 export interface KnowledgeChunkDraft {
