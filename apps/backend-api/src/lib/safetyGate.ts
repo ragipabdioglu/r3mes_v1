@@ -146,7 +146,7 @@ function buildFallback(
     summary: `${queryNote} ${policy.fallbackGuidance.summary}`,
     unknowns: answerSpec?.unknowns ?? [],
     sourceIds: fallbackMode === "privacy_safe" ? [] : (answerSpec?.sourceIds ?? answer.used_source_ids),
-    facts: answerSpec?.facts ?? [],
+    facts: fallbackMode === "privacy_safe" ? [] : (answerSpec?.facts ?? []),
   };
 
   return composeAnswerSpec(spec);
@@ -210,7 +210,11 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
 
   const policy = getDomainSafetyPolicy(opts.answer.answer_domain);
 
-  if (getRiskyCertaintyPatterns(opts.answer.answer_domain).some((pattern) => pattern.test(combined))) {
+  // Judge risky certainty from the final user-visible answer. Intermediate
+  // draft fields can contain rejected model text and should not force a safe
+  // rendered answer into a fallback path.
+  const visibleRiskText = answerText || combined;
+  if (getRiskyCertaintyPatterns(opts.answer.answer_domain).some((pattern) => pattern.test(visibleRiskText))) {
     addRail("RISKY_CERTAINTY_OR_TREATMENT", "output", "rewrite");
   }
 

@@ -48,6 +48,22 @@ describe("deterministic safety gate", () => {
     expect(result.blockedReasons).not.toContain("RISKY_CERTAINTY_OR_TREATMENT");
   });
 
+  it("does not treat cautious 'not a definite result' phrasing as risky certainty", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "Bu, tek başına kesin veya panik gerektiren bir sonuç gibi sunulmamalı; kaynakların desteklediği sınır burada kalıyor.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
+        user_query: "HPV pozitif çıktı, takip gerekli mi?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+    });
+
+    expect(result.blockedReasons).not.toContain("RISKY_CERTAINTY_OR_TREATMENT");
+  });
+
   it("blocks risky certainty and returns a safe fallback", () => {
     const result = evaluateSafetyGate({
       answerText: "Bu kesin kanserdir, hemen tedaviye başla.",
@@ -65,6 +81,23 @@ describe("deterministic safety gate", () => {
     expect(result.fallbackMode).toBe("domain_safe");
     expect(result.blockedReasons).toContain("RISKY_CERTAINTY_OR_TREATMENT");
     expect(result.safeFallback).toContain("Kesin tanı veya tedavi önermek doğru olmaz");
+  });
+
+  it("judges risky certainty from the rendered answer instead of hidden draft fields", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "Kesin tanı veya tedavi önermek doğru olmaz; yakınma sürüyorsa uygun bir sağlık profesyoneliyle görüşün.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "medical",
+        answer: "Bu kesin kanserdir, hemen tedaviye başla.",
+        user_query: "HPV pozitif çıktı, takip gerekli mi?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+    });
+
+    expect(result.blockedReasons).not.toContain("RISKY_CERTAINTY_OR_TREATMENT");
   });
 
   it("blocks red-flag queries when the answer lacks urgent guidance", () => {

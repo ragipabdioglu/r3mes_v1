@@ -177,6 +177,33 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).toContain("fotoğraf");
   });
 
+  it("uses shared Turkish concept expansion when surfacing relevant medical follow-up facts", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "medical",
+      answerIntent: "reassure",
+      groundingConfidence: "high",
+      userQuery: "Yumurtalık kistimin boyutu söylendi ama korktum. Boyut tek başına ameliyat kararı mıdır?",
+      tone: "calm",
+      sections: ["assessment", "action", "caution", "summary"],
+      assessment:
+        "Kist veya kitle ifadesi tek başına ameliyat gerektirir anlamına gelmez; boyut, görünüm ve yakınmalar birlikte değerlendirilir.",
+      action:
+        "Soruda belirtilen kist, boyut bilgisi kaynak yanıtını yorumlarken korunmalı; bu başlıklar kesin tanı yerine uygun muayene/kontrol bağlamında değerlendirilmelidir.",
+      caution: ["Kaynakta açık dayanak yoksa tanı, ilaç, test veya kesin neden çıkarılmamalıdır."],
+      summary:
+        "Kist veya kitle ifadesi tek başına ameliyat gerektirir anlamına gelmez; boyut, görünüm ve yakınmalar birlikte değerlendirilir.",
+      unknowns: [],
+      sourceIds: ["clinical-card-152"],
+      facts: [
+        "Kullanıcı, yumurtalık kisti/kitle ifadesinin takip veya müdahale gerektirip gerektirmediğini soruyor.",
+        "Kist veya kitle ifadesi tek başına ameliyat gerektirir anlamına gelmez; boyut, görünüm ve yakınmalar birlikte değerlendirilir.",
+      ],
+    });
+
+    expect(rendered).toContain("Ek kontrol:");
+    expect(rendered).toContain("takip");
+  });
+
   it("deduplicates step answers when the best action and assessment are the same fact", () => {
     const rendered = composeAnswerSpec({
       answerDomain: "education",

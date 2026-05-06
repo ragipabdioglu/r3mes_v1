@@ -3,6 +3,7 @@ import type { AnswerSpec } from "./answerSpec.js";
 import { buildAnswerSpecFromGroundedAnswer } from "./answerSpec.js";
 import { polishAnswerText } from "./answerQuality.js";
 import { getDomainPolicy } from "./domainPolicy.js";
+import { buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 
 function clean(value: string, fallback: string): string {
   const polished = polishAnswerText(value);
@@ -69,10 +70,12 @@ function matchTokens(value: string): string[] {
     "ve",
     "veya",
   ]);
-  return normalizeForMatch(value)
+  const baseTokens = normalizeForMatch(value)
     .split(/\s+/)
     .map((part) => part.trim())
     .filter((part) => part.length >= 3 && !stopwords.has(part));
+  const expandedTokens = buildExpandedQueryTokens(value, null, 96).filter((part) => part.length >= 3 && !stopwords.has(part));
+  return Array.from(new Set([...baseTokens, ...expandedTokens]));
 }
 
 function queryRelevantFact(spec: AnswerSpec, usedText: string): string | null {

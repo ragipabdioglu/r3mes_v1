@@ -13,7 +13,7 @@ export interface DomainSafetyPolicy {
 }
 
 const COMMON_RISKY_CERTAINTY_PATTERNS = [
-  /(?<![\p{L}])kesin(?:likle)?(?![\p{L}])(?![^.!?\n]{0,100}(?:değil|degil|doğru olmaz|dogru olmaz|önermek doğru olmaz|onermek dogru olmaz|yerine|söylenemez|soylenemez|söylenmemeli|soylenmemeli|göstermez|gostermez|anlamına gelmez|anlamina gelmez|karar vermeden|çıkarılmamalı|cikarilmamali))/iu,
+  /(?<![\p{L}])kesin(?:likle)?(?![\p{L}])(?![^.!?\n]{0,100}(?:değil|degil|doğru olmaz|dogru olmaz|önermek doğru olmaz|onermek dogru olmaz|yerine|söylenemez|soylenemez|söylenmemeli|soylenmemeli|sunulmamalı|sunulmamali|göstermez|gostermez|anlamına gelmez|anlamina gelmez|karar vermeden|çıkarılmamalı|cikarilmamali))/iu,
   /(?<![\p{L}])mutlaka(?![\p{L}])(?![^.!?\n]{0,80}(?:değil|degil|gerekmez))/iu,
   /(?<![\p{L}])net\s+olarak(?![\p{L}])(?![^.!?\n]{0,80}(?:söylenemez|soylenemez|belirtilemez))/iu,
   /\bhiç\s+gerek\s+yok\b/iu,
