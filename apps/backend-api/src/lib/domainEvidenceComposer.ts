@@ -20,6 +20,19 @@ function sentence(value: string): string {
   return /[.!?]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
+function uniqueSentences(values: string[], limit: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values.map((item) => sentence(clean(item, ""))).filter(Boolean)) {
+    const key = normalizeForMatch(value).slice(0, 180);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 function normalizeForMatch(value: string): string {
   return value
     .normalize("NFKC")
@@ -118,12 +131,10 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
   }
 
   if (spec.answerIntent === "steps") {
-    lines.push(
-      `Kısa plan:`,
-      `1. ${sentence(action)}`,
-      `2. ${sentence(assessment)}`,
-      `3. ${sentence(caution)}`,
-    );
+    lines.push(`Kısa plan:`);
+    uniqueSentences([action, assessment, caution], 3).forEach((item, index) => {
+      lines.push(`${index + 1}. ${item}`);
+    });
     if (relevantFact) lines.push(`Ek kontrol: ${sentence(relevantFact)}`);
     lines.push(`Özet: ${sentence(summary)}`);
     return lines.join("\n");

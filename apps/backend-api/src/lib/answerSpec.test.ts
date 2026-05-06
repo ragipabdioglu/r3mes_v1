@@ -129,4 +129,26 @@ describe("buildAnswerSpec", () => {
     expect(spec.facts).not.toContain("ÖNEMSEYİNİZ!");
     expect(spec.facts).not.toContain("VELİ BİLGİLENDİRME REHBERİ 13 ÖNEMSEYİNİZ!");
   });
+
+  it("prioritizes query-aligned action facts over generic PDF guidance", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "education",
+      groundingConfidence: "high",
+      userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",
+      evidence: evidence({
+        answerIntent: "steps",
+        directAnswerFacts: [
+          "MEB Veli Bilgilendirme Rehberi: Doğru ve güvenilir kaynaklardan bilgi edinerek salgın hastalıklar konusunda öğrencimizi bilinçlendiriniz.(*) • Bakanlığımız ve yetkili kurumlarc….",
+          "MEB Veli Bilgilendirme Rehberi: Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.",
+        ],
+        supportingContext: [],
+        usableFacts: [],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.assessment).toBe("Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.");
+    expect(spec.action).toBe("Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.");
+  });
 });

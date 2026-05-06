@@ -54,6 +54,86 @@ function cleanValues(values: string[] | undefined): string[] {
   return out;
 }
 
+function normalizeForFactMatch(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[çğıİöşü]/g, (char) => ({
+      ç: "c",
+      ğ: "g",
+      ı: "i",
+      İ: "i",
+      ö: "o",
+      ş: "s",
+      ü: "u",
+    })[char] ?? char)
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const FACT_STOPWORDS = new Set([
+  "acaba",
+  "ama",
+  "bana",
+  "ben",
+  "bir",
+  "bu",
+  "da",
+  "de",
+  "diye",
+  "gibi",
+  "hangi",
+  "icin",
+  "ile",
+  "kisa",
+  "mi",
+  "midir",
+  "ne",
+  "nasil",
+  "olur",
+  "sonra",
+  "ve",
+  "veya",
+]);
+
+function factTokens(value: string): string[] {
+  return normalizeForFactMatch(value)
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !FACT_STOPWORDS.has(token));
+}
+
+function factQualityScore(value: string, userQuery: string): number {
+  const tokens = factTokens(value);
+  if (tokens.length === 0) return -100;
+  const queryTokens = new Set(factTokens(userQuery));
+  const overlap = tokens.filter((token) => queryTokens.has(token)).length;
+  const directActionBonus = /(göndermeyiniz|göndermeyin|bilgilendir|başvur|kontrol|hazırla|sakla|denenmel|planlan|yapılmal|edilmel)/iu.test(value)
+    ? 4
+    : 0;
+  const sentenceBonus = /[.!?]$/u.test(value.trim()) ? 1 : 0;
+  const lengthBonus = value.length >= 45 && value.length <= 260 ? 2 : value.length < 24 ? -4 : 0;
+  const truncationPenalty = /[…]|\.{3}$/u.test(value) ? 5 : 0;
+  const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(value) ? 6 : 0;
+  const genericPenalty = /(doğru ve güvenilir kaynaklardan bilgi edin|kaynakta özel alarm|kaynakta açık dayanak yoksa)/iu.test(value)
+    ? 3
+    : 0;
+  return overlap * 6 + directActionBonus + sentenceBonus + lengthBonus - truncationPenalty - scaffoldPenalty - genericPenalty;
+}
+
+function prioritizeFacts(values: string[], userQuery: string): string[] {
+  return values
+    .map((value, index) => ({ value, index, score: factQualityScore(value, userQuery) }))
+    .filter(({ score }) => score > -20)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ value }) => value);
+}
+
+function firstUsefulFact(values: string[], userQuery: string, exclude: string[] = []): string | undefined {
+  const excluded = new Set(exclude.map((value) => normalizeForFactMatch(value)));
+  return values.find((value) => !excluded.has(normalizeForFactMatch(value)) && factQualityScore(value, userQuery) >= 1);
+}
+
 function fallbackAction(domain: AnswerDomain): string {
   if (domain === "technical") return "Önce kontrollü ortamda deneyip yedek, log ve geri dönüş planını netleştirin.";
   if (domain === "legal") return "Belgeleri saklayıp süre ve başvuru yolu için yetkili kurum veya avukattan destek alın.";
@@ -86,10 +166,10 @@ export function buildAnswerSpec(opts: {
   userQuery: string;
   evidence: EvidenceExtractorOutput | null;
 }): AnswerSpec {
-  const directFacts = cleanValues(opts.evidence?.directAnswerFacts);
-  const supportingFacts = cleanValues(opts.evidence?.supportingContext);
-  const usableFacts = cleanValues(opts.evidence?.usableFacts);
-  const riskFacts = cleanValues(opts.evidence?.redFlags);
+  const directFacts = prioritizeFacts(cleanValues(opts.evidence?.directAnswerFacts), opts.userQuery);
+  const supportingFacts = prioritizeFacts(cleanValues(opts.evidence?.supportingContext), opts.userQuery);
+  const usableFacts = prioritizeFacts(cleanValues(opts.evidence?.usableFacts), opts.userQuery);
+  const riskFacts = prioritizeFacts(cleanValues(opts.evidence?.redFlags), opts.userQuery);
   const unknowns = cleanValues([
     ...(opts.evidence?.uncertainOrUnusable ?? []),
     ...(opts.evidence?.missingInfo ?? []),
@@ -97,7 +177,13 @@ export function buildAnswerSpec(opts: {
   const facts = cleanValues([...directFacts, ...supportingFacts, ...usableFacts]);
   const contradictionUnknowns = unknowns.filter((item) => /çeliş|celis/u.test(item.toLocaleLowerCase("tr-TR")));
   const assessment = directFacts[0] ?? usableFacts[0] ?? "Kaynaklarda bu soruya doğrudan sınırlı bilgi bulundu.";
-  const action = supportingFacts[0] ?? directFacts[1] ?? usableFacts[1] ?? fallbackAction(opts.answerDomain);
+  const action =
+    firstUsefulFact(supportingFacts, opts.userQuery, [assessment]) ??
+    firstUsefulFact(directFacts, opts.userQuery, [assessment]) ??
+    firstUsefulFact(usableFacts, opts.userQuery, [assessment]) ??
+    firstUsefulFact(directFacts, opts.userQuery) ??
+    firstUsefulFact(usableFacts, opts.userQuery) ??
+    fallbackAction(opts.answerDomain);
   const caution = cleanValues([
     ...contradictionUnknowns,
     ...(riskFacts.length > 0 ? riskFacts : [fallbackCaution(opts.answerDomain)]),

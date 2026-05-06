@@ -176,4 +176,25 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).toContain("fatura");
     expect(rendered).toContain("fotoğraf");
   });
+
+  it("deduplicates step answers when the best action and assessment are the same fact", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "education",
+      answerIntent: "steps",
+      groundingConfidence: "high",
+      userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",
+      tone: "direct",
+      sections: ["action", "assessment", "caution", "summary"],
+      assessment: "Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.",
+      action: "Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa okul idaresi bilgilendirilmelidir.",
+      unknowns: [],
+      sourceIds: ["education-1"],
+      facts: [],
+    });
+
+    expect(rendered).toContain("1. Yüksek ateş");
+    expect(rendered).not.toContain("2. Yüksek ateş");
+  });
 });
