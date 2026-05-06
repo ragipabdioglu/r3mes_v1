@@ -303,6 +303,9 @@ function summarizeRouterQualityArtifacts(artifacts) {
       routeDecision: { total: 0, matched: 0, mismatches: [] },
       usedCollections: { total: 0, matched: 0, mismatches: [] },
       suggestedCollections: { total: 0, matched: 0, mismatches: [] },
+      topMetadataCandidateQuality: { total: 0, matched: 0, mismatches: [] },
+      forbiddenTopMetadataCandidateQuality: { total: 0, matched: 0, mismatches: [] },
+      topMetadataCandidateScoringMode: { total: 0, matched: 0, mismatches: [] },
     },
   };
 
@@ -339,7 +342,14 @@ function summarizeRouterQualityArtifacts(artifacts) {
       mergeWeightedAverage(weightedContributions, key, value, casesWithCandidates);
     }
 
-    for (const key of ["routeDecision", "usedCollections", "suggestedCollections"]) {
+    for (const key of [
+      "routeDecision",
+      "usedCollections",
+      "suggestedCollections",
+      "topMetadataCandidateQuality",
+      "forbiddenTopMetadataCandidateQuality",
+      "topMetadataCandidateScoringMode",
+    ]) {
       const expectation = routerQuality.expectations?.[key] ?? {};
       aggregate.expectations[key].total += Number(expectation.total ?? 0);
       aggregate.expectations[key].matched += Number(expectation.matched ?? 0);

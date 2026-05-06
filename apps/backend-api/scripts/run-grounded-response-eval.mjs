@@ -366,6 +366,35 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (Array.isArray(testCase.forbiddenMetadataCandidateSourceQualities) && testCase.forbiddenMetadataCandidateSourceQualities.length > 0) {
+    const sourceQualities = retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.sourceQuality) ?? [];
+    const forbiddenQualities = testCase.forbiddenMetadataCandidateSourceQualities.filter((quality) => sourceQualities.includes(quality));
+    if (forbiddenQualities.length > 0) {
+      failures.push(`metadata_candidate_quality_forbidden:${forbiddenQualities.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(testCase.expectedTopMetadataCandidateSourceQualities) && testCase.expectedTopMetadataCandidateSourceQualities.length > 0) {
+    const topQuality = retrievalDebug?.sourceSelection?.metadataRouteCandidates?.[0]?.sourceQuality;
+    if (!testCase.expectedTopMetadataCandidateSourceQualities.includes(topQuality)) {
+      failures.push(`top_metadata_candidate_quality:${topQuality ?? "missing"}`);
+    }
+  }
+
+  if (Array.isArray(testCase.forbiddenTopMetadataCandidateSourceQualities) && testCase.forbiddenTopMetadataCandidateSourceQualities.length > 0) {
+    const topQuality = retrievalDebug?.sourceSelection?.metadataRouteCandidates?.[0]?.sourceQuality;
+    if (testCase.forbiddenTopMetadataCandidateSourceQualities.includes(topQuality)) {
+      failures.push(`top_metadata_candidate_quality_forbidden:${topQuality}`);
+    }
+  }
+
+  if (Array.isArray(testCase.expectedTopMetadataCandidateScoringModes) && testCase.expectedTopMetadataCandidateScoringModes.length > 0) {
+    const topScoringMode = retrievalDebug?.sourceSelection?.metadataRouteCandidates?.[0]?.scoreBreakdown?.scoringMode;
+    if (!testCase.expectedTopMetadataCandidateScoringModes.includes(topScoringMode)) {
+      failures.push(`top_metadata_candidate_scoring_mode:${topScoringMode ?? "missing"}`);
+    }
+  }
+
   if (Array.isArray(testCase.expectedSuggestedReasonTerms) && testCase.expectedSuggestedReasonTerms.length > 0) {
     const reasonText = [
       ...(retrievalDebug?.sourceSelection?.suggestedCollections?.map((collection) => collection.reason) ?? []),
@@ -532,6 +561,15 @@ function scoreCase(testCase, response) {
           missingSignals: metadataRouteCandidates[0].scoreBreakdown?.missingSignals ?? [],
         }
       : null,
+    expectedTopMetadataCandidateSourceQualities: Array.isArray(testCase.expectedTopMetadataCandidateSourceQualities)
+      ? testCase.expectedTopMetadataCandidateSourceQualities
+      : [],
+    forbiddenTopMetadataCandidateSourceQualities: Array.isArray(testCase.forbiddenTopMetadataCandidateSourceQualities)
+      ? testCase.forbiddenTopMetadataCandidateSourceQualities
+      : [],
+    expectedTopMetadataCandidateScoringModes: Array.isArray(testCase.expectedTopMetadataCandidateScoringModes)
+      ? testCase.expectedTopMetadataCandidateScoringModes
+      : [],
     expectedRouteDecisionMode: testCase.expectedRouteDecisionMode ?? null,
     expectedUsedCollectionIds: Array.isArray(testCase.expectedUsedCollectionIds) ? testCase.expectedUsedCollectionIds : [],
     expectedSuggestedCollectionIds: Array.isArray(testCase.expectedSuggestedCollectionIds) ? testCase.expectedSuggestedCollectionIds : [],
@@ -627,6 +665,42 @@ function summarizeRouterQuality(results) {
       expected: result.expectedSuggestedCollectionIds,
       actual: result.suggestedCollectionIds,
     }));
+  const expectedTopQualityCases = results.filter((result) => result.expectedTopMetadataCandidateSourceQualities.length > 0);
+  const topQualityMismatches = results
+    .filter((result) => {
+      if (result.expectedTopMetadataCandidateSourceQualities.length === 0) return false;
+      return !result.expectedTopMetadataCandidateSourceQualities.includes(result.metadataRouteCandidateTop?.sourceQuality);
+    })
+    .map((result) => ({
+      id: result.id,
+      bucket: result.bucket,
+      expected: result.expectedTopMetadataCandidateSourceQualities,
+      actual: result.metadataRouteCandidateTop?.sourceQuality ?? "missing",
+    }));
+  const forbiddenTopQualityCases = results.filter((result) => result.forbiddenTopMetadataCandidateSourceQualities.length > 0);
+  const forbiddenTopQualityViolations = results
+    .filter((result) => {
+      if (result.forbiddenTopMetadataCandidateSourceQualities.length === 0) return false;
+      return result.forbiddenTopMetadataCandidateSourceQualities.includes(result.metadataRouteCandidateTop?.sourceQuality);
+    })
+    .map((result) => ({
+      id: result.id,
+      bucket: result.bucket,
+      forbidden: result.forbiddenTopMetadataCandidateSourceQualities,
+      actual: result.metadataRouteCandidateTop?.sourceQuality ?? "missing",
+    }));
+  const expectedTopScoringModeCases = results.filter((result) => result.expectedTopMetadataCandidateScoringModes.length > 0);
+  const topScoringModeMismatches = results
+    .filter((result) => {
+      if (result.expectedTopMetadataCandidateScoringModes.length === 0) return false;
+      return !result.expectedTopMetadataCandidateScoringModes.includes(result.metadataRouteCandidateTop?.scoringMode);
+    })
+    .map((result) => ({
+      id: result.id,
+      bucket: result.bucket,
+      expected: result.expectedTopMetadataCandidateScoringModes,
+      actual: result.metadataRouteCandidateTop?.scoringMode ?? "missing",
+    }));
 
   return {
     routeDecisionModes: results.reduce((acc, result) => increment(acc, result.routeDecisionMode), {}),
@@ -690,6 +764,21 @@ function summarizeRouterQuality(results) {
         total: expectedSuggestedCollectionCases.length,
         matched: expectedSuggestedCollectionCases.length - suggestedCollectionMismatches.length,
         mismatches: suggestedCollectionMismatches,
+      },
+      topMetadataCandidateQuality: {
+        total: expectedTopQualityCases.length,
+        matched: expectedTopQualityCases.length - topQualityMismatches.length,
+        mismatches: topQualityMismatches,
+      },
+      forbiddenTopMetadataCandidateQuality: {
+        total: forbiddenTopQualityCases.length,
+        matched: forbiddenTopQualityCases.length - forbiddenTopQualityViolations.length,
+        mismatches: forbiddenTopQualityViolations,
+      },
+      topMetadataCandidateScoringMode: {
+        total: expectedTopScoringModeCases.length,
+        matched: expectedTopScoringModeCases.length - topScoringModeMismatches.length,
+        mismatches: topScoringModeMismatches,
       },
     },
   };
