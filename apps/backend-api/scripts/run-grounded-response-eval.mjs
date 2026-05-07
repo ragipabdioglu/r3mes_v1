@@ -12,6 +12,19 @@ function argValue(name, fallback) {
   return process.argv[index + 1];
 }
 
+function readNonNegativeNumberEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function readBooleanEnv(name, fallback = false) {
+  const raw = (process.env[name] ?? "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 function parseArgs() {
   const fileArg = argValue("--file", defaultSet);
   const outArg = argValue("--out", process.env.R3MES_GROUNDED_EVAL_OUT || defaultOut);
@@ -986,6 +999,83 @@ function summarizeBudgetQuality(results) {
   };
 }
 
+function buildEvalGuardrails(opts) {
+  const strict = readBooleanEnv("R3MES_EVAL_GUARDRAILS_STRICT", false);
+  const thresholds = {
+    maxRerankerFallbackRatio: readNonNegativeNumberEnv("R3MES_EVAL_MAX_RERANKER_FALLBACK_RATIO", 0),
+    maxFastGroundedP95Ms: readNonNegativeNumberEnv("R3MES_EVAL_MAX_FAST_GROUNDED_P95_MS", 6000),
+    maxNormalRagP95Ms: readNonNegativeNumberEnv("R3MES_EVAL_MAX_NORMAL_RAG_P95_MS", 8000),
+    maxDeepRagP95Ms: readNonNegativeNumberEnv("R3MES_EVAL_MAX_DEEP_RAG_P95_MS", 10000),
+    maxFastGroundedModelCandidateP95: readNonNegativeNumberEnv("R3MES_EVAL_MAX_FAST_GROUNDED_MODEL_CANDIDATE_P95", 3),
+    maxNormalRagModelCandidateP95: readNonNegativeNumberEnv("R3MES_EVAL_MAX_NORMAL_RAG_MODEL_CANDIDATE_P95", 5),
+    maxDeepRagModelCandidateP95: readNonNegativeNumberEnv("R3MES_EVAL_MAX_DEEP_RAG_MODEL_CANDIDATE_P95", 8),
+  };
+  const violations = [];
+  const pushIfOver = (id, actual, max, detail) => {
+    if (!Number.isFinite(Number(actual)) || Number(actual) <= max) return;
+    violations.push({
+      id,
+      actual: Number(actual),
+      max,
+      detail,
+    });
+  };
+
+  pushIfOver(
+    "reranker_fallback_ratio",
+    opts.rerankerQuality?.fallbackRatio,
+    thresholds.maxRerankerFallbackRatio,
+    "Cross-encoder reranker fallback oranı beklenenden yüksek.",
+  );
+
+  const latencyByBudget = opts.budgetQuality?.latencyByBudgetMode ?? {};
+  pushIfOver(
+    "fast_grounded_p95_latency",
+    latencyByBudget.fast_grounded?.p95Ms,
+    thresholds.maxFastGroundedP95Ms,
+    "Fast path p95 latency budget üstüne çıktı.",
+  );
+  pushIfOver(
+    "normal_rag_p95_latency",
+    latencyByBudget.normal_rag?.p95Ms,
+    thresholds.maxNormalRagP95Ms,
+    "Normal RAG p95 latency budget üstüne çıktı.",
+  );
+  pushIfOver(
+    "deep_rag_p95_latency",
+    latencyByBudget.deep_rag?.p95Ms,
+    thresholds.maxDeepRagP95Ms,
+    "Deep RAG p95 latency budget üstüne çıktı.",
+  );
+
+  const modelCandidatesByBudget = opts.rerankerQuality?.modelCandidatesByBudgetMode ?? {};
+  pushIfOver(
+    "fast_grounded_model_candidate_p95",
+    modelCandidatesByBudget.fast_grounded?.p95,
+    thresholds.maxFastGroundedModelCandidateP95,
+    "Fast path reranker model havuzu beklenenden genişledi.",
+  );
+  pushIfOver(
+    "normal_rag_model_candidate_p95",
+    modelCandidatesByBudget.normal_rag?.p95,
+    thresholds.maxNormalRagModelCandidateP95,
+    "Normal RAG reranker model havuzu beklenenden genişledi.",
+  );
+  pushIfOver(
+    "deep_rag_model_candidate_p95",
+    modelCandidatesByBudget.deep_rag?.p95,
+    thresholds.maxDeepRagModelCandidateP95,
+    "Deep RAG reranker model havuzu beklenenden genişledi.",
+  );
+
+  return {
+    status: violations.length === 0 ? "pass" : strict ? "fail" : "warn",
+    strict,
+    thresholds,
+    violations,
+  };
+}
+
 async function runCase(opts, testCase) {
   const body = {
     messages: [{ role: "user", content: testCase.query }],
@@ -1133,6 +1223,10 @@ async function main() {
   }
 
   const passed = results.filter((result) => result.ok).length;
+  const routerQuality = summarizeRouterQuality(results);
+  const budgetQuality = summarizeBudgetQuality(results);
+  const rerankerQuality = summarizeRerankerQuality(results);
+  const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality });
   const summary = {
     total: results.length,
     passed,
@@ -1143,9 +1237,10 @@ async function main() {
       acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     }, {}),
-    routerQuality: summarizeRouterQuality(results),
-    budgetQuality: summarizeBudgetQuality(results),
-    rerankerQuality: summarizeRerankerQuality(results),
+    routerQuality,
+    budgetQuality,
+    rerankerQuality,
+    evalGuardrails,
     shadowRuntime: {
       observed: results.filter((result) => result.shadowRuntime).length,
       activeAdjustmentCases: results.filter((result) => (result.shadowRuntime?.activeAdjustmentCount ?? 0) > 0).length,
@@ -1180,7 +1275,7 @@ async function main() {
   await writeFile(opts.out, `${JSON.stringify({ summary, results }, null, 2)}\n`, "utf8");
   console.log(`wrote ${opts.out}`);
   console.log(JSON.stringify(summary, null, 2));
-  process.exitCode = summary.failed === 0 ? 0 : 1;
+  process.exitCode = summary.failed === 0 && evalGuardrails.status !== "fail" ? 0 : 1;
 }
 
 main().catch((error) => {
