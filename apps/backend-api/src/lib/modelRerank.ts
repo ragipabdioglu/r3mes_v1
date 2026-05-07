@@ -359,7 +359,7 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
   }
 
   const requestedLimit = Math.max(1, Math.min(limit, deterministic.length));
-  const candidateLimit = Math.min(getCandidateLimit(), deterministic.length, requestedLimit);
+  const candidateLimit = Math.min(getCandidateLimit(), deterministic.length);
   const modelPool = deterministic.slice(0, candidateLimit);
   const documents = modelPool.map((candidate) => buildRerankerDocumentText(candidate));
 

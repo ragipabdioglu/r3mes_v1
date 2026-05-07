@@ -112,4 +112,51 @@ describe("rerankKnowledgeCardsWithFallback", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
+
+  it("scores the configured model pool even when the final return limit is smaller", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "model");
+    vi.stubEnv("R3MES_RERANKER_CANDIDATE_LIMIT", "3");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ scores: [0.1, 0.2, 0.9], provider: "cross_encoder" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
+      "kaynak üç daha alakalı",
+      [1, 2, 3, 4].map((index) => ({
+        fusedScore: 1 / index,
+        lexicalScore: 1 / index,
+        embeddingScore: 0,
+        chunk: {
+          id: `chunk-${index}`,
+          content: `aday ${index}`,
+          document: { title: `Aday ${index}` },
+        },
+        card: {
+          topic: `aday ${index}`,
+          tags: [`aday-${index}`],
+          patientSummary: "",
+          clinicalTakeaway: "",
+          safeGuidance: "",
+          redFlags: "",
+          doNotInfer: "",
+        },
+      })),
+      1,
+    );
+
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string | undefined) ?? "{}") as {
+      documents?: string[];
+    };
+    expect(body.documents).toHaveLength(3);
+    expect(result.diagnostics.modelCandidateCount).toBe(3);
+    expect(result.diagnostics.returnedCandidateCount).toBe(1);
+    expect(result.candidates[0]?.chunk).toMatchObject({ id: "chunk-3" });
+
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 });
