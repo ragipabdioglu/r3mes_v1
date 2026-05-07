@@ -67,6 +67,10 @@ export interface RerankWithDiagnosticsResult<TChunk> {
   diagnostics: RerankDiagnostics;
 }
 
+export interface ModelRerankOptions {
+  candidateLimit?: number;
+}
+
 const rerankScoreCache = new Map<string, RerankCacheEntry>();
 
 function rerankerMode(): string {
@@ -95,6 +99,12 @@ function getModelWeight(): number {
 
 function getCandidateLimit(): number {
   return parsePositiveInt(process.env.R3MES_RERANKER_CANDIDATE_LIMIT, DEFAULT_CANDIDATE_LIMIT);
+}
+
+function resolveCandidateLimit(override?: number): number {
+  return Number.isFinite(override) && override && override > 0
+    ? Math.floor(override)
+    : getCandidateLimit();
 }
 
 function getCacheTtlMs(): number {
@@ -267,6 +277,7 @@ function buildDiagnostics<TChunk>(opts: {
   returned: Array<RerankCandidate<TChunk>>;
   modelScores?: { raw: number[]; normalized: number[] };
 }): RerankDiagnostics {
+  const candidateLimit = opts.candidateLimit ?? getCandidateLimit();
   return {
     mode: opts.mode,
     modelEnabled: opts.modelEnabled,
@@ -276,7 +287,7 @@ function buildDiagnostics<TChunk>(opts: {
     deterministicCandidateCount: opts.deterministicCandidateCount,
     modelCandidateCount: opts.modelCandidateCount,
     returnedCandidateCount: opts.returned.length,
-    candidateLimit: opts.candidateLimit ?? getCandidateLimit(),
+    candidateLimit,
     modelWeight: getModelWeight(),
     timeoutMs: getTimeoutMs(),
     topCandidates: traceCandidates(opts.returned, opts.modelScores),
@@ -340,6 +351,7 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
   query: string,
   candidates: Array<HybridCandidate<TChunk> & { card: KnowledgeCard }>,
   limit = 4,
+  opts: ModelRerankOptions = {},
 ): Promise<RerankWithDiagnosticsResult<TChunk>> {
   const deterministic = rerankKnowledgeCards(query, candidates, candidates.length);
   if (!isModelRerankerEnabled() || deterministic.length === 0) {
@@ -359,7 +371,7 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
   }
 
   const requestedLimit = Math.max(1, Math.min(limit, deterministic.length));
-  const candidateLimit = Math.min(getCandidateLimit(), deterministic.length);
+  const candidateLimit = Math.min(resolveCandidateLimit(opts.candidateLimit), deterministic.length);
   const modelPool = deterministic.slice(0, candidateLimit);
   const documents = modelPool.map((candidate) => buildRerankerDocumentText(candidate));
 

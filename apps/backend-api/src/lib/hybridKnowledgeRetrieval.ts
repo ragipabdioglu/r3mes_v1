@@ -117,6 +117,16 @@ function finalSourceLimit(fallback: number): number {
   return parsePositiveInt(process.env.R3MES_RAG_FINAL_SOURCE_LIMIT, fallback);
 }
 
+function rerankerCandidateLimitForBudget(budgetMode: RetrievalBudgetMode): number {
+  if (budgetMode === "fast_grounded") {
+    return parsePositiveInt(process.env.R3MES_RERANKER_FAST_CANDIDATE_LIMIT, 3);
+  }
+  if (budgetMode === "deep_rag") {
+    return parsePositiveInt(process.env.R3MES_RERANKER_DEEP_CANDIDATE_LIMIT, 8);
+  }
+  return parsePositiveInt(process.env.R3MES_RERANKER_NORMAL_CANDIDATE_LIMIT, 5);
+}
+
 function minRerankScore(): number {
   return parseNonNegativeFloat(process.env.R3MES_RAG_MIN_RERANK_SCORE, 0.9);
 }
@@ -771,7 +781,9 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     embeddingScore: candidate.vectorScore ?? 0,
     fusedScore: candidate.preRankScore,
   }));
-  const rerankRun = await rerankKnowledgeCardsWithDiagnostics(query, rerankInput, Math.max(limit, 3));
+  const rerankRun = await rerankKnowledgeCardsWithDiagnostics(query, rerankInput, Math.max(limit, 3), {
+    candidateLimit: rerankerCandidateLimitForBudget(budgetMode),
+  });
   const reranked = rerankRun.candidates;
   const topScore = reranked[0]?.rerankScore ?? 0;
   const accepted = reranked

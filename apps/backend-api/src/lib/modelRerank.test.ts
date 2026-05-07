@@ -159,4 +159,51 @@ describe("rerankKnowledgeCardsWithFallback", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
+
+  it("allows callers to override the model candidate pool for adaptive budgets", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "model");
+    vi.stubEnv("R3MES_RERANKER_CANDIDATE_LIMIT", "5");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ scores: [0.3, 0.7], provider: "cross_encoder" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
+      "hızlı bütçe için küçük havuz",
+      [1, 2, 3, 4, 5].map((index) => ({
+        fusedScore: 1 / index,
+        lexicalScore: 1 / index,
+        embeddingScore: 0,
+        chunk: {
+          id: `chunk-${index}`,
+          content: `aday ${index}`,
+          document: { title: `Aday ${index}` },
+        },
+        card: {
+          topic: `aday ${index}`,
+          tags: [`aday-${index}`],
+          patientSummary: "",
+          clinicalTakeaway: "",
+          safeGuidance: "",
+          redFlags: "",
+          doNotInfer: "",
+        },
+      })),
+      1,
+      { candidateLimit: 2 },
+    );
+
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string | undefined) ?? "{}") as {
+      documents?: string[];
+    };
+    expect(body.documents).toHaveLength(2);
+    expect(result.diagnostics.candidateLimit).toBe(2);
+    expect(result.diagnostics.modelCandidateCount).toBe(2);
+
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 });
