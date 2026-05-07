@@ -529,6 +529,13 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (testCase.expectedAnswerPathName) {
+    const actualAnswerPath = chatTrace?.answerPath?.name;
+    if (actualAnswerPath !== testCase.expectedAnswerPathName) {
+      failures.push(`answer_path:${actualAnswerPath ?? "missing"}`);
+    }
+  }
+
   const forbidden = includesForbiddenAny(content, testCase.forbiddenTerms ?? []);
   if (forbidden.length > 0) {
     failures.push(`forbidden:${forbidden.join(",")}`);
@@ -661,6 +668,7 @@ function scoreCase(testCase, response) {
         }
       : null,
     latencyMs: response?._latencyMs ?? null,
+    answerPathName: chatTrace?.answerPath?.name ?? null,
     traceTotalDurationMs: Number.isFinite(Number(chatTrace?.totalDurationMs)) ? Number(chatTrace.totalDurationMs) : null,
     traceStageDurations: Array.isArray(chatTrace?.stages)
       ? chatTrace.stages.map((stage) => ({

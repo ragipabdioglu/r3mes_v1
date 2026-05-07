@@ -22,6 +22,7 @@ const REQUIRED_BUCKETS = [
   "suggestion",
   "router_quality",
   "adaptive_budget",
+  "small_talk_no_rag",
 ];
 
 const SUITE_PRIORITY = [
@@ -31,6 +32,7 @@ const SUITE_PRIORITY = [
   "adaptive-rag",
   "rag-quality-gates",
   "collection-suggestion",
+  "conversational-intent",
   "grounded-response",
   "multi-domain-basic",
   "domain-regression",
@@ -190,6 +192,11 @@ function classifyCase(testCase, suite) {
     testCase.expectedBudgetMode !== undefined ||
       testCase.expectedContextBudgetMode !== undefined ||
       includesAny(combined, ["budget", "adaptive"]),
+  );
+  mark(
+    "small_talk_no_rag",
+    testCase.expectedAnswerPathName === "conversational_intent" ||
+      includesAny(combined, ["small_talk", "small-talk", "conversational", "merhaba", "selam", "tesekkur"]),
   );
 
   return [...labels].sort();

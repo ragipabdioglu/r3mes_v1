@@ -47,6 +47,42 @@ describe("chat proxy RAG orchestration", () => {
     vi.clearAllMocks();
   });
 
+  it("answers short conversational messages without running retrieval", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { prisma } = await import("./lib/prisma.js");
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "content-type": "application/json" },
+      payload: JSON.stringify({
+        messages: [{ role: "user", content: "Merhaba" }],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      sources?: unknown[];
+      chat_trace?: {
+        answerPath?: { name?: string; intent?: string };
+        stages?: Array<{ name?: string; status?: string; detail?: { name?: string; reason?: string } }>;
+      };
+    };
+    expect(body.choices?.[0]?.message?.content).toContain("Merhaba");
+    expect(body.sources).toEqual([]);
+    expect(body.chat_trace?.answerPath?.name).toBe("conversational_intent");
+    expect(body.chat_trace?.answerPath?.intent).toBe("greeting");
+    expect(body.chat_trace?.stages?.some((stage) => stage.name === "retrieval" && stage.status === "skipped")).toBe(true);
+    expect(vi.mocked(prisma.knowledgeChunk.findMany)).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   it("adds retrieved context and returns sources metadata", async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);

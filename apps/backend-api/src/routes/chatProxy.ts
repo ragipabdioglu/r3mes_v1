@@ -10,6 +10,7 @@ import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
+import { detectConversationalIntent, type ConversationalIntentDecision } from "../lib/conversationalIntent.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
 import { evaluateFeedbackShadowRuntime, type FeedbackShadowRuntimeReport } from "../lib/feedbackShadowRuntime.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
@@ -922,6 +923,27 @@ function buildDeterministicGroundedAnswer(opts: {
   };
 }
 
+function createConversationalIntentPayload(opts: {
+  decision: ConversationalIntentDecision;
+  exposeDebug: boolean;
+  chatTrace: ChatTraceBuilder;
+}): Record<string, unknown> {
+  const payload = createChatCompletionPayload(opts.decision.response);
+  payload.sources = [];
+  if (opts.exposeDebug) {
+    payload.chat_trace = opts.chatTrace.snapshot({
+      answerPath: {
+        name: "conversational_intent",
+        retrievalWasUsed: false,
+        intent: opts.decision.kind,
+        confidence: opts.decision.confidence,
+        reason: opts.decision.reason,
+      },
+    });
+  }
+  return payload;
+}
+
 function isThinOrGenericText(value: string): boolean {
   const normalized = value.trim().toLocaleLowerCase("tr-TR");
   if (!normalized) return true;
@@ -1409,6 +1431,31 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           403,
           "KNOWLEDGE_ACCESS_DENIED",
           "İstenen knowledge collection'ların en az biri erişilebilir değil",
+        );
+      }
+
+      const conversationalIntent = detectConversationalIntent(retrievalQuery);
+      if (!stream && conversationalIntent) {
+        chatTrace.recordNow("query_planning", "skipped", {
+          name: "conversational_intent",
+          intent: conversationalIntent.kind,
+          confidence: conversationalIntent.confidence,
+          reason: conversationalIntent.reason,
+        });
+        chatTrace.recordNow("retrieval", "skipped", {
+          reason: "non-knowledge conversational intent",
+        });
+        chatTrace.recordNow("answer_path", "ok", {
+          name: "conversational_intent",
+          retrievalWasUsed: false,
+          intent: conversationalIntent.kind,
+        });
+        return reply.type("application/json").send(
+          createConversationalIntentPayload({
+            decision: conversationalIntent,
+            exposeDebug,
+            chatTrace,
+          }),
         );
       }
 
