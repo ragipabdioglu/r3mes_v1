@@ -116,6 +116,21 @@ describe("routeQuery", () => {
     });
   });
 
+  it("uses shared surface variants across non-medical domains", () => {
+    expect(routeQuery("Depozitomdan kesinti yapılmış, hangi belgeler gerekli?")).toMatchObject({
+      domain: "legal",
+      subtopics: ["kira"],
+    });
+    expect(routeQuery("Öğrencilerin disiplin kurulunda veliler ne hazırlamalı?")).toMatchObject({
+      domain: "education",
+      subtopics: expect.arrayContaining(["ogrenci_disiplini", "okul_yonetimi"]),
+    });
+    expect(routeQuery("Production veritabanlarından önce yedekleri nasıl kontrol edeyim?")).toMatchObject({
+      domain: "technical",
+      subtopics: ["migration"],
+    });
+  });
+
   it("extracts weak query signals without making them the final route authority", () => {
     const signals = extractQuerySignals("Boşanma davasında velayet için hangi belgeleri hazırlamalıyım?");
 

@@ -117,6 +117,21 @@ export function expandSurfaceConceptTerms(values: string | string[], limit = 64)
   return unique(terms, limit);
 }
 
+export function expandSurfaceTokenVariants(values: string | string[], limit = 64): string[] {
+  const inputs = Array.isArray(values) ? values : [values];
+  const terms: string[] = [];
+  for (const input of inputs) {
+    const normalized = normalizeConceptText(input);
+    if (!normalized) continue;
+    const tokens = normalized.split(/\s+/).filter((token) => token.length >= 3);
+    for (const token of tokens) {
+      terms.push(token);
+      terms.push(...lightTokenVariants(token).filter((variant) => variant === token || variant.length >= 4));
+    }
+  }
+  return unique(terms, limit);
+}
+
 const CONCEPT_RULES: CanonicalConceptRule[] = [
   {
     id: "concept:pelvic_pain",

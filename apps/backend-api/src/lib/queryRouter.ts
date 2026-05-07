@@ -1,5 +1,5 @@
 import type { AnswerDomain } from "./answerSchema.js";
-import { normalizeConceptText } from "./conceptNormalizer.js";
+import { expandSurfaceTokenVariants, normalizeConceptText } from "./conceptNormalizer.js";
 
 export type RouteRiskLevel = "low" | "medium" | "high";
 export type RouteConfidence = "low" | "medium" | "high";
@@ -48,11 +48,16 @@ function normalize(text: string): string {
 }
 
 function tokenize(text: string): string[] {
+  const normalized = normalize(text);
+  const baseTokens = normalized
+    .split(/[^\p{L}\p{N}-]+/u)
+    .map((token) => token.trim())
+    .filter(Boolean);
   return unique(
-    normalize(text)
-      .split(/[^\p{L}\p{N}-]+/u)
-      .map((token) => token.trim())
-      .filter(Boolean),
+    [
+      ...baseTokens,
+      ...expandSurfaceTokenVariants(baseTokens, 96).filter((token) => token.length >= 4),
+    ],
   );
 }
 
@@ -394,15 +399,16 @@ function fallbackDomainFromMatches(matches: RouteRule[]): AnswerDomain {
 
 export function routeQuery(userQuery: string): DomainRoutePlan {
   const normalized = normalize(userQuery);
+  const normalizedForMatching = unique([normalized, ...expandSurfaceTokenVariants(normalized, 128).filter((term) => term.length >= 4)]).join(" ");
   const tokens = tokenize(userQuery);
   const matched = ROUTE_RULES
-    .map((rule) => ({ rule, score: countMatches(normalized, tokens, rule.terms) }))
+    .map((rule) => ({ rule, score: countMatches(normalizedForMatching, tokens, rule.terms) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
   const rules = matched.map((item) => item.rule);
   const domain = fallbackDomainFromMatches(rules);
   const domainRules = rules.filter((rule) => rule.domain === domain);
-  const riskHits = domainRules.flatMap((rule) => rule.riskTerms ?? []).filter((term) => containsTerm(normalized, tokens, term));
+  const riskHits = domainRules.flatMap((rule) => rule.riskTerms ?? []).filter((term) => containsTerm(normalizedForMatching, tokens, term));
   const confidence: RouteConfidence =
     domainRules.length === 0 ? "low" : domainRules.length >= 2 || matched[0]?.score > 1 ? "high" : "medium";
 
