@@ -594,21 +594,63 @@ async function postChatCompletionToAiEngine(opts: {
 
 function summarizeRetrievalDiagnostics(diagnostics?: Record<string, unknown>): Record<string, unknown> | undefined {
   if (!diagnostics) return undefined;
-  const keys = [
-    "mode",
-    "embeddingProvider",
-    "embeddingDimension",
-    "qdrantCandidateCount",
-    "lexicalCandidateCount",
-    "preRankedCandidateCount",
-    "finalCandidateCount",
-    "droppedByAlignmentCount",
-    "alignmentFastFailed",
-    "rerankerMode",
-    "rerankerCandidateCount",
-    "budget",
-  ];
-  return Object.fromEntries(keys.map((key) => [key, diagnostics[key]]).filter(([, value]) => value !== undefined));
+  const alignment = typeof diagnostics.alignment === "object" && diagnostics.alignment
+    ? diagnostics.alignment as Record<string, unknown>
+    : undefined;
+  const reranker = typeof diagnostics.reranker === "object" && diagnostics.reranker
+    ? diagnostics.reranker as Record<string, unknown>
+    : undefined;
+  const budget = typeof diagnostics.budget === "object" && diagnostics.budget
+    ? diagnostics.budget as Record<string, unknown>
+    : undefined;
+
+  return {
+    retrievalMode: diagnostics.retrievalMode,
+    qdrantCandidateCount: diagnostics.qdrantCandidateCount,
+    prismaCandidateCount: diagnostics.prismaCandidateCount,
+    dedupedCandidateCount: diagnostics.dedupedCandidateCount,
+    preRankedCandidateCount: diagnostics.preRankedCandidateCount,
+    rerankedCandidateCount: diagnostics.rerankedCandidateCount,
+    finalCandidateCount: diagnostics.finalCandidateCount,
+    alignment: alignment
+      ? {
+          enabled: alignment.enabled,
+          minScore: alignment.minScore,
+          weakScore: alignment.weakScore,
+          alignedCandidateCount: alignment.alignedCandidateCount,
+          weakCandidateCount: alignment.weakCandidateCount,
+          mismatchCandidateCount: alignment.mismatchCandidateCount,
+          droppedCandidateCount: alignment.droppedCandidateCount,
+          fastFailed: alignment.fastFailed,
+        }
+      : undefined,
+    reranker: reranker
+      ? {
+          mode: reranker.mode,
+          modelEnabled: reranker.modelEnabled,
+          fallbackUsed: reranker.fallbackUsed,
+          fallbackReason: reranker.fallbackReason,
+          inputCandidateCount: reranker.inputCandidateCount,
+          deterministicCandidateCount: reranker.deterministicCandidateCount,
+          modelCandidateCount: reranker.modelCandidateCount,
+          returnedCandidateCount: reranker.returnedCandidateCount,
+          candidateLimit: reranker.candidateLimit,
+          topCandidates: Array.isArray(reranker.topCandidates) ? reranker.topCandidates.slice(0, 3) : undefined,
+        }
+      : undefined,
+    budget: budget
+      ? {
+          mode: budget.budgetMode,
+          contextMode: budget.contextMode,
+          requestedSourceLimit: budget.requestedSourceLimit,
+          finalSourceLimit: budget.finalSourceLimit,
+          finalSourceCount: budget.finalSourceCount,
+          contextTextChars: budget.contextTextChars,
+          evidenceUsableFactCount: budget.evidenceUsableFactCount,
+          evidenceRiskFactCount: budget.evidenceRiskFactCount,
+        }
+      : undefined,
+  };
 }
 
 function summarizeSourceSelectionForTrace(

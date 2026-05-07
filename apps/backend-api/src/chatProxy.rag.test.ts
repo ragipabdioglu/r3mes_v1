@@ -154,7 +154,18 @@ describe("chat proxy RAG orchestration", () => {
       chat_trace?: {
         query?: { hash?: string; length?: number };
         stages?: Array<{ name?: string; status?: string; durationMs?: number }>;
-        retrieval?: { mode?: string; sourceCount?: number };
+        retrieval?: {
+          mode?: string;
+          sourceCount?: number;
+          diagnostics?: {
+            qdrantCandidateCount?: number;
+            prismaCandidateCount?: number;
+            finalCandidateCount?: number;
+            alignment?: { fastFailed?: boolean; droppedCandidateCount?: number };
+            reranker?: { mode?: string; candidateLimit?: number; fallbackUsed?: boolean };
+            budget?: { mode?: string; finalSourceLimit?: number; finalSourceCount?: number };
+          };
+        };
         sourceSelection?: { selectionMode?: string; usedCollectionCount?: number };
         safety?: { pass?: boolean };
         answerPath?: { name?: string };
@@ -176,6 +187,12 @@ describe("chat proxy RAG orchestration", () => {
     expect(body.chat_trace?.query?.length).toBeGreaterThan(0);
     expect(body.chat_trace?.retrieval?.mode).toBe("true_hybrid");
     expect(body.chat_trace?.retrieval?.sourceCount).toBe(1);
+    expect(body.chat_trace?.retrieval?.diagnostics?.qdrantCandidateCount).toBeGreaterThanOrEqual(0);
+    expect(body.chat_trace?.retrieval?.diagnostics?.prismaCandidateCount).toBeGreaterThanOrEqual(0);
+    expect(body.chat_trace?.retrieval?.diagnostics?.finalCandidateCount).toBeGreaterThanOrEqual(1);
+    expect(body.chat_trace?.retrieval?.diagnostics?.alignment?.fastFailed).toBe(false);
+    expect(body.chat_trace?.retrieval?.diagnostics?.reranker?.candidateLimit).toBeGreaterThan(0);
+    expect(body.chat_trace?.retrieval?.diagnostics?.budget?.mode).toBe("deep_rag");
     expect(body.chat_trace?.sourceSelection?.selectionMode).toBe("selected");
     expect(body.chat_trace?.sourceSelection?.usedCollectionCount).toBe(1);
     expect(body.chat_trace?.safety?.pass).toBe(true);
