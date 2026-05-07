@@ -901,6 +901,53 @@ function summarizeLatencyByBudget(results) {
   );
 }
 
+function summarizeNumericByGroup(results, groupField, valueField) {
+  const groups = new Map();
+  for (const result of results) {
+    const group = result[groupField] ?? "missing";
+    const value = Number(result[valueField]);
+    if (!Number.isFinite(value)) continue;
+    const values = groups.get(group) ?? [];
+    values.push(value);
+    groups.set(group, values);
+  }
+  return Object.fromEntries(
+    [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([group, values]) => [
+      group,
+      {
+        count: values.length,
+        avg: Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3)),
+        p50: percentile(values, 0.5),
+        p95: percentile(values, 0.95),
+        max: Number(Math.max(...values).toFixed(3)),
+      },
+    ]),
+  );
+}
+
+function summarizeRerankerQuality(results) {
+  const casesWithReranker = results.filter((result) => result.rerankerMode);
+  const fallbackCases = casesWithReranker.filter((result) => result.rerankerFallbackUsed === true);
+  return {
+    observedCases: casesWithReranker.length,
+    coverageRatio: results.length === 0 ? 0 : Number((casesWithReranker.length / results.length).toFixed(3)),
+    modes: results.reduce((acc, result) => increment(acc, result.rerankerMode), {}),
+    fallbackCases: fallbackCases.length,
+    fallbackRatio:
+      casesWithReranker.length === 0
+        ? 0
+        : Number((fallbackCases.length / casesWithReranker.length).toFixed(3)),
+    averages: {
+      inputCandidates: averageField(casesWithReranker, "rerankerInputCandidateCount"),
+      modelCandidates: averageField(casesWithReranker, "rerankerModelCandidateCount"),
+      returnedCandidates: averageField(casesWithReranker, "rerankerReturnedCandidateCount"),
+    },
+    modelCandidatesByBudgetMode: summarizeNumericByGroup(casesWithReranker, "budgetMode", "rerankerModelCandidateCount"),
+    inputCandidatesByBudgetMode: summarizeNumericByGroup(casesWithReranker, "budgetMode", "rerankerInputCandidateCount"),
+    latencyByRerankerMode: summarizeNumericByGroup(casesWithReranker, "rerankerMode", "latencyMs"),
+  };
+}
+
 function summarizeBudgetQuality(results) {
   const casesWithBudget = results.filter((result) => result.budgetMode);
   const expectedBudgetCases = results.filter((result) => result.expectedBudgetMode);
@@ -1098,6 +1145,7 @@ async function main() {
     }, {}),
     routerQuality: summarizeRouterQuality(results),
     budgetQuality: summarizeBudgetQuality(results),
+    rerankerQuality: summarizeRerankerQuality(results),
     shadowRuntime: {
       observed: results.filter((result) => result.shadowRuntime).length,
       activeAdjustmentCases: results.filter((result) => (result.shadowRuntime?.activeAdjustmentCount ?? 0) > 0).length,
