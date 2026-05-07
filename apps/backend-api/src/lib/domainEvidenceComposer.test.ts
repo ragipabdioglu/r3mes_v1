@@ -224,4 +224,31 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).toContain("1. Yüksek ateş");
     expect(rendered).not.toContain("2. Yüksek ateş");
   });
+
+  it("uses a natural brief answer when the user asks for a short calm explanation", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "medical",
+      answerIntent: "steps",
+      groundingConfidence: "high",
+      userQuery: "Smear sonucum temiz ama kasıklarım ağrıyor. Kısa ve sakin açıkla.",
+      tone: "calm",
+      sections: ["assessment", "action", "caution", "summary"],
+      assessment: "Temiz smear sonucu tek başına ara ara kasık ağrısının nedenini açıklamaz.",
+      action: "Ağrı sürerse veya artarsa jinekoloji değerlendirmesi planlanmalıdır.",
+      caution: ["Şiddetli ağrı, ateş, yoğun kanama veya bayılma varsa daha hızlı başvuru gerekir."],
+      summary: "Smear temiz olsa da devam eden ağrı ayrıca değerlendirilmelidir.",
+      unknowns: [],
+      sourceIds: ["clinical-card-1"],
+      facts: [
+        "Smear sonucu temiz olsa bile kasık ağrısı farklı nedenlerle ilişkili olabilir.",
+        "Ağrı sürerse veya artarsa jinekoloji değerlendirmesi planlanmalıdır.",
+      ],
+    });
+
+    expect(rendered).toContain("Temiz smear sonucu");
+    expect(rendered).toContain("jinekoloji değerlendirmesi");
+    expect(rendered).toContain("Dikkat edilmesi gereken nokta:");
+    expect(rendered).not.toContain("Kısa plan:");
+    expect(rendered).not.toContain("1.");
+  });
 });

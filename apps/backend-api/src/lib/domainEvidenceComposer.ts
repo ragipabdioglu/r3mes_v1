@@ -41,6 +41,29 @@ function normalizeForMatch(value: string): string {
     .replace(/[^\p{L}\p{N}\s-]/gu, " ");
 }
 
+function compactForCompare(value: string): string {
+  return normalizeForMatch(value).replace(/\s+/g, " ").trim();
+}
+
+function isNearDuplicate(left: string, right: string): boolean {
+  const a = compactForCompare(left);
+  const b = compactForCompare(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 40) return false;
+  return a.includes(b.slice(0, 80)) || b.includes(a.slice(0, 80));
+}
+
+function asksForStructuredList(query: string): boolean {
+  const normalized = compactForCompare(query);
+  return /\b(madde|maddeli|liste|adim|adım|checklist|sirala|sırala)\b/u.test(normalized);
+}
+
+function asksForBriefNaturalAnswer(query: string): boolean {
+  const normalized = compactForCompare(query);
+  return /\b(kisa|kısa|sakin|basit|dogal|doğal|acikla|açıkla)\b/u.test(normalized) && !asksForStructuredList(query);
+}
+
 function matchTokens(value: string): string[] {
   const stopwords = new Set([
     "acaba",
@@ -107,6 +130,40 @@ function lowGroundingLead(spec: AnswerSpec): string | null {
   return "Bu kaynaklarla net ve kesin bir cevap vermek doğru olmaz; aşağıdaki yanıt yalnızca eldeki sınırlı dayanağa göre okunmalı.";
 }
 
+function composeNaturalBrief(spec: AnswerSpec, opts: {
+  assessment: string;
+  action: string;
+  caution: string;
+  summary: string;
+  relevantFact: string | null;
+}): string {
+  const lines: string[] = [];
+  const lead = lowGroundingLead(spec);
+  if (lead) lines.push(lead);
+
+  const firstSentence = sentence(opts.assessment);
+  const actionSentence = sentence(opts.action);
+  const cautionSentence = sentence(opts.caution);
+  const summarySentence = sentence(opts.summary);
+
+  const body: string[] = [firstSentence];
+  if (!isNearDuplicate(opts.action, opts.assessment)) body.push(actionSentence);
+  if (opts.relevantFact && ![opts.assessment, opts.action, opts.caution].some((value) => isNearDuplicate(value, opts.relevantFact ?? ""))) {
+    body.push(sentence(opts.relevantFact));
+  }
+  lines.push(body.join(" "));
+
+  if (!isNearDuplicate(opts.caution, opts.assessment) && !isNearDuplicate(opts.caution, opts.action)) {
+    lines.push(`Dikkat edilmesi gereken nokta: ${cautionSentence}`);
+  }
+
+  if (!isNearDuplicate(opts.summary, opts.assessment) && !isNearDuplicate(opts.summary, opts.action)) {
+    lines.push(`Kısaca: ${summarySentence}`);
+  }
+
+  return lines.join("\n");
+}
+
 export function composeAnswerSpec(spec: AnswerSpec): string {
   const policy = getDomainPolicy(spec.answerDomain);
   const sourceNote =
@@ -134,6 +191,9 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
   }
 
   if (spec.answerIntent === "steps") {
+    if (asksForBriefNaturalAnswer(spec.userQuery)) {
+      return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
+    }
     lines.push(`Kısa plan:`);
     uniqueSentences([action, assessment, caution], 3).forEach((item, index) => {
       lines.push(`${index + 1}. ${item}`);
@@ -144,6 +204,9 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
   }
 
   if (spec.answerIntent === "reassure") {
+    if (asksForBriefNaturalAnswer(spec.userQuery)) {
+      return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
+    }
     lines.push(
       `Kısa cevap: ${sentence(assessment)}`,
       `Bu, tek başına kesin veya panik gerektiren bir sonuç gibi sunulmamalı; kaynakların desteklediği sınır burada kalıyor.`,
@@ -165,6 +228,9 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
   }
 
   if (spec.answerIntent === "explain") {
+    if (asksForBriefNaturalAnswer(spec.userQuery)) {
+      return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
+    }
     lines.push(
       `${sentence(assessment)}`,
       `Pratik anlamı: ${sentence(action)}`,
@@ -172,6 +238,10 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
       `Kısa özet: ${sentence(summary)}`,
     );
     return lines.join("\n");
+  }
+
+  if (asksForBriefNaturalAnswer(spec.userQuery)) {
+    return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
   }
 
   lines.push(
