@@ -10,7 +10,7 @@ import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
-import { detectConversationalIntent, type ConversationalIntentDecision } from "../lib/conversationalIntent.js";
+import type { ConversationalIntentDecision } from "../lib/conversationalIntent.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
 import { evaluateFeedbackShadowRuntime, type FeedbackShadowRuntimeReport } from "../lib/feedbackShadowRuntime.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
@@ -29,6 +29,7 @@ import {
 } from "../lib/knowledgeAccess.js";
 import { retrieveKnowledgeContext } from "../lib/knowledgeRetrieval.js";
 import { retrieveKnowledgeContextQdrant } from "../lib/qdrantRetrieval.js";
+import { buildQueryUnderstanding, summarizeQueryUnderstandingForTrace } from "../lib/queryUnderstanding.js";
 import { renderGroundedMedicalAnswer } from "../lib/renderMedicalAnswer.js";
 import { buildRouteDecisionLogEvent } from "../lib/routeDecisionLog.js";
 import { resolveRetrievalBudget } from "../lib/retrievalBudget.js";
@@ -1445,6 +1446,11 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         hasQuery: retrievalQuery.trim().length > 0,
         messageCount: Array.isArray(rawBody.messages) ? rawBody.messages.length : 0,
       });
+      const queryUnderstanding = buildQueryUnderstanding(retrievalQuery);
+      chatTrace.recordNow("query_understanding", "ok", {
+        name: "query_understanding",
+        ...summarizeQueryUnderstandingForTrace(queryUnderstanding),
+      });
       const sourceAccessTrace = chatTrace.start("source_access");
       const accessibleCollections =
         requestedCollectionIds.length > 0 || includePublic
@@ -1474,7 +1480,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         );
       }
 
-      const conversationalIntent = detectConversationalIntent(retrievalQuery);
+      const conversationalIntent = queryUnderstanding.conversationalIntent;
       if (!stream && conversationalIntent) {
         chatTrace.recordNow("query_planning", "skipped", {
           name: "conversational_intent",

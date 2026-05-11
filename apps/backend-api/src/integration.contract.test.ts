@@ -245,7 +245,7 @@ describe("integration contract surface", () => {
       headers: { "content-type": "application/json" },
       payload: JSON.stringify({
         adapter_db_id: "adapter-1",
-        messages: [{ role: "user", content: "hi" }],
+        messages: [{ role: "system", content: "adapter integration contract test" }],
       }),
     });
 
@@ -281,7 +281,7 @@ describe("integration contract surface", () => {
       headers: { "content-type": "application/json" },
       payload: JSON.stringify({
         adapter_db_id: "adapter-pending",
-        messages: [{ role: "user", content: "hi" }],
+        messages: [{ role: "system", content: "adapter integration contract test" }],
       }),
     });
 
@@ -310,7 +310,7 @@ describe("integration contract surface", () => {
       headers: { "content-type": "application/json" },
       payload: JSON.stringify({
         adapter_db_id: "adapter-1",
-        messages: [{ role: "user", content: "hi" }],
+        messages: [{ role: "system", content: "adapter integration contract test" }],
       }),
     });
 
@@ -342,7 +342,7 @@ describe("integration contract surface", () => {
       headers: { "content-type": "application/json" },
       payload: JSON.stringify({
         adapter_cid: "bafypendingcid",
-        messages: [{ role: "user", content: "hi" }],
+        messages: [{ role: "system", content: "adapter integration contract test" }],
       }),
     });
 

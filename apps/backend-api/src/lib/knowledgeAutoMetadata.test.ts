@@ -113,6 +113,9 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
         symbolRatio: 0.01,
         shortLineRatio: 0.1,
         structureSignalCount: 2,
+        tableSignalCount: 0,
+        numericDensity: 0,
+        ocrRiskScore: 0,
       },
     };
     const noisy = inferKnowledgeAutoMetadata({
@@ -133,6 +136,9 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
         symbolRatio: 0.04,
         shortLineRatio: 0.2,
         structureSignalCount: 1,
+        tableSignalCount: 0,
+        numericDensity: 0,
+        ocrRiskScore: 27,
       },
     };
 
@@ -157,7 +163,7 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
       now: new Date("2026-04-29T00:00:00.000Z"),
     });
 
-    expect(profile?.version).toBe(2);
+    expect(profile?.version).toBe(3);
     expect(profile?.profileVersion).toBe(1);
     expect(profile?.domains[0]).toBe("legal");
     expect(profile?.keywords).toEqual(expect.arrayContaining(["bosanma", "velayet", "nafaka"]));
@@ -175,6 +181,41 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(profile?.entityEmbedding).toHaveLength(256);
     expect(profile?.lastProfiledAt).toBe("2026-04-29T00:00:00.000Z");
     expect(profile?.updatedAt).toBe("2026-04-29T00:00:00.000Z");
+  });
+
+  it("adds table concepts to collection profiles for table-heavy sources", () => {
+    const metadata = inferKnowledgeAutoMetadata({
+      title: "KAP finansal tablo",
+      content: "Hasılat 2024 1.250.000 TL, 2025 1.640.000 TL. Net kar 2024 220.000 TL, 2025 305.000 TL.",
+    });
+    metadata.parseQuality = {
+      score: 86,
+      level: "clean",
+      warnings: ["table_like_content"],
+      signals: {
+        textLength: 520,
+        chunkCount: 1,
+        averageChunkChars: 520,
+        replacementCharRatio: 0,
+        mojibakeMarkerCount: 0,
+        controlCharRatio: 0,
+        symbolRatio: 0.02,
+        shortLineRatio: 0.1,
+        structureSignalCount: 2,
+        tableSignalCount: 2,
+        numericDensity: 0.12,
+        ocrRiskScore: 0,
+      },
+    };
+
+    const profile = buildKnowledgeCollectionProfile([metadata], {
+      now: new Date("2026-04-29T00:00:00.000Z"),
+    });
+
+    expect(profile?.version).toBe(3);
+    expect(profile?.tableConcepts.length).toBeGreaterThan(0);
+    expect(profile?.tableConcepts).toEqual(expect.arrayContaining(["table evidence"]));
+    expect(profile?.profileText).toContain("Table concepts:");
   });
 
   it("builds useful profile signals for unknown-domain uploads without route rules", () => {

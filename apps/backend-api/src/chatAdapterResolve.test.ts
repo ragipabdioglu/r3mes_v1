@@ -97,7 +97,7 @@ describe("resolveAdapterCidForChatProxy", () => {
     }
     expect(findUnique).toHaveBeenCalledWith({
       where: { id: "clxyz123" },
-      select: { weightsCid: true, manifestCid: true, status: true },
+      select: expect.objectContaining({ weightsCid: true, manifestCid: true, status: true }),
     });
   });
 

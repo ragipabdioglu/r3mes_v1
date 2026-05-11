@@ -34,7 +34,7 @@ export interface KnowledgeAutoMetadata {
 }
 
 export interface KnowledgeCollectionProfile {
-  version: 2;
+  version: 3;
   profileVersion: number;
   domains: string[];
   subtopics: string[];
@@ -42,6 +42,7 @@ export interface KnowledgeCollectionProfile {
   entities: string[];
   topicPhrases: string[];
   answerableConcepts: string[];
+  tableConcepts: string[];
   negativeHints: string[];
   documentTypes: string[];
   audiences: string[];
@@ -151,6 +152,9 @@ function aggregateParseQuality(items: KnowledgeAutoMetadata[]): KnowledgeParseQu
       symbolRatio: Number((qualities.reduce((sum, item) => sum + item.signals.symbolRatio, 0) / qualities.length).toFixed(5)),
       shortLineRatio: Number((qualities.reduce((sum, item) => sum + item.signals.shortLineRatio, 0) / qualities.length).toFixed(5)),
       structureSignalCount: Math.round(qualities.reduce((sum, item) => sum + item.signals.structureSignalCount, 0) / qualities.length),
+      tableSignalCount: Math.round(qualities.reduce((sum, item) => sum + (item.signals.tableSignalCount ?? 0), 0) / qualities.length),
+      numericDensity: Number((qualities.reduce((sum, item) => sum + (item.signals.numericDensity ?? 0), 0) / qualities.length).toFixed(5)),
+      ocrRiskScore: Math.round(qualities.reduce((sum, item) => sum + (item.signals.ocrRiskScore ?? 0), 0) / qualities.length),
     },
   };
 }
@@ -191,6 +195,7 @@ function buildProfileText(
     profileLine("Entities", profile.entities),
     profileLine("Topic phrases", profile.topicPhrases),
     profileLine("Answerable concepts", profile.answerableConcepts),
+    profileLine("Table concepts", profile.tableConcepts),
     profileLine("Negative hints", profile.negativeHints),
     profileLine("Document types", profile.documentTypes),
     profileLine("Audiences", profile.audiences),
@@ -387,6 +392,23 @@ function buildNegativeHints(opts: {
   );
 }
 
+function buildTableConcepts(items: KnowledgeAutoMetadata[]): string[] {
+  const tableItems = items.filter((item) => (item.parseQuality?.signals.tableSignalCount ?? 0) > 0);
+  if (tableItems.length === 0) return [];
+  return weightedUnique(
+    [
+      "table evidence",
+      "structured table",
+      ...tableItems.flatMap((item) => [
+        ...item.subtopics.map(phraseFromSubtopic),
+        ...item.keywords.filter((keyword) => !isGenericProfileTerm(keyword) && !/^\d+(?:\s+\d+)*$/.test(normalizeTerm(keyword))),
+        ...item.entities.filter((entity) => !isGenericProfileTerm(entity) && !/^\d+(?:\s+\d+)*$/.test(normalizeTerm(entity))),
+      ]),
+    ],
+    16,
+  );
+}
+
 export function buildKnowledgeCollectionProfile(
   items: KnowledgeAutoMetadata[],
   opts: { now?: Date; previousProfile?: KnowledgeCollectionProfile | null } = {},
@@ -407,6 +429,7 @@ export function buildKnowledgeCollectionProfile(
   const sampleQuestions = unique(cleanItems.flatMap((item) => item.questionsAnswered), 12);
   const topicPhrases = buildTopicPhrases(cleanItems);
   const answerableConcepts = buildAnswerableConcepts({ topicPhrases, subtopics, keywords, entities });
+  const tableConcepts = buildTableConcepts(cleanItems);
   const negativeHints = buildNegativeHints({ keywords, topicPhrases, answerableConcepts });
   const baseProfile = {
     domains,
@@ -415,6 +438,7 @@ export function buildKnowledgeCollectionProfile(
     entities,
     topicPhrases,
     answerableConcepts,
+    tableConcepts,
     negativeHints,
     documentTypes,
     audiences,
@@ -428,7 +452,7 @@ export function buildKnowledgeCollectionProfile(
   const profileTextHash = hashProfileText(profileText);
   const timestamp = (opts.now ?? new Date()).toISOString();
   return {
-    version: 2,
+    version: 3,
     profileVersion: nextProfileVersion(opts.previousProfile, profileTextHash),
     ...baseProfile,
     profileText,

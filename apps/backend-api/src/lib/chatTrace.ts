@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 export type ChatTraceStageName =
   | "request"
   | "source_access"
+  | "query_understanding"
   | "query_planning"
   | "retrieval"
   | "suggestion_probe"

@@ -60,7 +60,7 @@ describe("chat proxy default stop sequences", () => {
       headers: { "content-type": "application/json" },
       payload: JSON.stringify({
         adapter_db_id: "adapter-1",
-        messages: [{ role: "user", content: "hello" }],
+        messages: [{ role: "system", content: "adapter stop sequence test" }],
       }),
     });
 
@@ -106,7 +106,7 @@ describe("chat proxy default stop sequences", () => {
       payload: JSON.stringify({
         adapter_db_id: "adapter-1",
         stop: ["<eos>"],
-        messages: [{ role: "user", content: "hello" }],
+        messages: [{ role: "system", content: "adapter stop sequence test" }],
       }),
     });
 

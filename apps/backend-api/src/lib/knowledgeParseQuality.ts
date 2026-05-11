@@ -16,6 +16,9 @@ export interface KnowledgeParseQuality {
     symbolRatio: number;
     shortLineRatio: number;
     structureSignalCount: number;
+    tableSignalCount: number;
+    numericDensity: number;
+    ocrRiskScore: number;
   };
 }
 
@@ -27,6 +30,12 @@ const STRUCTURE_PATTERNS = [
   /^\s*\d+[.)]\s+\S/m,
   /\|[^|\n]+\|/,
   /\b(topic|tags|summary|soru|cevap|kaynak|madde|risk|özet|ozet)\s*:/iu,
+];
+const TABLE_PATTERNS = [
+  /\|[^|\n]+\|[^|\n]+\|/,
+  /^\s*[^\n|;]+(?:[;,\t]\s*[^\n|;]+){3,}$/m,
+  /\b\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?\s*(?:TL|TRY|USD|EUR|%)\b/iu,
+  /\b(?:gelir|gider|aktif|pasif|kar|zarar|özkaynak|ozkaynak|nakit|hasılat|hasilat)\b/iu,
 ];
 
 function clampScore(score: number): number {
@@ -44,6 +53,10 @@ function countMatches(text: string, pattern: RegExp): number {
 function structureSignalCount(text: string, sourceType: "TEXT" | "MARKDOWN" | "JSON"): number {
   const base = STRUCTURE_PATTERNS.filter((pattern) => pattern.test(text)).length;
   return sourceType === "JSON" ? base + 1 : base;
+}
+
+function tableSignalCount(text: string): number {
+  return TABLE_PATTERNS.filter((pattern) => pattern.test(text)).length;
 }
 
 function qualityLevel(score: number): KnowledgeParseQualityLevel {
@@ -72,6 +85,17 @@ export function scoreKnowledgeParseQuality(opts: {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const shortLineRatio = ratio(lines.filter((line) => line.length <= 18).length, lines.length);
   const structureSignals = structureSignalCount(text, opts.sourceType);
+  const tableSignals = tableSignalCount(text);
+  const numericDensity = ratio(countMatches(text, /\d/g), textLength);
+  const ocrRiskScore = Math.min(
+    100,
+    Math.round(
+      replacementCharRatio * 10000
+        + mojibakeMarkerCount * 3
+        + controlCharRatio * 4000
+        + Math.max(0, symbolRatio - 0.08) * 300,
+    ),
+  );
 
   const warnings: string[] = [];
   let score = 72;
@@ -79,6 +103,10 @@ export function scoreKnowledgeParseQuality(opts: {
   if (opts.sourceType === "JSON" || opts.sourceType === "MARKDOWN") score += 5;
   if (structureSignals >= 2) score += 10;
   else if (structureSignals === 1) score += 4;
+  if (tableSignals >= 2) {
+    score += 5;
+    warnings.push("table_like_content");
+  }
 
   if (textLength < 160) {
     score -= 26;
@@ -123,6 +151,17 @@ export function scoreKnowledgeParseQuality(opts: {
     warnings.push("fragmented_lines");
   }
 
+  if (ocrRiskScore >= 35) {
+    warnings.push("ocr_risk_high");
+  } else if (ocrRiskScore >= 12) {
+    warnings.push("ocr_risk_medium");
+  }
+
+  if (numericDensity > 0.18 && tableSignals === 0 && textLength > 400) {
+    score -= 8;
+    warnings.push("dense_numbers_without_table_structure");
+  }
+
   if (structureSignals === 0 && textLength > 700) {
     score -= 6;
     warnings.push("low_structural_signal");
@@ -142,6 +181,9 @@ export function scoreKnowledgeParseQuality(opts: {
       symbolRatio: Number(symbolRatio.toFixed(5)),
       shortLineRatio: Number(shortLineRatio.toFixed(5)),
       structureSignalCount: structureSignals,
+      tableSignalCount: tableSignals,
+      numericDensity: Number(numericDensity.toFixed(5)),
+      ocrRiskScore,
     },
   };
 }

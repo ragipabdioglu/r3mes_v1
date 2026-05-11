@@ -221,6 +221,9 @@ function readKnowledgeParseQuality(value: unknown): KnowledgeParseQuality | unde
           symbolRatio: 0,
           shortLineRatio: 0,
           structureSignalCount: 0,
+          tableSignalCount: 0,
+          numericDensity: 0,
+          ocrRiskScore: 0,
         },
   };
 }

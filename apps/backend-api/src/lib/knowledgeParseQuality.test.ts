@@ -63,4 +63,43 @@ describe("scoreKnowledgeParseQuality", () => {
     expect(quality.level).toBe("usable");
     expect(quality.score).toBeGreaterThanOrEqual(48);
   });
+
+  it("keeps table-like financial content visible as a parse signal", () => {
+    const text = [
+      "# KAP Finansal Tablo",
+      "| Kalem | 2024 | 2025 | Değişim |",
+      "| Hasılat | 1.250.000 TL | 1.640.000 TL | %31 |",
+      "| Net kar | 220.000 TL | 305.000 TL | %39 |",
+      "Şirket hasılat ve net kar değişimini finansal tablo içinde açıklamıştır.",
+    ].join("\n");
+
+    const quality = scoreKnowledgeParseQuality({
+      filename: "kap-table.md",
+      sourceType: "MARKDOWN",
+      text,
+      chunks: chunkKnowledgeText(text),
+    });
+
+    expect(quality.signals.tableSignalCount).toBeGreaterThanOrEqual(2);
+    expect(quality.signals.numericDensity).toBeGreaterThan(0.05);
+    expect(quality.warnings).toContain("table_like_content");
+  });
+
+  it("flags dense numeric text without table structure as a parsing risk", () => {
+    const text = [
+      "2024 1250000 1640000 31 2025 220000 305000 39 2023 980000 1100000 12 2022 800000 930000 16",
+      "Bu metinde sayılar art arda gelmektedir ancak başlık, satır veya tablo ayrımı yeterince açık değildir.",
+      "Açıklama kullanıcıya aktarılmadan önce kaynak bağlamının dikkatli kontrol edilmesi gerekir.",
+    ].join("\n").repeat(3);
+
+    const quality = scoreKnowledgeParseQuality({
+      filename: "ocr-numbers.txt",
+      sourceType: "TEXT",
+      text,
+      chunks: chunkKnowledgeText(text),
+    });
+
+    expect(quality.signals.numericDensity).toBeGreaterThan(0.18);
+    expect(quality.warnings).toContain("dense_numbers_without_table_structure");
+  });
 });
