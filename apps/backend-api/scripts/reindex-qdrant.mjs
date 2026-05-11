@@ -20,11 +20,49 @@ const argValue = (name) => {
 };
 const explicitAfter = argValue("--after");
 const maxBatches = Number.parseInt(argValue("--max-batches") || "0", 10);
+const explicitCollectionIds = [
+  ...process.argv
+    .map((value, index) => value === "--collection-id" ? process.argv[index + 1] : null)
+    .filter(Boolean),
+  ...(process.env.R3MES_QDRANT_REINDEX_COLLECTION_IDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+];
 const resetCheckpoint = args.has("--reset-checkpoint");
 const noCheckpoint = args.has("--no-checkpoint");
 const statusOnly = args.has("--status");
 const verifyCount = args.has("--verify-count") || statusOnly;
 const CHECKPOINT_SCHEMA_VERSION = 2;
+
+function collectionScopeWhere() {
+  return explicitCollectionIds.length > 0
+    ? { document: { collectionId: { in: [...new Set(explicitCollectionIds)] } } }
+    : {};
+}
+
+function collectionScopeFilter() {
+  const uniqueIds = [...new Set(explicitCollectionIds)];
+  if (uniqueIds.length === 0) return null;
+  return {
+    should: uniqueIds.map((id) => ({ key: "collectionId", match: { value: id } })),
+  };
+}
+
+function collectionScopeKey() {
+  return [...new Set(explicitCollectionIds)].sort().join(",");
+}
+
+function withCollectionScopeFilter(filter) {
+  const scope = collectionScopeFilter();
+  if (!scope) return filter;
+  return {
+    must: [
+      ...(filter?.must ?? []),
+      scope,
+    ],
+  };
+}
 
 function getQdrantBaseUrl() {
   return (process.env.R3MES_QDRANT_URL ?? "http://127.0.0.1:6333").replace(/\/$/, "");
@@ -83,6 +121,12 @@ async function qdrantPointCount() {
   return null;
 }
 
+async function qdrantScopedPointCount() {
+  const scope = collectionScopeFilter();
+  if (!scope) return qdrantPointCount();
+  return qdrantFilteredPointCount(scope);
+}
+
 async function qdrantFilteredPointCount(filter) {
   const collection = encodeURIComponent(getQdrantCollectionName());
   const response = await fetch(`${getQdrantBaseUrl()}/collections/${collection}/points/count`, {
@@ -99,30 +143,31 @@ async function qdrantFilteredPointCount(filter) {
 }
 
 async function embeddingProviderPointCount() {
-  return qdrantFilteredPointCount({
+  return qdrantFilteredPointCount(withCollectionScopeFilter({
     must: [
       { key: "embeddingProvider", match: { value: requestedEmbeddingProvider } },
       { key: "embeddingVectorSize", match: { value: getQdrantVectorSize() } },
     ],
-  });
+  }));
 }
 
 async function deterministicFallbackPointCount() {
-  return qdrantFilteredPointCount({
+  return qdrantFilteredPointCount(withCollectionScopeFilter({
     must: [
       { key: "embeddingProvider", match: { value: "deterministic" } },
     ],
-  });
+  }));
 }
 
 async function chunkStats(afterId = null) {
+  const baseWhere = collectionScopeWhere();
   const [totalChunks, remainingChunks] = await Promise.all([
-    prisma.knowledgeChunk.count(),
+    prisma.knowledgeChunk.count({ where: baseWhere }),
     afterId
       ? prisma.knowledgeChunk.count({
-          where: { id: { gt: afterId } },
+          where: { ...baseWhere, id: { gt: afterId } },
         })
-      : prisma.knowledgeChunk.count(),
+      : prisma.knowledgeChunk.count({ where: baseWhere }),
   ]);
   return {
     totalChunks,
@@ -137,6 +182,7 @@ function readCheckpoint() {
     const parsed = JSON.parse(readFileSync(checkpointPath, "utf8"));
     if (parsed?.collection !== getQdrantCollectionName()) return null;
     if (parsed?.vectorSize !== getQdrantVectorSize()) return null;
+    if ((parsed?.collectionScopeKey ?? "") !== collectionScopeKey()) return null;
     if (typeof parsed?.lastChunkId !== "string" || !parsed.lastChunkId) return null;
     return parsed;
   } catch {
@@ -157,7 +203,7 @@ function clearCheckpoint() {
 
 async function printStatus(startAfter) {
   const stats = await chunkStats(startAfter ?? null);
-  const pointCount = verifyCount ? await qdrantPointCount() : null;
+  const pointCount = verifyCount ? await qdrantScopedPointCount() : null;
   const providerPointCount = verifyCount ? await embeddingProviderPointCount() : null;
   const fallbackPointCount = verifyCount ? await deterministicFallbackPointCount() : null;
   const indexComplete = pointCount == null ? null : pointCount >= stats.totalChunks;
@@ -169,6 +215,8 @@ async function printStatus(startAfter) {
     checkpointPath: noCheckpoint ? null : checkpointPath,
     resumeAfter: startAfter ?? null,
     collection: getQdrantCollectionName(),
+    collectionIds: explicitCollectionIds.length > 0 ? [...new Set(explicitCollectionIds)] : null,
+    collectionScopeKey: collectionScopeKey() || null,
     vectorSize: getQdrantVectorSize(),
     requestedEmbeddingProvider,
     requireRealEmbeddings,
@@ -205,9 +253,11 @@ async function main() {
     requireRealEmbeddings,
     vectorSize: getQdrantVectorSize(),
     collection: getQdrantCollectionName(),
+    collectionIds: explicitCollectionIds.length > 0 ? [...new Set(explicitCollectionIds)] : null,
+    collectionScopeKey: collectionScopeKey() || null,
     totalChunks: statsAtStart.totalChunks,
     remainingChunks: statsAtStart.remainingChunks,
-    qdrantPointCount: verifyCount ? await qdrantPointCount() : null,
+    qdrantPointCount: verifyCount ? await qdrantScopedPointCount() : null,
   }));
 
   let cursor = startAfter;
@@ -218,6 +268,7 @@ async function main() {
     const chunks = await prisma.knowledgeChunk.findMany({
       take: batchSize,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      where: collectionScopeWhere(),
       orderBy: { id: "asc" },
       include: {
         document: {
@@ -295,6 +346,7 @@ async function main() {
       batchSize: points.length,
       lastChunkId: cursor,
       collection: getQdrantCollectionName(),
+      collectionScopeKey: collectionScopeKey(),
       vectorSize: getQdrantVectorSize(),
       totalChunks: statsAtStart.totalChunks,
       completedChunksApprox: Math.min(statsAtStart.totalChunks, statsAtStart.completedChunks + total),
@@ -313,6 +365,7 @@ async function main() {
         indexedThisRun: total,
         batchesThisRun: batches,
         lastChunkId: cursor,
+        collectionIds: explicitCollectionIds.length > 0 ? [...new Set(explicitCollectionIds)] : null,
         checkpointPath: noCheckpoint ? null : checkpointPath,
         resumeCommand: `pnpm --filter @r3mes/backend-api run qdrant:reindex`,
       }, null, 2));
@@ -320,13 +373,14 @@ async function main() {
     }
   }
 
-  const finalPointCount = verifyCount ? await qdrantPointCount() : null;
+  const finalPointCount = verifyCount ? await qdrantScopedPointCount() : null;
   clearCheckpoint();
   console.log(JSON.stringify({
     ok: true,
     partial: false,
     indexedThisRun: total,
     batchesThisRun: batches,
+    collectionIds: explicitCollectionIds.length > 0 ? [...new Set(explicitCollectionIds)] : null,
     totalChunks: statsAtStart.totalChunks,
     qdrantPointCount: finalPointCount,
     countMatches: finalPointCount == null ? null : finalPointCount >= statsAtStart.totalChunks,
