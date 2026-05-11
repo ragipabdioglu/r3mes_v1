@@ -22,11 +22,13 @@ const REQUIRED_BUCKETS = [
   "suggestion",
   "router_quality",
   "adaptive_budget",
+  "context_pruning",
   "small_talk_no_rag",
 ];
 
 const SUITE_PRIORITY = [
   "retrieval-quality",
+  "context-pruning",
   "real-world-stress",
   "realistic-rag",
   "adaptive-rag",
@@ -192,6 +194,14 @@ function classifyCase(testCase, suite) {
     testCase.expectedBudgetMode !== undefined ||
       testCase.expectedContextBudgetMode !== undefined ||
       includesAny(combined, ["budget", "adaptive"]),
+  );
+  mark(
+    "context_pruning",
+    testCase.expectedEvidenceContextMode !== undefined ||
+      testCase.maxEvidencePrunedInputChars !== undefined ||
+      testCase.maxEvidenceInputCompressionRatio !== undefined ||
+      testCase.expectedEvidencePrunedNotGreaterThanRaw !== undefined ||
+      includesAny(combined, ["context-pruning", "context_pruning", "pruning", "pruned evidence"]),
   );
   mark(
     "small_talk_no_rag",

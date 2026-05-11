@@ -356,6 +356,37 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (testCase.expectedEvidenceContextMode) {
+    const actual = budget?.evidenceContextMode;
+    if (actual !== testCase.expectedEvidenceContextMode) {
+      failures.push(`evidence_context_mode:${actual ?? "missing"}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.maxEvidencePrunedInputChars))) {
+    const actual = Number(budget?.evidencePrunedInputChars ?? 0);
+    if (actual > Number(testCase.maxEvidencePrunedInputChars)) {
+      failures.push(`evidence_pruned_input_chars:${actual}>${Number(testCase.maxEvidencePrunedInputChars)}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.maxEvidenceInputCompressionRatio))) {
+    const rawChars = Number(budget?.evidenceInputChars ?? 0);
+    const prunedChars = Number(budget?.evidencePrunedInputChars ?? 0);
+    const ratio = rawChars > 0 ? prunedChars / rawChars : 0;
+    if (ratio > Number(testCase.maxEvidenceInputCompressionRatio)) {
+      failures.push(`evidence_input_compression_ratio:${ratio.toFixed(3)}>${Number(testCase.maxEvidenceInputCompressionRatio)}`);
+    }
+  }
+
+  if (testCase.expectedEvidencePrunedNotGreaterThanRaw === true) {
+    const rawChars = Number(budget?.evidenceInputChars ?? 0);
+    const prunedChars = Number(budget?.evidencePrunedInputChars ?? 0);
+    if (prunedChars > rawChars) {
+      failures.push(`evidence_input_expanded:${prunedChars}>${rawChars}`);
+    }
+  }
+
   if (typeof testCase.expectedFallbackTemplateUsed === "boolean") {
     const actualFallback = response?.answer_quality?.fallbackTemplateUsed;
     if (actualFallback !== testCase.expectedFallbackTemplateUsed) {
@@ -597,6 +628,13 @@ function scoreCase(testCase, response) {
     budgetEvidenceSupportingFactCount: budget?.evidenceSupportingFactCount ?? null,
     budgetEvidenceRiskFactCount: budget?.evidenceRiskFactCount ?? null,
     budgetEvidenceUsableFactCount: budget?.evidenceUsableFactCount ?? null,
+    budgetEvidenceContextMode: budget?.evidenceContextMode ?? null,
+    budgetEvidenceInputChars: budget?.evidenceInputChars ?? null,
+    budgetEvidencePrunedInputChars: budget?.evidencePrunedInputChars ?? null,
+    budgetEvidenceInputCompressionRatio:
+      Number(budget?.evidenceInputChars ?? 0) > 0
+        ? Number((Number(budget?.evidencePrunedInputChars ?? 0) / Number(budget?.evidenceInputChars ?? 1)).toFixed(3))
+        : null,
     rerankerMode: reranker?.mode ?? null,
     rerankerFallbackUsed: reranker?.fallbackUsed ?? null,
     rerankerInputCandidateCount: reranker?.inputCandidateCount ?? null,
@@ -986,6 +1024,7 @@ function summarizeBudgetQuality(results) {
     coverageRatio: results.length === 0 ? 0 : Number((casesWithBudget.length / results.length).toFixed(3)),
     budgetModes: results.reduce((acc, result) => increment(acc, result.budgetMode), {}),
     contextModes: results.reduce((acc, result) => increment(acc, result.budgetContextMode), {}),
+    evidenceContextModes: results.reduce((acc, result) => increment(acc, result.budgetEvidenceContextMode), {}),
     averages: {
       requestedSourceLimit: averageField(casesWithBudget, "budgetRequestedSourceLimit"),
       finalSourceLimit: averageField(casesWithBudget, "budgetFinalSourceLimit"),
@@ -995,6 +1034,9 @@ function summarizeBudgetQuality(results) {
       evidenceSupportingFacts: averageField(casesWithBudget, "budgetEvidenceSupportingFactCount"),
       evidenceRiskFacts: averageField(casesWithBudget, "budgetEvidenceRiskFactCount"),
       evidenceUsableFacts: averageField(casesWithBudget, "budgetEvidenceUsableFactCount"),
+      evidenceInputChars: averageField(casesWithBudget, "budgetEvidenceInputChars"),
+      evidencePrunedInputChars: averageField(casesWithBudget, "budgetEvidencePrunedInputChars"),
+      evidenceInputCompressionRatio: averageField(casesWithBudget, "budgetEvidenceInputCompressionRatio"),
     },
     latencyByBudgetMode: summarizeLatencyByBudget(casesWithBudget),
     expectations: {
