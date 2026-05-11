@@ -554,6 +554,75 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(reason).toContain("thin profile");
     expect(reason).toContain("temkinli");
   });
+
+  it("uses profile v3 table concepts when suggesting data-heavy collections", async () => {
+    const { rankMetadataRouteCandidates, rankSuggestedKnowledgeCollections } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "Şirketin net kar ve hasılat tablosunda çeyreklik değişim nasıl görünüyor?";
+    const routePlan = routeQuery(query);
+    const collections = [
+      {
+        id: "kap-general-disclosures",
+        name: "KAP genel açıklamalar",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            profileVersion: 3,
+            domains: ["finance"],
+            subtopics: ["kap"],
+            keywords: ["şirket", "açıklama", "yatırımcı"],
+            entities: ["KAP"],
+            topicPhrases: ["özel durum açıklamaları", "yatırımcı duyuruları"],
+            answerableConcepts: ["şirket açıklaması özeti"],
+            tableConcepts: [],
+            sampleQuestions: ["KAP açıklamasının kısa özeti nedir?"],
+            summary: "Şirketlerin genel KAP açıklamaları ve yatırımcı duyuruları.",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileEmbedding: embedKnowledgeText("KAP genel açıklama yatırımcı duyuru şirket özeti"),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+      {
+        id: "kap-financial-tables",
+        name: "KAP finansal tablo arşivi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            profileVersion: 3,
+            domains: ["finance"],
+            subtopics: ["kap", "finansal_tablo"],
+            keywords: ["net kar", "hasılat", "çeyrek", "finansal tablo"],
+            entities: ["KAP"],
+            topicPhrases: ["net kar değişimi", "hasılat tablosu", "çeyreklik finansal performans"],
+            answerableConcepts: ["net kar ve hasılat tablosu değişimi", "finansal tablo karşılaştırması"],
+            tableConcepts: ["table evidence", "structured table", "net kar", "hasılat", "çeyreklik değişim"],
+            sampleQuestions: ["Şirketin net kar ve hasılat tablosunda çeyreklik değişim nasıl görünüyor?"],
+            summary: "KAP finansal tablolarında net kar, hasılat ve dönemsel değişim bilgileri.",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileEmbedding: embedKnowledgeText("net kar hasılat tablosu çeyreklik değişim finansal performans"),
+            sampleQuestionsEmbedding: embedKnowledgeText(query),
+            keywordsEmbedding: embedKnowledgeText("net kar hasılat finansal tablo çeyrek dönem"),
+            updatedAt: "2026-04-29T00:00:00.000Z",
+          },
+        },
+        documents: [],
+      },
+    ];
+
+    const ranked = rankSuggestedKnowledgeCollections({ routePlan, query, collections, limit: 2 });
+    const metadataCandidates = rankMetadataRouteCandidates({ routePlan, query, collections, limit: 2 });
+
+    expect(ranked.map((collection) => collection.id)[0]).toBe("kap-financial-tables");
+    expect(metadataCandidates.map((collection) => collection.id)[0]).toBe("kap-financial-tables");
+    expect(metadataCandidates[0]?.matchedTerms).toEqual(expect.arrayContaining(["net kar", "ceyreklik degisim"]));
+    expect(metadataCandidates[0]?.score).toBeGreaterThan(metadataCandidates[1]?.score ?? 0);
+  });
 });
 
 describe("collectionHasSpecificRouteSupport", () => {

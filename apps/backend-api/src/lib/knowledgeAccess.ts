@@ -6,6 +6,7 @@ import { extractQuerySignals, routeQuery, type DomainRoutePlan } from "./queryRo
 import { explainWeightedRouterScore, getRouterWeights, type RouterScoreBreakdown } from "./routerConfig.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
+import { buildQueryUnderstanding } from "./queryUnderstanding.js";
 
 interface KnowledgeMetadataProfile {
   domain: string;
@@ -16,6 +17,7 @@ interface KnowledgeMetadataProfile {
   topicPhrases: string[];
   answerableConcepts: string[];
   negativeHints: string[];
+  tableConcepts: string[];
   summary: string;
   profileText?: string;
   profileEmbedding?: number[];
@@ -89,6 +91,7 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
         topicPhrases: stringArray(profile.topicPhrases),
         answerableConcepts: stringArray(profile.answerableConcepts),
         negativeHints: stringArray(profile.negativeHints),
+        tableConcepts: stringArray(profile.tableConcepts),
         summary: typeof profile.summary === "string" ? profile.summary : "",
         profileText,
         profileEmbedding: numberArray(profile.profileEmbedding) ?? (profileText ? embedKnowledgeText(profileText) : undefined),
@@ -114,6 +117,7 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
     topicPhrases: [],
     answerableConcepts: [],
     negativeHints: [],
+    tableConcepts: [],
     summary: typeof record.summary === "string" ? record.summary : "",
     questionsAnswered: stringArray(record.questionsAnswered),
   };
@@ -130,6 +134,7 @@ function metadataText(value: unknown): string {
     ...profile.entities.slice(0, 24),
     ...profile.topicPhrases.slice(0, 24),
     ...profile.answerableConcepts.slice(0, 32),
+    ...profile.tableConcepts.slice(0, 18),
     compact(profile.summary, 900),
     compact(profile.profileText ?? "", 1_200),
     ...profile.questionsAnswered.slice(0, 12),
@@ -179,6 +184,7 @@ function collectionProfileVersion(value: unknown): string {
     profile?.lastProfiledAt ?? "",
     profile?.sourceQuality ?? "",
     profile?.confidence ?? "",
+    profile?.tableConcepts.slice(0, 8).join("|") ?? "",
   ].join(":");
 }
 
@@ -409,16 +415,26 @@ function queryConceptTerms(query: string): string[] {
 }
 
 function queryProfileSignals(query: string): string[] {
+  const understanding = buildQueryUnderstanding(query);
   const signals = extractQuerySignals(query);
   return unique([
+    ...understanding.concepts,
     ...signals.phraseHints,
-    ...signals.significantTerms,
     ...signals.namedEntities,
+    ...signals.significantTerms,
+    ...understanding.normalized.expandedTokens.slice(0, 32),
   ]).filter((token) => !GENERIC_QUERY_TERMS.has(normalize(token))).slice(0, 32);
 }
 
 function queryProfileSignalText(query: string): string {
-  return unique([buildExpandedQueryText(query, null, 48), ...queryProfileSignals(query)]).join(" ");
+  const understanding = buildQueryUnderstanding(query);
+  return unique([
+    buildExpandedQueryText(query, null, 48),
+    understanding.normalized.normalized,
+    ...understanding.normalized.expandedTokens.slice(0, 48),
+    ...understanding.concepts,
+    ...queryProfileSignals(query),
+  ]).join(" ");
 }
 
 function queryAdaptiveTerms(query: string): string[] {
@@ -432,6 +448,7 @@ function profileAnswerableTerms(profile: KnowledgeMetadataProfile): string[] {
   return expandSurfaceConceptTerms([
     ...profile.topicPhrases,
     ...profile.answerableConcepts,
+    ...profile.tableConcepts,
     ...profile.entities,
     ...profile.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
   ], 96);
