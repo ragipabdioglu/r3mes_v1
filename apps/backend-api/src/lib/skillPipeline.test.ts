@@ -329,6 +329,45 @@ Rollback planı production migration öncesi gerekli değil, doğrudan migration
     expect(extraction.missingInfo).toEqual([]);
   });
 
+  it("extracts finance table rows that answer numeric line-item questions", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "SPK'ya göre net dönem kârı kaç görünüyor?",
+      cards: [
+        {
+          sourceId: "kap-dividend-table",
+          title: "KAP Kar Dağıtım Tablosu",
+          rawContent:
+            "Source Summary: 7.000.000.000 5.762.623.738 SPK’ya Göre Yasal Kayıtlara (YK) Göre 3. Dönem Kârı 3.497.911.571 (3.777.110.075) 4. Vergiler ( - ) 2.986.110.462 - 5. Net Dönem Kârı ( = ) 511.801.109 (3.777.110.075) 6. Geçmiş Yıllar Zararları ( - ) - 8. NET DAĞITILABİLİR DÖNEM KARI (=) 511.801.109 (3.777.110.075) 9. Yıl içinde yapılan bağışlar ( + ) 67.350.354 -",
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts.join(" ")).toContain("Net Dönem Kârı");
+    expect(extraction.usableFacts.join(" ")).toContain("511.801.109");
+    expect(extraction.missingInfo).toEqual([]);
+  });
+
+  it("keeps separate requested finance table line items inside the evidence budget", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Dönem kârı ve net dönem kârı kaç? EREGL veya FROTO rakamlarını kullanma.",
+      cards: [
+        {
+          sourceId: "kap-kchol-dividend-table",
+          title: "KCHOL Kar Payı Dağıtım Tablosu",
+          rawContent:
+            "Source Summary: SPK'ya Göre Yasal Kayıtlara Göre 1. Ödenmiş Sermaye 7.000.000.000 5.762.623.738 2. Genel Kanuni Yedek Akçe 3.112.991.000 3. Dönem Kârı 87.713.503.000,00 44.999.997.398,02 4. Vergiler 65.713.002.000,00 1.787.670.432,02 5. Net Dönem Kârı (=) 22.000.501.000,00 43.212.326.966,00 8. NET DAĞITILABİLİR DÖNEM KÂRI (=) 22.000.501.000,00 43.212.326.966,00",
+        },
+      ],
+    });
+
+    const directFacts = extraction.directAnswerFacts.join(" ");
+    expect(directFacts).toContain("3. Dönem Kârı");
+    expect(directFacts).toContain("87.713.503.000");
+    expect(directFacts).toContain("5. Net Dönem Kârı");
+    expect(directFacts).toContain("22.000.501.000");
+    expect(extraction.missingInfo).toEqual([]);
+  });
+
   it("prefers complete actionable document snippets over PDF headings and clipped fragments", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",

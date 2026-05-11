@@ -71,6 +71,9 @@ function normalizeForFactMatch(value: string): string {
       ş: "s",
       ü: "u",
     })[char] ?? char)
+    .replace(/[âÂ]/g, "a")
+    .replace(/[îÎ]/g, "i")
+    .replace(/[ûÛ]/g, "u")
     .replace(/[^\p{L}\p{N}\s-]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -185,23 +188,57 @@ function factTokens(value: string): string[] {
     .filter((token) => token.length >= 3 && !FACT_STOPWORDS.has(token));
 }
 
+function hasNumericTableValue(value: string): boolean {
+  return /(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+\s*%|%\s*\d+|\(\s*\d)/u.test(value);
+}
+
 function factQualityScore(value: string, userQuery: string): number {
   const tokens = factTokens(value);
   if (tokens.length === 0) return -100;
   const queryTokens = new Set(factTokens(userQuery));
   const overlap = tokens.filter((token) => queryTokens.has(token)).length;
+  const normalizedValue = normalizeForFactMatch(value);
+  const normalizedQuery = normalizeForFactMatch(userQuery);
   const directActionBonus = /(göndermeyiniz|göndermeyin|bilgilendir|başvur|kontrol|hazırla|sakla|denenmel|planlan|yapılmal|edilmel)/iu.test(value)
     ? 4
     : 0;
+  const numericTableBonus = hasNumericTableValue(value) ? 5 : 0;
+  const exactFinanceBonus =
+    normalizedQuery.includes("net donem") && normalizedValue.includes("net donem")
+      ? 10
+      : normalizedQuery.includes("donem kari") && normalizedValue.includes("donem kari")
+        ? 8
+        : 0;
+  const plainPeriodProfitBonus =
+    normalizedQuery.includes("donem kari") &&
+    !normalizedQuery.includes("sadece net donem") &&
+    /(?:^|:\s*)\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(value)
+      ? 9
+      : 0;
+  const unrequestedNetDistributablePenalty =
+    normalizedValue.includes("dagitilabilir") && !normalizedQuery.includes("dagitilabilir")
+      ? 50
+      : 0;
   const sentenceBonus = /[.!?]$/u.test(value.trim()) ? 1 : 0;
-  const incompleteLongPenalty = !/[.!?]$/u.test(value.trim()) && value.trim().length >= 60 ? 10 : 0;
+  const incompleteLongPenalty = !/[.!?]$/u.test(value.trim()) && value.trim().length >= 60 && !hasNumericTableValue(value) ? 10 : 0;
   const lengthBonus = value.length >= 45 && value.length <= 260 ? 2 : value.length < 24 ? -4 : 0;
   const truncationPenalty = /[…]|\.{3}$/u.test(value) ? 5 : 0;
   const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(value) ? 6 : 0;
   const genericPenalty = /(doğru ve güvenilir kaynaklardan bilgi edin|kaynakta özel alarm|kaynakta açık dayanak yoksa)/iu.test(value)
     ? 3
     : 0;
-  return overlap * 6 + directActionBonus + sentenceBonus + lengthBonus - truncationPenalty - scaffoldPenalty - genericPenalty - incompleteLongPenalty;
+  return overlap * 6 +
+    directActionBonus +
+    numericTableBonus +
+    exactFinanceBonus +
+    plainPeriodProfitBonus +
+    sentenceBonus +
+    lengthBonus -
+    truncationPenalty -
+    scaffoldPenalty -
+    genericPenalty -
+    incompleteLongPenalty -
+    unrequestedNetDistributablePenalty;
 }
 
 function prioritizeFacts(values: string[], userQuery: string): string[] {
@@ -264,8 +301,16 @@ export function buildAnswerSpec(opts: {
       ? medicalQueryContextFact(opts.userQuery, [...facts, ...riskFacts, ...unknowns].join(" "))
       : null;
   const assessment = directFacts[0] ?? usableFacts[0] ?? "Kaynaklarda bu soruya doğrudan sınırlı bilgi bulundu.";
+  const numericFollowUpFact =
+    opts.answerDomain === "finance"
+      ? [...directFacts, ...usableFacts].find((fact) =>
+          fact !== assessment &&
+          hasNumericTableValue(fact) &&
+          factQualityScore(fact, opts.userQuery) >= 1)
+      : undefined;
   const action =
     queryContextFact ??
+    numericFollowUpFact ??
     firstUsefulFact(supportingFacts, opts.userQuery, [assessment]) ??
     firstUsefulFact(directFacts, opts.userQuery, [assessment]) ??
     firstUsefulFact(usableFacts, opts.userQuery, [assessment]) ??

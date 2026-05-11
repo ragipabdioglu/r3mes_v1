@@ -361,6 +361,143 @@ function sentenceFragments(text: string, limit = 2): string[] {
     .map(({ fragment }) => fragment);
 }
 
+function splitNumberedTableRows(text: string): string[] {
+  return text
+    .replace(/\s+(\d{1,2})\.\s*(?=[\p{L}A-ZÇĞİÖŞÜ])/gu, "\n$1. ")
+    .replace(/\s+(\d{1,2})\.\s+(?=[A-ZÇĞİÖŞÜ][\p{L}\s]{2,})/gu, "\n$1. ")
+    .split(/\n+/)
+    .map(normalizeTableLine)
+    .map(normalizeDocumentScaffoldFragment)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function hasFinancialTableValue(value: string): boolean {
+  return /(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+\s*%|%\s*\d+|\(\s*\d)/u.test(value);
+}
+
+function isLikelyFinancialTableRow(value: string): boolean {
+  const normalized = normalizeConceptText(value);
+  if (!hasFinancialTableValue(value)) return false;
+  const hasLineItemLabel = /^\s*\d{1,2}\.\s*\p{L}/u.test(value) || /(net\s+donem|donem\s+kari|donem\s+kâri|dagitilabilir|profit|dividend|stopaj|withholding)/u.test(normalized);
+  if (!hasLineItemLabel) return false;
+  return [
+    "donem kari",
+    "donem kâri",
+    "net donem",
+    "dagitilabilir",
+    "spk",
+    "yasal kayit",
+    "tax",
+    "profit",
+    "net profit",
+    "dividend",
+    "stopaj",
+    "withholding",
+    "sermaye",
+    "capital",
+  ].some((term) => normalized.includes(normalizeConceptText(term)));
+}
+
+function financialTableScope(text: string): string {
+  const normalized = normalizeConceptText(text);
+  const parts: string[] = [];
+  if (normalized.includes("spkya gore") || normalized.includes("spk ya gore")) parts.push("SPK'ya Göre");
+  if (normalized.includes("yasal kayitlara gore") || normalized.includes("yasal kayitlara yk gore")) {
+    parts.push("Yasal Kayıtlara Göre");
+  }
+  return parts.join(" / ");
+}
+
+function numericTableFragments(text: string, query: string, limit = 4): string[] {
+  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
+  const normalizedQuery = normalizeConceptText(query);
+  const scope = financialTableScope(text);
+  const rows = splitNumberedTableRows(text);
+  return rows
+    .map((row, index) => {
+      const normalized = normalizeConceptText(row);
+      const overlap = queryCoreOverlapScore(queryTokens, row);
+      const exactPhraseBonus =
+        normalized.includes("net donem") && normalizedQuery.includes("net donem")
+          ? 6
+          : normalized.includes("donem kari") && normalizedQuery.includes("donem kari")
+            ? 6
+            : 0;
+      const requestedPlainPeriodProfit =
+        normalizedQuery.includes("donem kari") && !normalizedQuery.includes("sadece net donem");
+      const plainPeriodProfitBonus =
+        requestedPlainPeriodProfit && /^\s*\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(row)
+          ? 5
+          : 0;
+      const unrequestedNetDistributablePenalty =
+        normalized.includes("dagitilabilir") && !normalizedQuery.includes("dagitilabilir")
+          ? 50
+          : 0;
+      const score =
+        overlap * 3 +
+        exactPhraseBonus +
+        plainPeriodProfitBonus +
+        (isLikelyFinancialTableRow(row) ? 5 : 0) +
+        (hasFinancialTableValue(row) ? 2 : 0) -
+        (row.length > 420 ? 2 : 0) -
+        unrequestedNetDistributablePenalty;
+      const scopedRow = scope && isLikelyFinancialTableRow(row) && !normalizeConceptText(row).includes("spkya gore")
+        ? `${scope}: ${row}`
+        : row;
+      return { row: scopedRow, index, score };
+    })
+    .filter(({ row, score }) => score >= 7 && hasFinancialTableValue(row))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map(({ row }) => row);
+}
+
+function evidenceRelevanceScore(query: string, fact: string): number {
+  const normalizedQuery = normalizeConceptText(query);
+  const normalizedFact = normalizeConceptText(fact);
+  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
+  const coreOverlap = queryCoreOverlapScore(queryTokens, fact);
+  const tableValueBonus = hasFinancialTableValue(fact) ? 3 : 0;
+  const tableRowBonus = isLikelyFinancialTableRow(fact) ? 5 : 0;
+  const exactPhraseBonus =
+    normalizedQuery.includes("net donem") && normalizedFact.includes("net donem")
+      ? 10
+      : normalizedQuery.includes("donem kari") && normalizedFact.includes("donem kari")
+        ? 8
+        : 0;
+  const requestedPlainPeriodProfit =
+    normalizedQuery.includes("donem kari") && !normalizedQuery.includes("sadece net donem");
+  const plainPeriodProfitBonus =
+    requestedPlainPeriodProfit && /(?:^|:\s*)\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(fact)
+      ? 9
+      : 0;
+  const shortRelevantBonus = fact.length <= 360 ? 2 : 0;
+  const unrequestedNetDistributablePenalty =
+    normalizedFact.includes("dagitilabilir") && !normalizedQuery.includes("dagitilabilir")
+      ? 50
+      : 0;
+  const headerPenalty =
+    /spk'?ya\s+gore\s+yasal\s+kayitlara\s+gore/u.test(normalizedFact) && !/^\s*[^:]+:\s*\d{1,2}\./u.test(fact)
+      ? 6
+      : 0;
+  return coreOverlap * 4 +
+    tableValueBonus +
+    tableRowBonus +
+    exactPhraseBonus +
+    plainPeriodProfitBonus +
+    shortRelevantBonus -
+    headerPenalty -
+    unrequestedNetDistributablePenalty;
+}
+
+function rankEvidenceFacts(query: string, facts: string[]): string[] {
+  return unique(facts)
+    .map((fact, index) => ({ fact, index, score: evidenceRelevanceScore(query, fact) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ fact }) => fact);
+}
+
 function tokenizeForOverlap(text: string): string[] {
   const normalized = normalizeConceptText(text);
   return [
@@ -883,7 +1020,7 @@ export function buildDeterministicEvidenceExtraction(
       opts.kind === "supporting" &&
       (strongOverlap || coreOverlap > 0 || (opts.allowGenericGuidance && overlap > 0));
     if (acceptDirect || acceptSupporting) {
-      const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized));
+      const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized), isLikelyFinancialTableRow(sanitized) ? 520 : 320);
       usableFacts.push(line);
       if (opts.kind === "supporting") {
         supportingContext.push(line);
@@ -904,6 +1041,14 @@ export function buildDeterministicEvidenceExtraction(
     }
 
     for (const section of cardSections(card)) {
+      if (section.kind === "direct" || section.kind === "supporting") {
+        for (const fragment of numericTableFragments(section.text, input.userQuery, 4)) {
+          addUsableIfRelevant(sourceLabel, fragment, {
+            allowGenericGuidance: true,
+            kind: section.kind === "supporting" ? "supporting" : "direct",
+          });
+        }
+      }
       const fragmentLimit = section.text.includes("|") ? 6 : 2;
       for (const fragment of sentenceFragments(section.text, fragmentLimit)) {
         if (section.kind === "direct") {
@@ -963,11 +1108,11 @@ export function buildDeterministicEvidenceExtraction(
   return {
     answerIntent: intentResolution.intent,
     intentResolution,
-    directAnswerFacts: unique(directAnswerFacts).slice(0, budget.directFactLimit),
-    supportingContext: unique(supportingContext).slice(0, budget.supportingFactLimit),
+    directAnswerFacts: rankEvidenceFacts(input.userQuery, directAnswerFacts).slice(0, budget.directFactLimit),
+    supportingContext: rankEvidenceFacts(input.userQuery, supportingContext).slice(0, budget.supportingFactLimit),
     riskFacts: unique(redFlags).slice(0, budget.riskFactLimit),
     notSupported: unique([...uncertainOrUnusable, ...missingInfo]).slice(0, budget.notSupportedLimit),
-    usableFacts: unique(usableFacts).slice(0, budget.usableFactLimit),
+    usableFacts: rankEvidenceFacts(input.userQuery, usableFacts).slice(0, budget.usableFactLimit),
     uncertainOrUnusable: unique(uncertainOrUnusable).slice(0, budget.notSupportedLimit),
     redFlags: unique(redFlags).slice(0, budget.riskFactLimit + 1),
     sourceIds: unique(sourceIds).slice(0, budget.sourceIdLimit),

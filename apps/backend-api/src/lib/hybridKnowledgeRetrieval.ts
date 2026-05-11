@@ -681,9 +681,35 @@ function evidenceInputMaxChars(budgetMode: RetrievalBudgetMode): number {
 function sentenceParts(value: string): string[] {
   return value
     .replace(/\r\n/g, "\n")
-    .split(/(?<=[.!?])\s+|\n+/u)
+    .replace(/\s+(\d{1,2})\.\s*(?=[\p{L}A-ZÇĞİÖŞÜ])/gu, "\n$1. ")
+    .split(/(?<!\b\d\.)(?<=[.!?])\s+|\n+/u)
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function hasNumericValue(value: string): boolean {
+  return /(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+\s*%|%\s*\d+|\(\s*\d)/u.test(value);
+}
+
+function financeLineItemScore(query: string, sentence: string): number {
+  if (!hasNumericValue(sentence)) return 0;
+  const normalizedQuery = normalize(query);
+  const normalizedSentence = normalize(sentence);
+  let score = 0;
+  if (normalizedQuery.includes("net donem") && normalizedSentence.includes("net donem")) score += 8;
+  if (normalizedQuery.includes("donem kari") && normalizedSentence.includes("donem kari")) score += 7;
+  if (
+    normalizedQuery.includes("donem kari") &&
+    !normalizedQuery.includes("sadece net donem") &&
+    /(?:^|\s)\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(sentence)
+  ) {
+    score += 9;
+  }
+  if (/(spk|yasal\s+kayit|yasal\s+kayıt|profit|dividend|withholding|stopaj|sermaye|capital)/iu.test(sentence)) {
+    score += 3;
+  }
+  if (normalizedSentence.includes("dagitilabilir") && !normalizedQuery.includes("dagitilabilir")) score -= 30;
+  return score;
 }
 
 function pickRelevantSentences(query: string, text: string, maxChars: number): {
@@ -704,7 +730,7 @@ function pickRelevantSentences(query: string, text: string, maxChars: number): {
       const riskBonus = /\b(?:risk|dikkat|acil|şiddetli|siddetli|uyarı|uyari|kesin|çıkarım|cikarim|do not infer)\b/iu.test(sentence)
         ? 1
         : 0;
-      return { sentence, index, score: overlap * 3 + structureBonus + riskBonus };
+      return { sentence, index, score: overlap * 3 + structureBonus + riskBonus + financeLineItemScore(query, sentence) };
     })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.index - b.index);

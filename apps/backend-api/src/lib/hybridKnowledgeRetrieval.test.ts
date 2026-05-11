@@ -400,6 +400,27 @@ describe("true hybrid retrieval helpers", () => {
     expect(input).toBe(raw);
   });
 
+  it("keeps query-matching numbered financial table rows while pruning", () => {
+    vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "520");
+    const result = buildPrunedEvidenceInputWithDiagnostics({
+      query: "Dönem kârı ve net dönem kârı kaç?",
+      budgetMode: "fast_grounded",
+      candidate: candidate({
+        id: "kap-table",
+        title: "KCHOL kar payı dağıtım tablosu",
+        content:
+          "Source Summary: SPK'ya Göre Yasal Kayıtlara Göre 1. Ödenmiş Sermaye 7.000.000.000 5.762.623.738 2. Genel Kanuni Yedek Akçe 3.112.991.000 3. Dönem Kârı 87.713.503.000,00 44.999.997.398,02 4. Vergiler 65.713.002.000,00 1.787.670.432,02 5. Net Dönem Kârı (=) 22.000.501.000,00 43.212.326.966,00 8. NET DAĞITILABİLİR DÖNEM KÂRI (=) 22.000.501.000,00 43.212.326.966,00 " +
+          "Bu dipnot alakasız genel kurul açıklamaları, dağıtım takvimi ve prosedür metniyle uzar. ".repeat(12),
+      }),
+    });
+
+    expect(result.text).toContain("3. Dönem Kârı");
+    expect(result.text).toContain("87.713.503.000");
+    expect(result.text).toContain("5. Net Dönem Kârı");
+    expect(result.text).toContain("22.000.501.000");
+    expect(result.diagnostics.mode).toBe("pruned");
+  });
+
   it("keeps pruning diagnostics generic for noisy mixed-domain evidence", () => {
     vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "240");
     const result = buildPrunedEvidenceInputWithDiagnostics({
