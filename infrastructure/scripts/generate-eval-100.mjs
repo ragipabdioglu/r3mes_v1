@@ -167,6 +167,7 @@ function classifyCase(testCase, suite) {
     includesAny(combined, ["multi-domain", "multi_domain", "domain-regression"]) || expectedDomain.length > 1,
   );
   mark("contradiction", includesAny(combined, ["contradiction", "contradictory", "celis", "çeliş"]));
+  mark("contradiction", testCase.minEvidenceContradictionSignalCount !== undefined);
   mark("latency", Number.isFinite(Number(testCase.maxLatencyMs)));
   mark(
     "shadow_runtime",

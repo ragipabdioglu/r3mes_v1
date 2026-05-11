@@ -401,6 +401,13 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (Number.isFinite(Number(testCase.minEvidenceContradictionSignalCount))) {
+    const actual = Number(budget?.evidenceContradictionSignalCount ?? 0);
+    if (actual < Number(testCase.minEvidenceContradictionSignalCount)) {
+      failures.push(`evidence_contradiction_signals:${actual}<${Number(testCase.minEvidenceContradictionSignalCount)}`);
+    }
+  }
+
   if (typeof testCase.expectedFallbackTemplateUsed === "boolean") {
     const actualFallback = response?.answer_quality?.fallbackTemplateUsed;
     if (actualFallback !== testCase.expectedFallbackTemplateUsed) {
@@ -648,6 +655,7 @@ function scoreCase(testCase, response) {
     budgetEvidenceFactCandidateCount: budget?.evidenceFactCandidateCount ?? null,
     budgetEvidenceFactSelectedCount: budget?.evidenceFactSelectedCount ?? null,
     budgetEvidenceFactDroppedCount: budget?.evidenceFactDroppedCount ?? null,
+    budgetEvidenceContradictionSignalCount: budget?.evidenceContradictionSignalCount ?? null,
     budgetEvidenceInputCompressionRatio:
       Number(budget?.evidenceInputChars ?? 0) > 0
         ? Number((Number(budget?.evidencePrunedInputChars ?? 0) / Number(budget?.evidenceInputChars ?? 1)).toFixed(3))
@@ -1056,6 +1064,7 @@ function summarizeBudgetQuality(results) {
       evidenceFactCandidates: averageField(casesWithBudget, "budgetEvidenceFactCandidateCount"),
       evidenceFactSelected: averageField(casesWithBudget, "budgetEvidenceFactSelectedCount"),
       evidenceFactDropped: averageField(casesWithBudget, "budgetEvidenceFactDroppedCount"),
+      evidenceContradictionSignals: averageField(casesWithBudget, "budgetEvidenceContradictionSignalCount"),
       evidenceInputCompressionRatio: averageField(casesWithBudget, "budgetEvidenceInputCompressionRatio"),
     },
     latencyByBudgetMode: summarizeLatencyByBudget(casesWithBudget),

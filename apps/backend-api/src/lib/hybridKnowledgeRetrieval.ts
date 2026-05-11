@@ -91,6 +91,7 @@ export interface HybridRetrievedKnowledgeContext {
       evidenceFactCandidateCount: number;
       evidenceFactSelectedCount: number;
       evidenceFactDroppedCount: number;
+      evidenceContradictionSignalCount: number;
       evidenceDirectFactLimit: number;
       evidenceSupportingFactLimit: number;
       evidenceRiskFactLimit: number;
@@ -238,6 +239,7 @@ function buildBudgetDiagnostics(opts: {
     evidenceFactCandidateCount: opts.evidenceFactCandidateCount ?? 0,
     evidenceFactSelectedCount: opts.evidenceFactSelectedCount ?? 0,
     evidenceFactDroppedCount: opts.evidenceFactDroppedCount ?? 0,
+    evidenceContradictionSignalCount: countContradictionSignals(opts.evidence),
     evidenceDirectFactLimit: evidenceBudget.directFactLimit,
     evidenceSupportingFactLimit: evidenceBudget.supportingFactLimit,
     evidenceRiskFactLimit: evidenceBudget.riskFactLimit,
@@ -247,6 +249,16 @@ function buildBudgetDiagnostics(opts: {
     evidenceRiskFactCount: opts.evidence?.riskFacts.length ?? 0,
     evidenceUsableFactCount: opts.evidence?.usableFacts.length ?? 0,
   };
+}
+
+function countContradictionSignals(evidence: EvidenceExtractorOutput | null | undefined): number {
+  if (!evidence) return 0;
+  const values = [
+    ...evidence.notSupported,
+    ...evidence.uncertainOrUnusable,
+    ...evidence.missingInfo,
+  ];
+  return values.filter((value) => /çeliş|celis|contradict/iu.test(normalizeConceptText(value))).length;
 }
 
 function buildRerankCandidateText(candidate: AlignableKnowledgeCandidate, maxWords: number): string {
