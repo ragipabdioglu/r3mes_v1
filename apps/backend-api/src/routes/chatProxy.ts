@@ -1680,6 +1680,13 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         candidateCollectionIds: shadowCandidateCollectionIds,
       });
       sourceSelection = applyFeedbackRuntimeToSourceSelection(sourceSelection, shadowRuntime);
+      const selectedCollectionDomainForAnswer =
+        retrieval.sources.length > 0 && sourceSelection.routeDecision.mode !== "suggest"
+          ? inferKnowledgeCollectionAnswerDomain({
+              collections: accessibleCollections,
+              usedCollectionIds: sourceSelection.usedCollectionIds,
+            })
+          : null;
       const answerDomain = inferAnswerDomain({
         userQuery: retrievalQuery,
         evidence: retrieval.evidence,
@@ -1698,12 +1705,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               confidence: sourceSelection.routeDecision.mode === "suggest" ? "high" : routePlan?.confidence ?? "medium",
             }
           : routePlan,
-        selectedCollectionDomain: sourceSelection.usedCollectionIds.length > 0
-          ? inferKnowledgeCollectionAnswerDomain({
-              collections: accessibleCollections,
-              usedCollectionIds: sourceSelection.usedCollectionIds,
-            })
-          : null,
+        selectedCollectionDomain: selectedCollectionDomainForAnswer,
       });
       const domainPolicy = getDomainPolicy(answerDomain);
       chatTrace.finish(shadowRuntimeTrace, "ok", {

@@ -33,7 +33,7 @@ export function inferAnswerDomain(opts: {
   if (opts.selectedCollectionDomain) {
     return opts.selectedCollectionDomain;
   }
-  if (opts.routePlan && opts.routePlan.confidence === "high") {
+  if (opts.routePlan && opts.routePlan.confidence === "high" && opts.routePlan.domain !== "general") {
     return opts.routePlan.domain;
   }
 
@@ -128,6 +128,24 @@ export function inferAnswerDomain(opts: {
       "portföy",
       "portfoy",
       "finans",
+      "kap",
+      "faaliyet raporu",
+      "finansal rapor",
+      "finansal tablo",
+      "kar dağıtım",
+      "kar dagitim",
+      "net dağıtılabilir",
+      "net dagitilabilir",
+      "dönem karı",
+      "donem kari",
+      "nakit oranı",
+      "nakit orani",
+      "pay başına",
+      "pay basina",
+      "temettü",
+      "temettu",
+      "yönetim kurulu",
+      "yonetim kurulu",
     ])
   ) {
     return "finance";
