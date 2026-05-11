@@ -20,6 +20,7 @@ class EmbeddingRuntime:
     tokenizer: Any
     model: Any
     device: str
+    dimension: int | None = None
 
 
 _embedding_lock = asyncio.Lock()
@@ -127,8 +128,26 @@ async def embed_documents(
             status_code=500,
             detail={"code": "EMBEDDING_FAILED", "message": str(exc)},
         ) from exc
+    runtime.dimension = len(vectors[0]) if vectors else None
 
     return EmbeddingsResponse(
         model=runtime.model_name_or_path,
         data=[EmbeddingItem(index=index, embedding=vector) for index, vector in enumerate(vectors)],
     )
+
+
+def embedding_runtime_status(settings: Settings, state: AppState) -> dict[str, Any]:
+    runtime = state.embedding_runtime
+    resolved_model = _resolve_model_name(settings)
+    loaded = runtime is not None
+    return {
+        "configured_model": settings.embedding_model_name_or_path,
+        "resolved_model": runtime.model_name_or_path if runtime else resolved_model,
+        "local_path": str(settings.embedding_local_path) if settings.embedding_local_path else None,
+        "local_files_only": settings.embedding_local_files_only,
+        "configured_device": settings.embedding_device,
+        "loaded": loaded,
+        "device": runtime.device if runtime else None,
+        "dimension": runtime.dimension if runtime else None,
+        "max_length": settings.embedding_max_length,
+    }

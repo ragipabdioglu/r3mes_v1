@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from r3mes_ai_engine.hf_embeddings import embedding_runtime_status
+from r3mes_ai_engine.hf_reranker import reranker_runtime_status
 from r3mes_ai_engine.llama_bootstrap import bootstrap_llama, stop_llama_server
 from r3mes_ai_engine.routes.chat import router as chat_router
 from r3mes_ai_engine.routes.embeddings import router as embeddings_router
@@ -54,6 +56,33 @@ def build_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/health/runtime")
+    def runtime_health() -> dict[str, object]:
+        settings = app.state.r3mes_settings
+        state = app.state.r3mes_state
+        return {
+            "status": "ok",
+            "inference": {
+                "backend": settings.inference_backend,
+                "default_model": settings.default_model_name,
+                "llama": {
+                    "configured": settings.inference_backend == "llama_cpp",
+                    "loaded": state.llama_process is not None and state.llama_process.poll() is None,
+                    "core_source": state.frozen_core_source,
+                    "ctx_size": settings.llama_ctx_size,
+                    "n_gpu_layers": settings.llama_n_gpu_layers,
+                },
+                "hf": {
+                    "model": settings.hf_model_name_or_path,
+                    "local_path": str(settings.hf_model_local_path) if settings.hf_model_local_path else None,
+                    "local_files_only": settings.hf_local_files_only,
+                    "loaded": state.hf_runtime is not None,
+                },
+            },
+            "embedding": embedding_runtime_status(settings, state),
+            "reranker": reranker_runtime_status(settings, state),
+        }
 
     app.include_router(chat_router)
     app.include_router(embeddings_router)

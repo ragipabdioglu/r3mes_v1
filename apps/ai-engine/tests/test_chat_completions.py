@@ -29,6 +29,19 @@ def test_health(client) -> None:
     assert r.json() == {"status": "ok"}
 
 
+def test_runtime_health_exposes_provider_configuration(client) -> None:
+    r = client.get("/health/runtime")
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body["status"] == "ok"
+    assert body["inference"]["backend"] == "llama_cpp"
+    assert body["embedding"]["configured_model"] == "BAAI/bge-m3"
+    assert body["embedding"]["loaded"] is False
+    assert body["reranker"]["configured_model"] == "BAAI/bge-reranker-base"
+    assert body["reranker"]["loaded"] is False
+
+
 def test_chat_proxy_route_mocked(client, monkeypatch: pytest.MonkeyPatch) -> None:
     """proxy tamamen mock: doğrulama + route; LoRA/IPFS/llama yok."""
 

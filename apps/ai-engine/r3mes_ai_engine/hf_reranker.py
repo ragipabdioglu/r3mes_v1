@@ -185,3 +185,18 @@ async def rerank_documents(
         return _fallback_response(query, documents, str(exc))
 
     return RerankResponse(scores=scores, provider="cross_encoder", fallback_used=False)
+
+
+def reranker_runtime_status(settings: Settings, state: AppState) -> dict[str, Any]:
+    runtime = state.reranker_runtime
+    resolved_model = _resolve_model_name(settings)
+    return {
+        "configured_model": settings.reranker_model_name_or_path,
+        "resolved_model": runtime.model_name_or_path if runtime else resolved_model,
+        "local_path": str(settings.reranker_local_path) if settings.reranker_local_path else None,
+        "local_files_only": settings.reranker_local_files_only,
+        "configured_device": settings.reranker_device,
+        "loaded": runtime is not None,
+        "device": runtime.device if runtime else None,
+        "max_length": settings.reranker_max_length,
+    }

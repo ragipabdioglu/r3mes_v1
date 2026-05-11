@@ -29,4 +29,9 @@ def test_rerank_route_mocked(client, monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert r.status_code == 200
-    assert r.json() == {"scores": [0.9, 0.1]}
+    assert r.json() == {
+        "scores": [0.9, 0.1],
+        "provider": "cross_encoder",
+        "fallback_used": False,
+        "fallback_reason": None,
+    }
