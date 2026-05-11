@@ -461,9 +461,42 @@ function firstMatch(value: string, patterns: RegExp[]): string | null {
   return null;
 }
 
+function firstTableSegment(value: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[0]) return match[0].replace(/\s+/g, " ").trim();
+  }
+  return null;
+}
+
+function queryRejectsConcept(normalizedQuery: string, concept: string): boolean {
+  const escaped = concept.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:${escaped}.{0,48}(?:sanma|karistirma|karıştırma|degil|değil|not)|(?:sanma|karistirma|karıştırma|degil|değil|not).{0,48}${escaped})`, "u")
+    .test(normalizedQuery);
+}
+
 function financeTargetedFragments(text: string, query: string): string[] {
   const normalizedQuery = normalizeConceptText(query);
   const fragments: string[] = [];
+
+  if (
+    (normalizedQuery.includes("grup") || normalizedQuery.includes("group")) &&
+    (
+      normalizedQuery.includes("nakit") ||
+      normalizedQuery.includes("cash") ||
+      normalizedQuery.includes("bedelsiz") ||
+      normalizedQuery.includes("bonus") ||
+      normalizedQuery.includes("oran") ||
+      normalizedQuery.includes("rate")
+    )
+  ) {
+    const shareGroupRows = firstTableSegment(text, [
+      /(?:GRUBU|PAY\s+GRUBU|SHARE\s+GROUP|GROUP)[\s\S]{0,260}(?:NAK\s*[İI]\s*T|NAK[İI]T|CASH)[\s\S]{0,760}(?:TOPLAM|TOTAL)[\s\S]{0,160}/iu,
+      /(?:CASH|NAK\s*[İI]\s*T|NAK[İI]T)\s*\(TL\)[\s\S]{0,760}(?:TOPLAM|TOTAL)[\s\S]{0,160}/iu,
+      /(?:TOTAL\s+DIVIDEND\s+AMOUNT|TOPLAM\s+DA[ĞG]ITILAN)[\s\S]{0,260}(?:A\s*(?:Grubu)?|A\s+[\d.,]+)[\s\S]{0,520}(?:B\s*(?:Grubu)?|B\s+[\d.,]+)[\s\S]{0,260}(?:TOPLAM|TOTAL)?[\s\S]{0,160}/iu,
+    ]);
+    if (shareGroupRows) fragments.push(`Pay grubu nakit/oran satırları: ${shareGroupRows}`);
+  }
 
   if (normalizedQuery.includes("net donem") && normalizedQuery.includes("spk")) {
     const value = firstMatch(text, [
@@ -487,11 +520,27 @@ function financeTargetedFragments(text: string, query: string): string[] {
 
   if (
     normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") ||
-    normalizedQuery.includes("olaganustu yedek") ||
     normalizedQuery.includes("other sources") ||
-    normalizedQuery.includes("extraordinary reserves")
+    (
+      (normalizedQuery.includes("olaganustu yedek") || normalizedQuery.includes("extraordinary reserves")) &&
+      !queryRejectsConcept(normalizedQuery, "olaganustu yedek") &&
+      !queryRejectsConcept(normalizedQuery, "extraordinary reserves")
+    )
   ) {
+    const wantsOnlyOtherSources =
+      (normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") || normalizedQuery.includes("other sources")) &&
+      (
+        queryRejectsConcept(normalizedQuery, "olaganustu yedek") ||
+        queryRejectsConcept(normalizedQuery, "extraordinary reserves")
+      );
     const otherSources = firstMatch(text, [
+      ...(wantsOnlyOtherSources
+        ? [
+            /Da[ğg]ıtılması\s+Öngörülen\s+Di[ğg]er\s+Kaynaklar\s+[\d.,-]+\s+[\d.,-]+/iu,
+            /20\.\s*Other\s+Sources[^\d]{0,80}[\d.,-]+\s+[\d.,-]+/iu,
+            /Other\s+sources\s+planned\s+for\s+distribution\s+[\d.,-]+\s+[\d.,-]+/iu,
+          ]
+        : []),
       /20\.\s*Da[ğg]ıtılması\s+Öngörülen\s+Di[ğg]er\s+Kaynaklar[\s\S]{0,360}?Ola[ğg]an[üu]st[üu]\s+Yedekler[\s\S]{0,160}?[\d.]+(?:,\d+)?/iu,
       /20\.\s*Da[ğg]ıtılması\s+Öngörülen\s+Di[ğg]er\s+Kaynaklar[\s\S]{0,260}?[\d.]+(?:,\d+)?[\s\S]{0,100}?[\d.]+(?:,\d+)?/iu,
       /20\.\s*Other\s+Sources[\s\S]{0,360}?Extraordinary\s+Reserves[\s\S]{0,160}?[\d.]+(?:,\d+)?/iu,
@@ -544,6 +593,16 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     (normalizedFact.includes("stopaj") || normalizedFact.includes("withholding"))
       ? 22
       : 0;
+  const stopajGroupRateBonus =
+    (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
+    (normalizedQuery.includes("b") || normalizedQuery.includes("c") || normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
+    (normalizedFact.includes("stopaj") || normalizedFact.includes("withholding")) &&
+    (normalizedFact.includes("b") || normalizedFact.includes("group b") || normalizedFact.includes("b grubu")) &&
+    (normalizedFact.includes("c") || normalizedFact.includes("group c") || normalizedFact.includes("c grubu")) &&
+    /(?:%?\s*0|0\s*%|0,00)/u.test(normalizedFact) &&
+    /(?:%?\s*5|5\s*%|5,00)/u.test(normalizedFact)
+      ? 34
+      : 0;
   const otherSourcesScopeBonus =
     (normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") ||
       normalizedQuery.includes("other sources") ||
@@ -554,8 +613,23 @@ function evidenceRelevanceScore(query: string, fact: string): number {
       normalizedFact.includes("extraordinary reserves"))
       ? 22
       : 0;
+  const shareGroupScopeBonus =
+    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
+    (normalizedFact.includes("grubu") || normalizedFact.includes("group") || normalizedFact.includes("pay grubu")) &&
+    (normalizedFact.includes("nakit") || normalizedFact.includes("cash") || normalizedFact.includes("bedelsiz") || normalizedFact.includes("bonus") || normalizedFact.includes("rate") || normalizedFact.includes("oran"))
+      ? 26
+      : 0;
+  const rejectedExtraordinaryReservePenalty =
+    (queryRejectsConcept(normalizedQuery, "olaganustu yedek") || queryRejectsConcept(normalizedQuery, "extraordinary reserves")) &&
+    (normalizedFact.includes("olaganustu yedek") || normalizedFact.includes("extraordinary reserves"))
+      ? 60
+      : 0;
   const unrequestedNetDistributablePenalty =
-    normalizedFact.includes("dagitilabilir") && !normalizedQuery.includes("dagitilabilir")
+    normalizedFact.includes("dagitilabilir") &&
+    !normalizedQuery.includes("dagitilabilir") &&
+    shareGroupScopeBonus === 0 &&
+    stopajGroupRateBonus === 0 &&
+    otherSourcesScopeBonus === 0
       ? 50
       : 0;
   const headerPenalty =
@@ -571,9 +645,12 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     languageEvidenceBonus +
     spkScopeBonus +
     stopajScopeBonus +
+    stopajGroupRateBonus +
     otherSourcesScopeBonus +
+    shareGroupScopeBonus +
     shortRelevantBonus -
     headerPenalty -
+    rejectedExtraordinaryReservePenalty -
     unrequestedNetDistributablePenalty;
 }
 
@@ -604,13 +681,43 @@ function rankEvidenceFacts(query: string, facts: string[]): string[] {
     .map(({ fact }) => fact);
 }
 
+function promoteCriticalDirectFacts(query: string, directFacts: string[], usableFacts: string[]): string[] {
+  const normalizedQuery = normalizeConceptText(query);
+  const promoted: string[] = [];
+  if (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) {
+    promoted.push(
+      ...usableFacts.filter((fact) => {
+        const normalizedFact = normalizeConceptText(fact);
+        return (
+          (normalizedFact.includes("stopaj") || normalizedFact.includes("withholding")) &&
+          (
+            /(?:^|\s)0(?:\s|$)|0,00|%0/u.test(normalizedFact) ||
+            normalizedFact.includes("group b") ||
+            normalizedFact.includes("b grubu")
+          )
+        );
+      }),
+    );
+  }
+  return unique([...promoted, ...directFacts]);
+}
+
 function asksForSourceTitleEvidence(query: string): boolean {
   const normalized = normalizeConceptText(query);
+  const asksForTableDetails =
+    normalized.includes("grubu") ||
+    normalized.includes("group") ||
+    normalized.includes("nakit") ||
+    normalized.includes("cash") ||
+    normalized.includes("bonus") ||
+    normalized.includes("bedelsiz") ||
+    normalized.includes("oran") ||
+    normalized.includes("rate");
   return (
     (normalized.includes("kaynak") && normalized.includes("baslik")) ||
     normalized.includes("bildirim indeksi") ||
     normalized.includes("ayni bildirim") ||
-    (normalized.includes("turkce") && normalized.includes("ingilizce"))
+    (normalized.includes("turkce") && normalized.includes("ingilizce") && !asksForTableDetails)
   );
 }
 
@@ -1250,14 +1357,17 @@ export function buildDeterministicEvidenceExtraction(
     sourceCount: sourceIds.length,
   });
 
+  const rankedUsableFacts = rankEvidenceFacts(input.userQuery, usableFacts);
+  const rankedDirectFacts = rankEvidenceFacts(input.userQuery, directAnswerFacts);
+
   return {
     answerIntent: intentResolution.intent,
     intentResolution,
-    directAnswerFacts: rankEvidenceFacts(input.userQuery, directAnswerFacts).slice(0, budget.directFactLimit),
+    directAnswerFacts: promoteCriticalDirectFacts(input.userQuery, rankedDirectFacts, rankedUsableFacts).slice(0, budget.directFactLimit),
     supportingContext: rankEvidenceFacts(input.userQuery, supportingContext).slice(0, budget.supportingFactLimit),
     riskFacts: unique(redFlags).slice(0, budget.riskFactLimit),
     notSupported: unique([...uncertainOrUnusable, ...missingInfo]).slice(0, budget.notSupportedLimit),
-    usableFacts: rankEvidenceFacts(input.userQuery, usableFacts).slice(0, budget.usableFactLimit),
+    usableFacts: rankedUsableFacts.slice(0, budget.usableFactLimit),
     uncertainOrUnusable: unique(uncertainOrUnusable).slice(0, budget.notSupportedLimit),
     redFlags: unique(redFlags).slice(0, budget.riskFactLimit + 1),
     sourceIds: unique(sourceIds).slice(0, budget.sourceIdLimit),

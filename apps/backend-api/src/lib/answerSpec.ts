@@ -223,6 +223,22 @@ function factQualityScore(value: string, userQuery: string): number {
     ? 4
     : 0;
   const numericTableBonus = hasNumericTableValue(value) ? 5 : 0;
+  const shareGroupTableBonus =
+    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
+    (normalizedQuery.includes("nakit") || normalizedQuery.includes("cash") || normalizedQuery.includes("oran") || normalizedQuery.includes("rate") || normalizedQuery.includes("bonus")) &&
+    (normalizedValue.includes("grubu") || normalizedValue.includes("group")) &&
+    (/\ba\s+grubu\b|\ba\s+\d/u.test(normalizedValue)) &&
+    (/\bb\s+grubu\b|\bb\s+\d/u.test(normalizedValue)) &&
+    hasNumericTableValue(value)
+      ? 36
+      : 0;
+  const withholdingGroupRateBonus =
+    (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
+    (normalizedValue.includes("stopaj") || normalizedValue.includes("withholding")) &&
+    /(?:%?\s*0|0\s*%|0,00)/u.test(normalizedValue) &&
+    /(?:%?\s*5|5\s*%|5,00)/u.test(normalizedValue)
+      ? 32
+      : 0;
   const exactFinanceBonus =
     normalizedQuery.includes("net donem") && normalizedValue.includes("net donem")
       ? 10
@@ -236,7 +252,10 @@ function factQualityScore(value: string, userQuery: string): number {
       ? 9
       : 0;
   const unrequestedNetDistributablePenalty =
-    normalizedValue.includes("dagitilabilir") && !normalizedQuery.includes("dagitilabilir")
+    normalizedValue.includes("dagitilabilir") &&
+    !normalizedQuery.includes("dagitilabilir") &&
+    shareGroupTableBonus === 0 &&
+    withholdingGroupRateBonus === 0
       ? 50
       : 0;
   const sentenceBonus = /[.!?]$/u.test(value.trim()) ? 1 : 0;
@@ -250,6 +269,8 @@ function factQualityScore(value: string, userQuery: string): number {
   return overlap * 6 +
     directActionBonus +
     numericTableBonus +
+    shareGroupTableBonus +
+    withholdingGroupRateBonus +
     exactFinanceBonus +
     plainPeriodProfitBonus +
     sourceTitleBonus +

@@ -480,6 +480,19 @@ function criticalEvidenceTermGroups(query: string): string[][] {
   ) {
     groups.push(["dagitilmasi ongorulen diger kaynak", "other sources", "olaganustu yedek", "extraordinary reserves"]);
   }
+  if (
+    (normalized.includes("grup") || normalized.includes("group")) &&
+    (
+      normalized.includes("nakit") ||
+      normalized.includes("cash") ||
+      normalized.includes("bedelsiz") ||
+      normalized.includes("bonus") ||
+      normalized.includes("oran") ||
+      normalized.includes("rate")
+    )
+  ) {
+    groups.push(["__share_group_table__"]);
+  }
   return groups;
 }
 
@@ -488,7 +501,42 @@ function candidateMatchesTermGroup(candidate: { chunk: HybridKnowledgeChunk }, t
     candidate.chunk.document.title,
     candidate.chunk.content,
   ].join(" "));
+  if (terms.includes("__share_group_table__")) {
+    return (
+      (haystack.includes("grubu") || haystack.includes("group")) &&
+      (haystack.includes("nakit") || haystack.includes("nak it") || haystack.includes("cash")) &&
+      (haystack.includes("toplam") || haystack.includes("total")) &&
+      (haystack.includes("oran") || haystack.includes("rate") || haystack.includes("bonus") || haystack.includes("bedelsiz"))
+    );
+  }
   return terms.some((term) => haystack.includes(normalize(term)));
+}
+
+function criticalEvidenceCoverageScore(candidate: { chunk: HybridKnowledgeChunk }, terms: string[]): number {
+  const haystack = normalize([
+    candidate.chunk.document.title,
+    candidate.chunk.content,
+  ].join(" "));
+  if (terms.includes("__share_group_table__")) {
+    let score = 0;
+    if (haystack.includes("grubu") || haystack.includes("group")) score += 2;
+    if (haystack.includes("nakit") || haystack.includes("nak it") || haystack.includes("cash")) score += 2;
+    if (haystack.includes("toplam") || haystack.includes("total")) score += 2;
+    if (haystack.includes("oran") || haystack.includes("rate") || haystack.includes("bonus") || haystack.includes("bedelsiz")) score += 2;
+    if (/\ba\s+grubu\b|\ba\s+[\d.,]{3,}/u.test(haystack)) score += 3;
+    if (/\bb\s+grubu\b|\bb\s+[\d.,]{3,}/u.test(haystack)) score += 3;
+    if (/\bc\s+grubu\b|\bc\s+[\d.,]{3,}/u.test(haystack)) score += 3;
+    if ((haystack.match(/\d[\d.]{2,}(?:,\d+)?/gu) ?? []).length >= 5) score += 3;
+    return score;
+  }
+  let score = 0;
+  for (const term of terms) {
+    if (haystack.includes(normalize(term))) score += 2;
+  }
+  if ((terms.includes("stopaj") || terms.includes("withholding")) && /(?:%?\s*0|0\s*%|0,00)/u.test(haystack) && /(?:%?\s*5|5\s*%|5,00)/u.test(haystack)) {
+    score += 5;
+  }
+  return score;
 }
 
 function diversifyCriticalEvidenceCandidates<T extends { chunk: HybridKnowledgeChunk }>(
@@ -507,11 +555,13 @@ function diversifyCriticalEvidenceCandidates<T extends { chunk: HybridKnowledgeC
   for (const group of groups) {
     const hasGroup = selected.some((candidate) => candidateMatchesTermGroup(candidate, group));
     if (hasGroup) continue;
-    const match = candidates.find((candidate) =>
-      candidateMatchesExplicitIdentifierScope(query, candidate) &&
-      candidateMatchesTermGroup(candidate, group) &&
-      !selectedKeys().has(key(candidate))
-    );
+    const match = candidates
+      .filter((candidate) =>
+        candidateMatchesExplicitIdentifierScope(query, candidate) &&
+        candidateMatchesTermGroup(candidate, group) &&
+        !selectedKeys().has(key(candidate))
+      )
+      .sort((a, b) => criticalEvidenceCoverageScore(b, group) - criticalEvidenceCoverageScore(a, group))[0];
     if (!match) continue;
     if (selected.length < limit) {
       selected.push(match);
@@ -533,6 +583,30 @@ function diversifyCriticalEvidenceCandidates<T extends { chunk: HybridKnowledgeC
   const deduped = new Map<string, T>();
   for (const candidate of selected) deduped.set(key(candidate), candidate);
   return [...deduped.values()].slice(0, limit);
+}
+
+function prioritizeCriticalEvidenceCandidates<T extends { chunk: HybridKnowledgeChunk }>(
+  query: string,
+  candidates: T[],
+): T[] {
+  const groups = criticalEvidenceTermGroups(query);
+  if (groups.length === 0) return candidates;
+  const selected = new Map<string, T>();
+  const key = (candidate: T) => candidate.chunk.id || `${candidate.chunk.documentId}:${candidate.chunk.chunkIndex}`;
+  for (const group of groups) {
+    const match = candidates
+      .filter((candidate) =>
+        candidateMatchesExplicitIdentifierScope(query, candidate) &&
+        candidateMatchesTermGroup(candidate, group) &&
+        !selected.has(key(candidate))
+      )
+      .sort((a, b) => criticalEvidenceCoverageScore(b, group) - criticalEvidenceCoverageScore(a, group))[0];
+    if (match) selected.set(key(match), match);
+  }
+  for (const candidate of candidates) {
+    selected.set(key(candidate), candidate);
+  }
+  return [...selected.values()];
 }
 
 function payloadToChunk(payload: QdrantKnowledgePayload): HybridKnowledgeChunk {
@@ -732,6 +806,68 @@ async function collectPrismaCandidates(opts: {
   return ranked.filter((candidate) => candidateMatchesRouteScope(candidate.card, candidate.chunk, opts.routePlan));
 }
 
+async function collectCriticalEvidenceCandidates(opts: {
+  query: string;
+  accessibleCollectionIds: string[];
+  routePlan?: DomainRoutePlan | null;
+}): Promise<HybridKnowledgeCandidate[]> {
+  const groups = criticalEvidenceTermGroups(opts.query);
+  const targetIndexes = targetDisclosureIndexes(opts.query);
+  const primarySymbol = primaryQuerySymbol(opts.query);
+  if (groups.length === 0 || (targetIndexes.length === 0 && !primarySymbol)) return [];
+
+  const titleScopes = [
+    ...targetIndexes.map((index) => ({ document: { title: { contains: index, mode: "insensitive" as const } } })),
+    ...(primarySymbol ? [{ document: { title: { contains: primarySymbol, mode: "insensitive" as const } } }] : []),
+  ];
+  const chunks = await prisma.knowledgeChunk.findMany({
+    where: {
+      document: {
+        collectionId: { in: opts.accessibleCollectionIds },
+        parseStatus: "READY",
+      },
+      ...(titleScopes.length > 0 ? { AND: titleScopes } : {}),
+    },
+    include: {
+      document: true,
+      embedding: true,
+    },
+    orderBy: [{ createdAt: "desc" }, { chunkIndex: "asc" }],
+    take: 120,
+  });
+
+  return chunks
+    .map((candidate) => {
+      const chunk: HybridKnowledgeChunk = {
+        id: candidate.id,
+        documentId: candidate.documentId,
+        chunkIndex: candidate.chunkIndex,
+        content: candidate.content,
+        autoMetadata: candidate.autoMetadata,
+        document: {
+          title: candidate.document.title,
+          collectionId: candidate.document.collectionId,
+          autoMetadata: candidate.document.autoMetadata,
+        },
+        embedding: candidate.embedding,
+      };
+      const coverage = Math.max(0, ...groups.map((group) => criticalEvidenceCoverageScore({ chunk }, group)));
+      return {
+        chunk,
+        card: parseKnowledgeCard(chunk.content),
+        sources: ["prisma" as const],
+        lexicalScore: coverage,
+        preRankScore: coverage + 20,
+      };
+    })
+    .filter((candidate) =>
+      candidateMatchesRouteScope(candidate.card, candidate.chunk, opts.routePlan) &&
+      groups.some((group) => candidateMatchesTermGroup(candidate, group)),
+    )
+    .sort((a, b) => b.preRankScore - a.preRankScore)
+    .slice(0, Math.max(8, prismaLimit()));
+}
+
 export function dedupeHybridKnowledgeCandidates(candidates: HybridKnowledgeCandidate[]): HybridKnowledgeCandidate[] {
   const byKey = new Map<string, HybridKnowledgeCandidate>();
   const contentSeen = new Map<string, string>();
@@ -789,12 +925,16 @@ function scoreLightweightCandidate(query: string, candidate: HybridKnowledgeCand
     (candidate.vectorScore ?? 0) >= getAlignmentConfig().semanticKeepScore
       ? (candidate.vectorScore ?? 0) * 3
       : 0;
+  const criticalEvidenceBonus = Math.min(
+    36,
+    Math.max(0, ...criticalEvidenceTermGroups(query).map((group) => criticalEvidenceCoverageScore(candidate, group) * 3)),
+  );
   const identifierBonus = targetIndexes.some((index) => title.includes(index) || candidate.chunk.content.includes(index))
     ? 10
     : 0;
   const symbolBonus = primarySymbol && candidateTitleSymbol(title) === primarySymbol ? 8 : 0;
   const lengthPenalty = candidate.chunk.content.trim().length < 80 ? 1 : 0;
-  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus + identifierBonus + symbolBonus - lengthPenalty;
+  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus + criticalEvidenceBonus + identifierBonus + symbolBonus - lengthPenalty;
 }
 
 export function preRankHybridKnowledgeCandidates(opts: {
@@ -1116,20 +1256,25 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   }
 
   const strictRouteScope = isStrictRouteScope(routePlan);
-  const [qdrantResult, prismaResult] = await Promise.allSettled([
+  const [qdrantResult, prismaResult, criticalEvidenceResult] = await Promise.allSettled([
     collectQdrantCandidates({ query, accessibleCollectionIds, routePlan }),
     collectPrismaCandidates({ query, accessibleCollectionIds, routePlan }),
+    collectCriticalEvidenceCandidates({ query: evidenceQuery, accessibleCollectionIds, routePlan }),
   ]);
   const qdrantCandidates = qdrantResult.status === "fulfilled" ? qdrantResult.value : [];
   const prismaCandidates = prismaResult.status === "fulfilled" ? prismaResult.value : [];
+  const criticalEvidenceCandidates = criticalEvidenceResult.status === "fulfilled" ? criticalEvidenceResult.value : [];
   if (qdrantResult.status === "rejected") {
     console.warn(`[hybrid-retrieval] qdrant candidate collection failed: ${qdrantResult.reason}`);
   }
   if (prismaResult.status === "rejected") {
     console.warn(`[hybrid-retrieval] prisma candidate collection failed: ${prismaResult.reason}`);
   }
+  if (criticalEvidenceResult.status === "rejected") {
+    console.warn(`[hybrid-retrieval] critical evidence candidate collection failed: ${criticalEvidenceResult.reason}`);
+  }
 
-  const deduped = dedupeHybridKnowledgeCandidates([...qdrantCandidates, ...prismaCandidates]);
+  const deduped = dedupeHybridKnowledgeCandidates([...criticalEvidenceCandidates, ...qdrantCandidates, ...prismaCandidates]);
   if (strictRouteScope && deduped.length === 0) {
     return {
       contextText: "",
@@ -1163,7 +1308,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     routePlan,
     allowSemanticReview: true,
   });
-  const candidatesForRerank = alignedPreRanked.candidates;
+  const candidatesForRerank = prioritizeCriticalEvidenceCandidates(evidenceQuery, alignedPreRanked.candidates);
   if (alignedPreRanked.diagnostics.fastFailed) {
     return {
       contextText: "",
@@ -1280,10 +1425,17 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       return true;
     })
     .slice(0, limit);
+  const criticalRerankPool = [
+    ...reranked,
+    ...candidatesForRerank.map((candidate) => ({
+      ...candidate,
+      rerankScore: Math.max(minRerankScore(), candidate.preRankScore ?? 0),
+    })),
+  ];
   const accepted = diversifyCriticalEvidenceCandidates(
     evidenceQuery,
     diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit),
-    reranked,
+    criticalRerankPool,
     limit,
   );
   const alignedAccepted = alignHybridKnowledgeCandidates({
