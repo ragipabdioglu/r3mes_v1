@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   alignHybridKnowledgeCandidates,
+  buildPrunedEvidenceInput,
   candidateMatchesRouteScope,
   dedupeHybridKnowledgeCandidates,
   preRankHybridKnowledgeCandidates,
@@ -352,5 +353,45 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.candidates).toEqual([]);
     expect(result.diagnostics.fastFailed).toBe(true);
     expect(result.diagnostics.droppedCandidateCount).toBe(1);
+  });
+
+  it("prunes evidence input to query-relevant structured facts before extraction", () => {
+    vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "260");
+    const input = buildPrunedEvidenceInput({
+      query: "Production migration öncesi yedek ve rollback için ne kontrol edilmeli?",
+      budgetMode: "fast_grounded",
+      candidate: candidate({
+        id: "migration-long",
+        title: "migration güvenliği",
+        content: [
+          "Topic: migration güvenliği",
+          "Tags: technical, migration, yedek, rollback",
+          "Source Summary: Production migration öncesinde yedek alınmalı ve rollback planı hazırlanmalıdır.",
+          "Key Takeaway: Staging ortamında deneme, log kontrolü ve geri dönüş planı net olmalıdır.",
+          "Red Flags: Yedeksiz işlem ve belirsiz rollback yüksek risklidir.",
+          "Bu paragraf alakasız bakım penceresi ayrıntılarıyla çok uzundur ve modele gereksiz ham doküman taşımamalıdır.".repeat(12),
+        ].join("\n"),
+      }),
+    });
+
+    expect(input.length).toBeLessThanOrEqual(260);
+    expect(input).toContain("yedek");
+    expect(input).toContain("rollback");
+    expect(input).not.toContain("alakasız bakım");
+  });
+
+  it("does not expand already-small evidence chunks while pruning", () => {
+    const raw = "Topic: migration\nTags: technical, migration\nYedek ve rollback planı kontrol edilmelidir.";
+    const input = buildPrunedEvidenceInput({
+      query: "migration öncesi yedek?",
+      budgetMode: "fast_grounded",
+      candidate: candidate({
+        id: "small",
+        title: "migration",
+        content: raw,
+      }),
+    });
+
+    expect(input).toBe(raw);
   });
 });

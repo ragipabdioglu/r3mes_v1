@@ -75,7 +75,10 @@ export interface HybridRetrievedKnowledgeContext {
       requestedSourceLimit: number;
       finalSourceLimit: number;
       finalSourceCount: number;
+      evidenceContextMode: "raw" | "pruned";
       contextTextChars: number;
+      evidenceInputChars: number;
+      evidencePrunedInputChars: number;
       evidenceDirectFactLimit: number;
       evidenceSupportingFactLimit: number;
       evidenceRiskFactLimit: number;
@@ -200,16 +203,23 @@ function buildBudgetDiagnostics(opts: {
   finalSourceLimit: number;
   finalSourceCount: number;
   contextText?: string;
+  evidenceInputChars?: number;
+  evidencePrunedInputChars?: number;
   evidence?: EvidenceExtractorOutput | null;
 }): HybridRetrievedKnowledgeContext["diagnostics"]["budget"] {
   const evidenceBudget = getEvidenceExtractorBudget();
+  const evidenceInputChars = opts.evidenceInputChars ?? 0;
+  const evidencePrunedInputChars = opts.evidencePrunedInputChars ?? evidenceInputChars;
   return {
     contextMode: getRagContextMode(),
     budgetMode: opts.budgetMode ?? "normal_rag",
     requestedSourceLimit: opts.requestedSourceLimit,
     finalSourceLimit: opts.finalSourceLimit,
     finalSourceCount: opts.finalSourceCount,
+    evidenceContextMode: evidencePrunedInputChars > 0 && evidencePrunedInputChars < evidenceInputChars ? "pruned" : "raw",
     contextTextChars: opts.contextText?.length ?? 0,
+    evidenceInputChars,
+    evidencePrunedInputChars,
     evidenceDirectFactLimit: evidenceBudget.directFactLimit,
     evidenceSupportingFactLimit: evidenceBudget.supportingFactLimit,
     evidenceRiskFactLimit: evidenceBudget.riskFactLimit,
@@ -632,6 +642,70 @@ function renderDetailedEvidenceBrief(
   ].filter(Boolean).join("\n\n");
 }
 
+function evidenceInputMaxChars(budgetMode: RetrievalBudgetMode): number {
+  if (budgetMode === "fast_grounded") return parsePositiveInt(process.env.R3MES_EVIDENCE_FAST_MAX_CHARS, 1200);
+  if (budgetMode === "deep_rag") return parsePositiveInt(process.env.R3MES_EVIDENCE_DEEP_MAX_CHARS, 2200);
+  return parsePositiveInt(process.env.R3MES_EVIDENCE_NORMAL_MAX_CHARS, 1600);
+}
+
+function sentenceParts(value: string): string[] {
+  return value
+    .replace(/\r\n/g, "\n")
+    .split(/(?<=[.!?])\s+|\n+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function pickRelevantSentences(query: string, text: string, maxChars: number): string {
+  const queryTokens = new Set(buildExpandedQueryTokens(query, null, 48));
+  const scored = sentenceParts(text)
+    .map((sentence, index) => {
+      const sentenceTokens = tokenize(sentence);
+      const overlap = sentenceTokens.filter((token) => queryTokens.has(token)).length;
+      const structureBonus = /^(?:Topic|Tags|Source Summary|Key Takeaway|Patient Summary|Clinical Takeaway|Safe Guidance|Red Flags|Do Not Infer|Başlık|Etiketler|Temel Bilgi|Triage|Uyarı Bulguları|Çıkarım Yapma)\s*:/iu.test(sentence)
+        ? 2
+        : 0;
+      const riskBonus = /\b(?:risk|dikkat|acil|şiddetli|siddetli|uyarı|uyari|kesin|çıkarım|cikarim|do not infer)\b/iu.test(sentence)
+        ? 1
+        : 0;
+      return { sentence, index, score: overlap * 3 + structureBonus + riskBonus };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const selected = scored.slice(0, 8).sort((a, b) => a.index - b.index).map((item) => item.sentence);
+  const fallback = sentenceParts(text).slice(0, 6);
+  const lines = (selected.length > 0 ? selected : fallback);
+  let out = "";
+  for (const line of lines) {
+    const candidate = out ? `${out}\n${line}` : line;
+    if (candidate.length > maxChars && out) break;
+    out = candidate.slice(0, maxChars);
+  }
+  return out.trim();
+}
+
+export function buildPrunedEvidenceInput(opts: {
+  query: string;
+  candidate: { chunk: HybridKnowledgeChunk; card: KnowledgeCard };
+  budgetMode: RetrievalBudgetMode;
+}): string {
+  const maxChars = evidenceInputMaxChars(opts.budgetMode);
+  const rawContent = opts.candidate.chunk.content.trim();
+  const structured = [
+    opts.candidate.card.topic ? `Topic: ${opts.candidate.card.topic}` : "",
+    opts.candidate.card.tags.length > 0 ? `Tags: ${opts.candidate.card.tags.join(", ")}` : "",
+    opts.candidate.card.patientSummary ? `Source Summary: ${opts.candidate.card.patientSummary}` : "",
+    opts.candidate.card.clinicalTakeaway ? `Key Takeaway: ${opts.candidate.card.clinicalTakeaway}` : "",
+    opts.candidate.card.safeGuidance ? `Safe Guidance: ${opts.candidate.card.safeGuidance}` : "",
+    opts.candidate.card.redFlags ? `Red Flags: ${opts.candidate.card.redFlags}` : "",
+    opts.candidate.card.doNotInfer ? `Do Not Infer: ${opts.candidate.card.doNotInfer}` : "",
+  ].filter(Boolean).join("\n");
+  const sourceText = structured.trim() || rawContent;
+  const pruned = pickRelevantSentences(opts.query, sourceText, maxChars) || sourceText.slice(0, maxChars).trim();
+  return pruned.length > 0 && pruned.length < rawContent.length ? pruned : rawContent;
+}
+
 export async function retrieveKnowledgeContextTrueHybrid(opts: {
   query: string;
   evidenceQuery?: string;
@@ -845,19 +919,22 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     chunkIndex: chunk.chunkIndex,
     excerpt: chunk.content.slice(0, 220),
   }));
+  const evidenceCards = finalCandidates.map((candidate) => ({
+    sourceId: candidate.chunk.documentId,
+    title: candidate.chunk.document.title,
+    topic: candidate.card.topic,
+    rawContent: buildPrunedEvidenceInput({ query: evidenceQuery, candidate, budgetMode }),
+    patientSummary: candidate.card.patientSummary,
+    clinicalTakeaway: candidate.card.clinicalTakeaway,
+    safeGuidance: candidate.card.safeGuidance,
+    redFlags: candidate.card.redFlags,
+    doNotInfer: candidate.card.doNotInfer,
+  }));
+  const evidenceInputChars = finalCandidates.reduce((sum, candidate) => sum + candidate.chunk.content.length, 0);
+  const evidencePrunedInputChars = evidenceCards.reduce((sum, card) => sum + card.rawContent.length, 0);
   const evidenceRun = await runEvidenceExtractorSkill({
     userQuery: evidenceQuery,
-    cards: finalCandidates.map(({ chunk, card }) => ({
-      sourceId: chunk.documentId,
-      title: chunk.document.title,
-      topic: card.topic,
-      rawContent: chunk.content,
-      patientSummary: card.patientSummary,
-      clinicalTakeaway: card.clinicalTakeaway,
-      safeGuidance: card.safeGuidance,
-      redFlags: card.redFlags,
-      doNotInfer: card.doNotInfer,
-    })),
+    cards: evidenceCards,
   });
   if (evidenceHasOnlyScopeExclusion(evidenceRun.output)) {
     const scopedOutAlignmentDiagnostics = {
@@ -885,6 +962,8 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           requestedSourceLimit,
           finalSourceLimit: limit,
           finalSourceCount: 0,
+          evidenceInputChars,
+          evidencePrunedInputChars,
           evidence: evidenceRun.output,
         }),
         retrievalMode: "true_hybrid",
@@ -933,6 +1012,8 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         finalSourceLimit: limit,
         finalSourceCount: finalCandidates.length,
         contextText,
+        evidenceInputChars,
+        evidencePrunedInputChars,
         evidence: evidenceRun.output,
       }),
       retrievalMode: "true_hybrid",
