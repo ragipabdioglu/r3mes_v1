@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   alignHybridKnowledgeCandidates,
   buildPrunedEvidenceInput,
+  buildPrunedEvidenceInputWithDiagnostics,
   candidateMatchesRouteScope,
   dedupeHybridKnowledgeCandidates,
   preRankHybridKnowledgeCandidates,
@@ -357,7 +358,7 @@ describe("true hybrid retrieval helpers", () => {
 
   it("prunes evidence input to query-relevant structured facts before extraction", () => {
     vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "260");
-    const input = buildPrunedEvidenceInput({
+    const result = buildPrunedEvidenceInputWithDiagnostics({
       query: "Production migration öncesi yedek ve rollback için ne kontrol edilmeli?",
       budgetMode: "fast_grounded",
       candidate: candidate({
@@ -373,11 +374,15 @@ describe("true hybrid retrieval helpers", () => {
         ].join("\n"),
       }),
     });
+    const input = result.text;
 
     expect(input.length).toBeLessThanOrEqual(260);
     expect(input).toContain("yedek");
     expect(input).toContain("rollback");
     expect(input).not.toContain("alakasız bakım");
+    expect(result.diagnostics.mode).toBe("pruned");
+    expect(result.diagnostics.selectedSentenceCount).toBeGreaterThan(0);
+    expect(result.diagnostics.droppedSentenceCount).toBeGreaterThan(0);
   });
 
   it("does not expand already-small evidence chunks while pruning", () => {
@@ -393,5 +398,31 @@ describe("true hybrid retrieval helpers", () => {
     });
 
     expect(input).toBe(raw);
+  });
+
+  it("keeps pruning diagnostics generic for noisy mixed-domain evidence", () => {
+    vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "240");
+    const result = buildPrunedEvidenceInputWithDiagnostics({
+      query: "Velayet ve nafaka için boşanma protokolünde ne kontrol edilmeli?",
+      budgetMode: "fast_grounded",
+      candidate: candidate({
+        id: "legal-mixed",
+        title: "hukuk karışık notlar",
+        content: [
+          "Topic: boşanma protokolü",
+          "Tags: legal, velayet, nafaka, protokol",
+          "Source Summary: Anlaşmalı boşanmada velayet, nafaka ve protokol maddeleri net yazılmalıdır.",
+          "Key Takeaway: Tarafların anlaşması, çocuğun yararı ve ödeme düzeni kaynakta birlikte değerlendirilir.",
+          "Bu teknik not migration rollback ve log izleme hakkındadır.".repeat(8),
+          "Bu sağlık notu kasık ağrısı ve smear takibi hakkındadır.".repeat(8),
+        ].join("\n"),
+      }),
+    });
+
+    expect(result.text).toContain("velayet");
+    expect(result.text).toContain("nafaka");
+    expect(result.text).not.toContain("migration rollback");
+    expect(result.text).not.toContain("kasık ağrısı");
+    expect(result.diagnostics.droppedSentenceCount).toBeGreaterThan(0);
   });
 });

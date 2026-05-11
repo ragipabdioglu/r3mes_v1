@@ -201,6 +201,8 @@ function classifyCase(testCase, suite) {
       testCase.maxEvidencePrunedInputChars !== undefined ||
       testCase.maxEvidenceInputCompressionRatio !== undefined ||
       testCase.expectedEvidencePrunedNotGreaterThanRaw !== undefined ||
+      testCase.minEvidenceFactDroppedCount !== undefined ||
+      testCase.maxEvidenceFactSelectedCount !== undefined ||
       includesAny(combined, ["context-pruning", "context_pruning", "pruning", "pruned evidence"]),
   );
   mark(

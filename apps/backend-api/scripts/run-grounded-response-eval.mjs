@@ -387,6 +387,20 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (Number.isFinite(Number(testCase.minEvidenceFactDroppedCount))) {
+    const actual = Number(budget?.evidenceFactDroppedCount ?? 0);
+    if (actual < Number(testCase.minEvidenceFactDroppedCount)) {
+      failures.push(`evidence_fact_dropped:${actual}<${Number(testCase.minEvidenceFactDroppedCount)}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.maxEvidenceFactSelectedCount))) {
+    const actual = Number(budget?.evidenceFactSelectedCount ?? 0);
+    if (actual > Number(testCase.maxEvidenceFactSelectedCount)) {
+      failures.push(`evidence_fact_selected:${actual}>${Number(testCase.maxEvidenceFactSelectedCount)}`);
+    }
+  }
+
   if (typeof testCase.expectedFallbackTemplateUsed === "boolean") {
     const actualFallback = response?.answer_quality?.fallbackTemplateUsed;
     if (actualFallback !== testCase.expectedFallbackTemplateUsed) {
@@ -631,6 +645,9 @@ function scoreCase(testCase, response) {
     budgetEvidenceContextMode: budget?.evidenceContextMode ?? null,
     budgetEvidenceInputChars: budget?.evidenceInputChars ?? null,
     budgetEvidencePrunedInputChars: budget?.evidencePrunedInputChars ?? null,
+    budgetEvidenceFactCandidateCount: budget?.evidenceFactCandidateCount ?? null,
+    budgetEvidenceFactSelectedCount: budget?.evidenceFactSelectedCount ?? null,
+    budgetEvidenceFactDroppedCount: budget?.evidenceFactDroppedCount ?? null,
     budgetEvidenceInputCompressionRatio:
       Number(budget?.evidenceInputChars ?? 0) > 0
         ? Number((Number(budget?.evidencePrunedInputChars ?? 0) / Number(budget?.evidenceInputChars ?? 1)).toFixed(3))
@@ -1036,6 +1053,9 @@ function summarizeBudgetQuality(results) {
       evidenceUsableFacts: averageField(casesWithBudget, "budgetEvidenceUsableFactCount"),
       evidenceInputChars: averageField(casesWithBudget, "budgetEvidenceInputChars"),
       evidencePrunedInputChars: averageField(casesWithBudget, "budgetEvidencePrunedInputChars"),
+      evidenceFactCandidates: averageField(casesWithBudget, "budgetEvidenceFactCandidateCount"),
+      evidenceFactSelected: averageField(casesWithBudget, "budgetEvidenceFactSelectedCount"),
+      evidenceFactDropped: averageField(casesWithBudget, "budgetEvidenceFactDroppedCount"),
       evidenceInputCompressionRatio: averageField(casesWithBudget, "budgetEvidenceInputCompressionRatio"),
     },
     latencyByBudgetMode: summarizeLatencyByBudget(casesWithBudget),

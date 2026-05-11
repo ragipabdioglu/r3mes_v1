@@ -54,6 +54,15 @@ interface AlignableKnowledgeCandidate {
   preRankScore?: number;
 }
 
+export interface EvidencePruningDiagnostics {
+  mode: "raw" | "pruned";
+  rawChars: number;
+  prunedChars: number;
+  candidateSentenceCount: number;
+  selectedSentenceCount: number;
+  droppedSentenceCount: number;
+}
+
 export interface HybridRetrievedKnowledgeContext {
   contextText: string;
   sources: ChatSourceCitation[];
@@ -79,6 +88,9 @@ export interface HybridRetrievedKnowledgeContext {
       contextTextChars: number;
       evidenceInputChars: number;
       evidencePrunedInputChars: number;
+      evidenceFactCandidateCount: number;
+      evidenceFactSelectedCount: number;
+      evidenceFactDroppedCount: number;
       evidenceDirectFactLimit: number;
       evidenceSupportingFactLimit: number;
       evidenceRiskFactLimit: number;
@@ -205,6 +217,9 @@ function buildBudgetDiagnostics(opts: {
   contextText?: string;
   evidenceInputChars?: number;
   evidencePrunedInputChars?: number;
+  evidenceFactCandidateCount?: number;
+  evidenceFactSelectedCount?: number;
+  evidenceFactDroppedCount?: number;
   evidence?: EvidenceExtractorOutput | null;
 }): HybridRetrievedKnowledgeContext["diagnostics"]["budget"] {
   const evidenceBudget = getEvidenceExtractorBudget();
@@ -220,6 +235,9 @@ function buildBudgetDiagnostics(opts: {
     contextTextChars: opts.contextText?.length ?? 0,
     evidenceInputChars,
     evidencePrunedInputChars,
+    evidenceFactCandidateCount: opts.evidenceFactCandidateCount ?? 0,
+    evidenceFactSelectedCount: opts.evidenceFactSelectedCount ?? 0,
+    evidenceFactDroppedCount: opts.evidenceFactDroppedCount ?? 0,
     evidenceDirectFactLimit: evidenceBudget.directFactLimit,
     evidenceSupportingFactLimit: evidenceBudget.supportingFactLimit,
     evidenceRiskFactLimit: evidenceBudget.riskFactLimit,
@@ -656,9 +674,15 @@ function sentenceParts(value: string): string[] {
     .filter(Boolean);
 }
 
-function pickRelevantSentences(query: string, text: string, maxChars: number): string {
+function pickRelevantSentences(query: string, text: string, maxChars: number): {
+  text: string;
+  candidateSentenceCount: number;
+  selectedSentenceCount: number;
+  droppedSentenceCount: number;
+} {
   const queryTokens = new Set(buildExpandedQueryTokens(query, null, 48));
-  const scored = sentenceParts(text)
+  const parts = sentenceParts(text);
+  const scored = parts
     .map((sentence, index) => {
       const sentenceTokens = tokenize(sentence);
       const overlap = sentenceTokens.filter((token) => queryTokens.has(token)).length;
@@ -674,7 +698,7 @@ function pickRelevantSentences(query: string, text: string, maxChars: number): s
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
   const selected = scored.slice(0, 8).sort((a, b) => a.index - b.index).map((item) => item.sentence);
-  const fallback = sentenceParts(text).slice(0, 6);
+  const fallback = parts.slice(0, 6);
   const lines = (selected.length > 0 ? selected : fallback);
   let out = "";
   for (const line of lines) {
@@ -682,14 +706,20 @@ function pickRelevantSentences(query: string, text: string, maxChars: number): s
     if (candidate.length > maxChars && out) break;
     out = candidate.slice(0, maxChars);
   }
-  return out.trim();
+  const selectedSentenceCount = lines.filter((line) => out.includes(line.slice(0, Math.min(32, line.length)))).length;
+  return {
+    text: out.trim(),
+    candidateSentenceCount: parts.length,
+    selectedSentenceCount,
+    droppedSentenceCount: Math.max(0, parts.length - selectedSentenceCount),
+  };
 }
 
-export function buildPrunedEvidenceInput(opts: {
+export function buildPrunedEvidenceInputWithDiagnostics(opts: {
   query: string;
   candidate: { chunk: HybridKnowledgeChunk; card: KnowledgeCard };
   budgetMode: RetrievalBudgetMode;
-}): string {
+}): { text: string; diagnostics: EvidencePruningDiagnostics } {
   const maxChars = evidenceInputMaxChars(opts.budgetMode);
   const rawContent = opts.candidate.chunk.content.trim();
   const structured = [
@@ -702,8 +732,28 @@ export function buildPrunedEvidenceInput(opts: {
     opts.candidate.card.doNotInfer ? `Do Not Infer: ${opts.candidate.card.doNotInfer}` : "",
   ].filter(Boolean).join("\n");
   const sourceText = structured.trim() || rawContent;
-  const pruned = pickRelevantSentences(opts.query, sourceText, maxChars) || sourceText.slice(0, maxChars).trim();
-  return pruned.length > 0 && pruned.length < rawContent.length ? pruned : rawContent;
+  const picked = pickRelevantSentences(opts.query, sourceText, maxChars);
+  const pruned = picked.text || sourceText.slice(0, maxChars).trim();
+  const text = pruned.length > 0 && pruned.length < rawContent.length ? pruned : rawContent;
+  return {
+    text,
+    diagnostics: {
+      mode: text.length < rawContent.length ? "pruned" : "raw",
+      rawChars: rawContent.length,
+      prunedChars: text.length,
+      candidateSentenceCount: picked.candidateSentenceCount,
+      selectedSentenceCount: text.length < rawContent.length ? picked.selectedSentenceCount : picked.candidateSentenceCount,
+      droppedSentenceCount: text.length < rawContent.length ? picked.droppedSentenceCount : 0,
+    },
+  };
+}
+
+export function buildPrunedEvidenceInput(opts: {
+  query: string;
+  candidate: { chunk: HybridKnowledgeChunk; card: KnowledgeCard };
+  budgetMode: RetrievalBudgetMode;
+}): string {
+  return buildPrunedEvidenceInputWithDiagnostics(opts).text;
 }
 
 export async function retrieveKnowledgeContextTrueHybrid(opts: {
@@ -919,11 +969,15 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     chunkIndex: chunk.chunkIndex,
     excerpt: chunk.content.slice(0, 220),
   }));
-  const evidenceCards = finalCandidates.map((candidate) => ({
+  const prunedEvidenceInputs = finalCandidates.map((candidate) => ({
+    candidate,
+    ...buildPrunedEvidenceInputWithDiagnostics({ query: evidenceQuery, candidate, budgetMode }),
+  }));
+  const evidenceCards = prunedEvidenceInputs.map(({ candidate, text }) => ({
     sourceId: candidate.chunk.documentId,
     title: candidate.chunk.document.title,
     topic: candidate.card.topic,
-    rawContent: buildPrunedEvidenceInput({ query: evidenceQuery, candidate, budgetMode }),
+    rawContent: text,
     patientSummary: candidate.card.patientSummary,
     clinicalTakeaway: candidate.card.clinicalTakeaway,
     safeGuidance: candidate.card.safeGuidance,
@@ -932,6 +986,18 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   }));
   const evidenceInputChars = finalCandidates.reduce((sum, candidate) => sum + candidate.chunk.content.length, 0);
   const evidencePrunedInputChars = evidenceCards.reduce((sum, card) => sum + card.rawContent.length, 0);
+  const evidenceFactCandidateCount = prunedEvidenceInputs.reduce(
+    (sum, input) => sum + input.diagnostics.candidateSentenceCount,
+    0,
+  );
+  const evidenceFactSelectedCount = prunedEvidenceInputs.reduce(
+    (sum, input) => sum + input.diagnostics.selectedSentenceCount,
+    0,
+  );
+  const evidenceFactDroppedCount = prunedEvidenceInputs.reduce(
+    (sum, input) => sum + input.diagnostics.droppedSentenceCount,
+    0,
+  );
   const evidenceRun = await runEvidenceExtractorSkill({
     userQuery: evidenceQuery,
     cards: evidenceCards,
@@ -964,6 +1030,9 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
           evidenceInputChars,
           evidencePrunedInputChars,
+          evidenceFactCandidateCount,
+          evidenceFactSelectedCount,
+          evidenceFactDroppedCount,
           evidence: evidenceRun.output,
         }),
         retrievalMode: "true_hybrid",
@@ -1014,6 +1083,9 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         contextText,
         evidenceInputChars,
         evidencePrunedInputChars,
+        evidenceFactCandidateCount,
+        evidenceFactSelectedCount,
+        evidenceFactDroppedCount,
         evidence: evidenceRun.output,
       }),
       retrievalMode: "true_hybrid",
