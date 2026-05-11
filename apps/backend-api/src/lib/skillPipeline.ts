@@ -453,6 +453,56 @@ function numericTableFragments(text: string, query: string, limit = 4): string[]
     .map(({ row }) => row);
 }
 
+function firstMatch(value: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[0]) return match[0].replace(/\s+/g, " ").trim();
+  }
+  return null;
+}
+
+function financeTargetedFragments(text: string, query: string): string[] {
+  const normalizedQuery = normalizeConceptText(query);
+  const fragments: string[] = [];
+
+  if (normalizedQuery.includes("net donem") && normalizedQuery.includes("spk")) {
+    const value = firstMatch(text, [
+      /SPK[\s\S]{0,24}?Göre[\s\S]{0,260}?(?:^|[^\d])5\.\s+[\d.]+(?:,\d+)?/ium,
+      /According\s+to\s+CMB[\s\S]{0,260}?(?:^|[^\d])5\.\s+[\d.]+(?:,\d+)?/ium,
+      /Capital\s+Markets\s+Board[\s\S]{0,260}?(?:^|[^\d])5\.\s+[\d.]+(?:,\d+)?/ium,
+    ]);
+    if (value) fragments.push(`SPK'ya Göre: 5. Net Dönem Kârı = ${value.match(/(?:^|[^\d])5\.\s+([\d.]+(?:,\d+)?)/u)?.[1] ?? value}`);
+  }
+
+  if (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) {
+    const withholding = firstMatch(text, [
+      /(?:stopaj|withholding\s+tax)[\s\S]{0,340}?(?:0\s*%|%\s*0|%0|0,00)[\s\S]{0,340}?(?:5\s*%|%\s*5|%5|5,00)/iu,
+      /(?:%|percent|oranı|orani|rate)[\s\S]{0,100}?(?:0|5)[\s\S]{0,260}?(?:%|percent|oranı|orani|rate)[\s\S]{0,100}?(?:0|5)/iu,
+      /(?:0\s*%|%\s*0|%0|0,00)[\s\S]{0,320}?(?:5\s*%|%\s*5|%5|5,00)/iu,
+      /withholding\s+tax\s+rate[\s\S]{0,260}?(?:0|5)/iu,
+      /stopaj\s+oran[ıi][\s\S]{0,260}?(?:0|5)/iu,
+    ]);
+    if (withholding) fragments.push(`Stopaj oranı: ${withholding}`);
+  }
+
+  if (
+    normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") ||
+    normalizedQuery.includes("olaganustu yedek") ||
+    normalizedQuery.includes("other sources") ||
+    normalizedQuery.includes("extraordinary reserves")
+  ) {
+    const otherSources = firstMatch(text, [
+      /20\.\s*Da[ğg]ıtılması\s+Öngörülen\s+Di[ğg]er\s+Kaynaklar[\s\S]{0,360}?Ola[ğg]an[üu]st[üu]\s+Yedekler[\s\S]{0,160}?[\d.]+(?:,\d+)?/iu,
+      /20\.\s*Da[ğg]ıtılması\s+Öngörülen\s+Di[ğg]er\s+Kaynaklar[\s\S]{0,260}?[\d.]+(?:,\d+)?[\s\S]{0,100}?[\d.]+(?:,\d+)?/iu,
+      /20\.\s*Other\s+Sources[\s\S]{0,360}?Extraordinary\s+Reserves[\s\S]{0,160}?[\d.]+(?:,\d+)?/iu,
+      /20\.\s*Other\s+Sources[\s\S]{0,260}?[\d.]+(?:,\d+)?[\s\S]{0,100}?[\d.]+(?:,\d+)?/iu,
+    ]);
+    if (otherSources) fragments.push(otherSources);
+  }
+
+  return unique(fragments).slice(0, 4);
+}
+
 function evidenceRelevanceScore(query: string, fact: string): number {
   const normalizedQuery = normalizeConceptText(query);
   const normalizedFact = normalizeConceptText(fact);
@@ -483,6 +533,27 @@ function evidenceRelevanceScore(query: string, fact: string): number {
       ? 9
       : 0;
   const shortRelevantBonus = fact.length <= 360 ? 2 : 0;
+  const spkScopeBonus =
+    normalizedQuery.includes("spk") && normalizedFact.includes("spk")
+      ? 24
+      : normalizedQuery.includes("spk") && normalizedFact.includes("capital markets board")
+        ? 18
+        : 0;
+  const stopajScopeBonus =
+    (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
+    (normalizedFact.includes("stopaj") || normalizedFact.includes("withholding"))
+      ? 22
+      : 0;
+  const otherSourcesScopeBonus =
+    (normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") ||
+      normalizedQuery.includes("other sources") ||
+      normalizedQuery.includes("olaganustu yedek")) &&
+    (normalizedFact.includes("dagitilmasi ongorulen diger kaynak") ||
+      normalizedFact.includes("other sources") ||
+      normalizedFact.includes("olaganustu yedek") ||
+      normalizedFact.includes("extraordinary reserves"))
+      ? 22
+      : 0;
   const unrequestedNetDistributablePenalty =
     normalizedFact.includes("dagitilabilir") && !normalizedQuery.includes("dagitilabilir")
       ? 50
@@ -498,9 +569,32 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     plainPeriodProfitBonus +
     titleEvidenceBonus +
     languageEvidenceBonus +
+    spkScopeBonus +
+    stopajScopeBonus +
+    otherSourcesScopeBonus +
     shortRelevantBonus -
     headerPenalty -
     unrequestedNetDistributablePenalty;
+}
+
+function addQueryLanguageAlias(query: string, fragment: string): string {
+  const normalizedQuery = normalizeConceptText(query);
+  const normalizedFragment = normalizeConceptText(fragment);
+  if (
+    normalizedQuery.includes("stopaj") &&
+    normalizedFragment.includes("withholding") &&
+    !normalizedFragment.includes("stopaj")
+  ) {
+    return `Stopaj oranı / withholding tax rate: ${fragment}`;
+  }
+  if (
+    normalizedQuery.includes("spk") &&
+    normalizedFragment.includes("capital markets board") &&
+    !normalizedFragment.includes("spk")
+  ) {
+    return `SPK / Capital Markets Board: ${fragment}`;
+  }
+  return fragment;
 }
 
 function rankEvidenceFacts(query: string, facts: string[]): string[] {
@@ -1039,8 +1133,8 @@ export function buildDeterministicEvidenceExtraction(
   const queryTokens = new Set(tokenizeForOverlap(input.userQuery));
   const weakIntent = inferAnswerIntent(input.userQuery);
 
-  const addUsableIfRelevant = (sourceLabel: string, fragment: string, opts: { allowGenericGuidance?: boolean; kind?: "direct" | "supporting" } = {}) => {
-    const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
+  const addUsableIfRelevant = (sourceLabel: string, fragment: string, opts: { allowGenericGuidance?: boolean; kind?: "direct" | "supporting"; force?: boolean } = {}) => {
+    const sanitized = removeOffQuerySymptomPhrases(input.userQuery, addQueryLanguageAlias(input.userQuery, fragment));
     if (!sanitized.trim()) return;
     if (hasContradictionMarker(sanitized) || hasSourceScopeExclusion(sanitized)) {
       uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
@@ -1051,10 +1145,10 @@ export function buildDeterministicEvidenceExtraction(
     const strongOverlap = hasStrongQueryOverlap(queryTokens, sanitized);
     const offQuerySymptom = hasOffQuerySymptom(input.userQuery, sanitized);
     if (offQuerySymptom && !opts.allowGenericGuidance) return;
-    const acceptDirect = opts.kind !== "supporting" && (strongOverlap || coreOverlap > 0 || (weakIntent === "explain" && overlap > 0));
+    const acceptDirect = opts.kind !== "supporting" && (opts.force || strongOverlap || coreOverlap > 0 || (weakIntent === "explain" && overlap > 0));
     const acceptSupporting =
       opts.kind === "supporting" &&
-      (strongOverlap || coreOverlap > 0 || (opts.allowGenericGuidance && overlap > 0));
+      (opts.force || strongOverlap || coreOverlap > 0 || (opts.allowGenericGuidance && overlap > 0));
     if (acceptDirect || acceptSupporting) {
       const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized), isLikelyFinancialTableRow(sanitized) ? 520 : 320);
       usableFacts.push(line);
@@ -1086,6 +1180,13 @@ export function buildDeterministicEvidenceExtraction(
 
     for (const section of cardSections(card)) {
       if (section.kind === "direct" || section.kind === "supporting") {
+        for (const fragment of financeTargetedFragments(section.text, input.userQuery)) {
+          addUsableIfRelevant(sourceLabel, fragment, {
+            allowGenericGuidance: true,
+            kind: section.kind === "supporting" ? "supporting" : "direct",
+            force: true,
+          });
+        }
         for (const fragment of numericTableFragments(section.text, input.userQuery, 4)) {
           addUsableIfRelevant(sourceLabel, fragment, {
             allowGenericGuidance: true,

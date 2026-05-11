@@ -305,6 +305,65 @@ function disclosureIndexes(value: string): string[] {
   return [...new Set(value.match(/\b\d{6,}\b/g) ?? [])];
 }
 
+function targetDisclosureIndexes(query: string): string[] {
+  const allIndexes = disclosureIndexes(query);
+  if (allIndexes.length <= 1) return allIndexes;
+  const indexedSymbol = query.match(/\b[A-Za-zÇĞİÖŞÜçğıöşü]{3,6}\s+(\d{6,})\b/u)?.[1];
+  return [indexedSymbol ?? allIndexes[0]].filter(Boolean);
+}
+
+const NON_PRIMARY_UPPERCASE_TOKENS = new Set([
+  "SPK",
+  "CMB",
+  "KAP",
+  "TL",
+  "TRY",
+  "PDF",
+  "YK",
+  "VUK",
+]);
+
+function explicitUppercaseSymbols(value: string): string[] {
+  return [...new Set(value.match(/\b[A-ZÇĞİÖŞÜ]{3,6}\b/gu) ?? [])]
+    .filter((token) => !NON_PRIMARY_UPPERCASE_TOKENS.has(token));
+}
+
+function primaryQuerySymbol(query: string): string | null {
+  const indexedSymbol = query.match(/\b([A-Za-zÇĞİÖŞÜçğıöşü]{3,6})\s+\d{6,}\b/u)?.[1];
+  if (indexedSymbol && !NON_PRIMARY_UPPERCASE_TOKENS.has(indexedSymbol.toLocaleUpperCase("tr-TR"))) {
+    return indexedSymbol.toLocaleUpperCase("tr-TR");
+  }
+  return explicitUppercaseSymbols(query)[0] ?? null;
+}
+
+function candidateTitleSymbol(title: string): string | null {
+  const indexedSymbol = title.match(/\b([A-Za-zÇĞİÖŞÜçğıöşü]{3,6})\s+\d{6,}\b/u)?.[1];
+  if (indexedSymbol && !NON_PRIMARY_UPPERCASE_TOKENS.has(indexedSymbol.toLocaleUpperCase("tr-TR"))) {
+    return indexedSymbol.toLocaleUpperCase("tr-TR");
+  }
+  return explicitUppercaseSymbols(title)[0] ?? null;
+}
+
+function candidateMatchesExplicitIdentifierScope(query: string, candidate: { chunk: HybridKnowledgeChunk }): boolean {
+  const targetIndexes = targetDisclosureIndexes(query);
+  if (targetIndexes.length > 0) {
+    const titleIndexes = disclosureIndexes(candidate.chunk.document.title);
+    const contentIndexes = disclosureIndexes(candidate.chunk.content.slice(0, 1200));
+    const candidateIndexes = new Set([...titleIndexes, ...contentIndexes]);
+    if (candidateIndexes.size > 0 && !targetIndexes.some((index) => candidateIndexes.has(index))) {
+      return false;
+    }
+  }
+
+  const primarySymbol = primaryQuerySymbol(query);
+  if (primarySymbol) {
+    const titleSymbol = candidateTitleSymbol(candidate.chunk.document.title);
+    if (titleSymbol && titleSymbol !== primarySymbol) return false;
+  }
+
+  return true;
+}
+
 function sourceLanguageKey(title: string): "tr" | "en" | "unknown" {
   const normalized = normalize(title);
   if (/(profit distribution|dividend distribution|withholding|board|table)/u.test(normalized)) return "en";
@@ -360,6 +419,80 @@ function diversifyMultilingualDisclosureCandidates<T extends { chunk: HybridKnow
   }
 
   return [...byDocument.values()].slice(0, limit);
+}
+
+function criticalEvidenceTermGroups(query: string): string[][] {
+  const normalized = normalize(query);
+  const groups: string[][] = [];
+  if (normalized.includes("stopaj") || normalized.includes("withholding")) {
+    groups.push(["stopaj", "withholding tax", "withholding"]);
+  }
+  if (normalized.includes("spk") || normalized.includes("cmb")) {
+    groups.push(["spk", "cmb", "capital markets board"]);
+  }
+  if (normalized.includes("net donem") || normalized.includes("net profit")) {
+    groups.push(["net donem", "net profit"]);
+  }
+  if (
+    normalized.includes("dagitilmasi ongorulen diger kaynak") ||
+    normalized.includes("other sources") ||
+    normalized.includes("olaganustu yedek")
+  ) {
+    groups.push(["dagitilmasi ongorulen diger kaynak", "other sources", "olaganustu yedek", "extraordinary reserves"]);
+  }
+  return groups;
+}
+
+function candidateMatchesTermGroup(candidate: { chunk: HybridKnowledgeChunk }, terms: string[]): boolean {
+  const haystack = normalize([
+    candidate.chunk.document.title,
+    candidate.chunk.content,
+  ].join(" "));
+  return terms.some((term) => haystack.includes(normalize(term)));
+}
+
+function diversifyCriticalEvidenceCandidates<T extends { chunk: HybridKnowledgeChunk }>(
+  query: string,
+  accepted: T[],
+  candidates: T[],
+  limit: number,
+): T[] {
+  const groups = criticalEvidenceTermGroups(query);
+  if (groups.length === 0) return accepted.slice(0, limit);
+
+  const key = (candidate: T) => candidate.chunk.id || `${candidate.chunk.documentId}:${candidate.chunk.chunkIndex}`;
+  const selected = accepted.slice(0, limit);
+  const selectedKeys = () => new Set(selected.map(key));
+
+  for (const group of groups) {
+    const hasGroup = selected.some((candidate) => candidateMatchesTermGroup(candidate, group));
+    if (hasGroup) continue;
+    const match = candidates.find((candidate) =>
+      candidateMatchesExplicitIdentifierScope(query, candidate) &&
+      candidateMatchesTermGroup(candidate, group) &&
+      !selectedKeys().has(key(candidate))
+    );
+    if (!match) continue;
+    if (selected.length < limit) {
+      selected.push(match);
+      continue;
+    }
+    let replaceIndex = -1;
+    for (let index = selected.length - 1; index >= 0; index -= 1) {
+      const alreadyCoversCriticalGroup = groups.some((candidateGroup) =>
+        candidateMatchesTermGroup(selected[index], candidateGroup),
+      );
+      if (!alreadyCoversCriticalGroup) {
+        replaceIndex = index;
+        break;
+      }
+    }
+    selected[replaceIndex >= 0 ? replaceIndex : selected.length - 1] = match;
+  }
+
+  const deduped = new Map<string, T>();
+  for (const candidate of selected) deduped.set(key(candidate), candidate);
+  return [...deduped.values()].slice(0, limit);
 }
 
 function payloadToChunk(payload: QdrantKnowledgePayload): HybridKnowledgeChunk {
@@ -422,6 +555,13 @@ function metadataText(value: unknown): string {
 
 export function candidateMatchesRouteScope(card: KnowledgeCard, chunk: HybridKnowledgeChunk, routePlan?: DomainRoutePlan | null): boolean {
   if (!routePlan || routePlan.confidence === "low") return true;
+  const metadataHaystack = normalize([
+    metadataText(chunk.autoMetadata),
+    metadataText(chunk.document.autoMetadata),
+  ].join(" "));
+  if (metadataHaystack.includes("kap") && metadataHaystack.includes("finance")) {
+    return true;
+  }
   const cardDomains = explicitCardDomains(card);
   if (
     cardDomains.length > 0 &&
@@ -430,10 +570,6 @@ export function candidateMatchesRouteScope(card: KnowledgeCard, chunk: HybridKno
   ) {
     return false;
   }
-  const metadataHaystack = normalize([
-    metadataText(chunk.autoMetadata),
-    metadataText(chunk.document.autoMetadata),
-  ].join(" "));
   if (metadataHaystack) {
     const domainMatches = metadataHaystack.includes(normalize(routePlan.domain));
     if (!domainMatches) return false;
@@ -582,7 +718,11 @@ export function dedupeHybridKnowledgeCandidates(candidates: HybridKnowledgeCandi
 
 function scoreLightweightCandidate(query: string, candidate: HybridKnowledgeCandidate, routePlan?: DomainRoutePlan | null): number {
   const queryTokens = new Set(buildExpandedQueryTokens(query, routePlan, 32));
+  const targetIndexes = targetDisclosureIndexes(query);
+  const primarySymbol = primaryQuerySymbol(query);
+  const title = candidate.chunk.document.title;
   const text = normalize([
+    title,
     candidate.card.topic,
     candidate.card.tags.join(" "),
     candidate.card.patientSummary,
@@ -609,8 +749,12 @@ function scoreLightweightCandidate(query: string, candidate: HybridKnowledgeCand
     (candidate.vectorScore ?? 0) >= getAlignmentConfig().semanticKeepScore
       ? (candidate.vectorScore ?? 0) * 3
       : 0;
+  const identifierBonus = targetIndexes.some((index) => title.includes(index) || candidate.chunk.content.includes(index))
+    ? 10
+    : 0;
+  const symbolBonus = primarySymbol && candidateTitleSymbol(title) === primarySymbol ? 8 : 0;
   const lengthPenalty = candidate.chunk.content.trim().length < 80 ? 1 : 0;
-  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus - lengthPenalty;
+  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus + identifierBonus + symbolBonus - lengthPenalty;
 }
 
 export function preRankHybridKnowledgeCandidates(opts: {
@@ -619,7 +763,11 @@ export function preRankHybridKnowledgeCandidates(opts: {
   routePlan?: DomainRoutePlan | null;
   limit?: number;
 }): HybridKnowledgeCandidate[] {
-  return opts.candidates
+  const scopedCandidates = opts.candidates.filter((candidate) =>
+    candidateMatchesExplicitIdentifierScope(opts.query, candidate),
+  );
+  const rankingPool = scopedCandidates.length > 0 ? scopedCandidates : opts.candidates;
+  return rankingPool
     .map((candidate) => ({
       ...candidate,
       preRankScore: scoreLightweightCandidate(opts.query, candidate, opts.routePlan),
@@ -1005,11 +1153,15 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     fusedScore: candidate.preRankScore,
   }));
   const rerankerCandidateLimit = rerankerCandidateLimitForBudget(budgetMode);
-  const rerankReturnLimit = asksForMultilingualDisclosure(evidenceQuery)
-    ? Math.max(limit, rerankerCandidateLimit)
+  const scopedRerankerCandidateLimit =
+    disclosureIndexes(evidenceQuery).length > 0 || primaryQuerySymbol(evidenceQuery)
+      ? Math.min(rerankerCandidateLimit, parsePositiveInt(process.env.R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT, 5))
+      : rerankerCandidateLimit;
+  const rerankReturnLimit = asksForMultilingualDisclosure(evidenceQuery) || criticalEvidenceTermGroups(evidenceQuery).length > 0
+    ? Math.max(limit, scopedRerankerCandidateLimit)
     : Math.max(limit, 3);
   const rerankRun = await rerankKnowledgeCardsWithDiagnostics(query, rerankInput, rerankReturnLimit, {
-    candidateLimit: rerankerCandidateLimit,
+    candidateLimit: scopedRerankerCandidateLimit,
   });
   const reranked = rerankRun.candidates;
   const topScore = reranked[0]?.rerankScore ?? 0;
@@ -1020,7 +1172,12 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       return true;
     })
     .slice(0, limit);
-  const accepted = diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit);
+  const accepted = diversifyCriticalEvidenceCandidates(
+    evidenceQuery,
+    diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit),
+    reranked,
+    limit,
+  );
   const alignedAccepted = alignHybridKnowledgeCandidates({
     query: evidenceQuery,
     candidates: accepted,
