@@ -19,6 +19,15 @@ vi.mock("./qdrantStore.js", () => ({
 
 vi.mock("./qdrantEmbedding.js", () => ({
   embedTextForQdrant: vi.fn(async () => [0, 1, 0]),
+  embedTextForQdrantWithDiagnostics: vi.fn(async () => ({
+    vector: [0, 1, 0],
+    diagnostics: {
+      requestedProvider: "deterministic",
+      actualProvider: "deterministic",
+      fallbackUsed: false,
+      dimension: 3,
+    },
+  })),
 }));
 
 function candidate(overrides: Partial<HybridKnowledgeCandidate> & {
@@ -150,6 +159,12 @@ describe("true hybrid retrieval helpers", () => {
       finalSourceLimit: 3,
       finalSourceCount: 0,
       evidenceUsableFactLimit: expect.any(Number),
+    });
+    expect(result.diagnostics.qdrantEmbedding).toMatchObject({
+      requestedProvider: "deterministic",
+      actualProvider: "deterministic",
+      fallbackUsed: false,
+      dimension: 3,
     });
 
     findMany.mockRestore();

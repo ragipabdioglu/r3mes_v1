@@ -160,6 +160,17 @@ export async function embedTextsForQdrant(texts: string[]): Promise<number[][]> 
   return (await embedTextsForQdrantWithDiagnostics(texts)).vectors;
 }
 
+export async function embedTextForQdrantWithDiagnostics(text: string): Promise<{
+  vector: number[];
+  diagnostics: QdrantEmbeddingDiagnostics;
+}> {
+  const result = await embedTextsForQdrantWithDiagnostics([text]);
+  return {
+    vector: result.vectors[0] ?? embedTextDeterministicForQdrant(text),
+    diagnostics: result.diagnostics,
+  };
+}
+
 export async function embedTextForQdrant(text: string): Promise<number[]> {
   return (await embedTextsForQdrant([text]))[0] ?? embedTextDeterministicForQdrant(text);
 }
