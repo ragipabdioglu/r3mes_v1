@@ -244,6 +244,22 @@ function phraseTerms(value: string): string[] {
   return unique(phrases, 12);
 }
 
+function strictEntityTerms(value: string): string[] {
+  const terms = new Set<string>();
+  const broadAcronyms = new Set(["bist", "cmb", "ifrs", "kap", "pdf", "spk", "tsrs", "yk"]);
+  const pattern = /\b(?:[A-ZÇĞİÖŞÜ]{3,8}|\d{6,12})\b/gu;
+  for (const match of value.matchAll(pattern)) {
+    const raw = match[0] ?? "";
+    const start = match.index ?? 0;
+    const context = normalizeConceptText(value.slice(Math.max(0, start - 42), Math.min(value.length, start + raw.length + 42)));
+    if (/(kullanma|karistirma|karistirmadan|degil|haric|olmasin|exclude|without|not)/u.test(context)) continue;
+    const normalized = tokenKey(raw);
+    if (!normalized || broadAcronyms.has(normalized) || ["json", "html"].includes(normalized)) continue;
+    terms.add(normalized);
+  }
+  return [...terms].slice(0, 8);
+}
+
 export function buildQueryConceptTerms(query: string, routePlan?: DomainRoutePlan | null): string[] {
   void routePlan;
   return unique(
@@ -307,6 +323,20 @@ export function scoreQuerySourceAlignment(opts: {
     96,
   );
   const sourceText = normalizeAlignmentText(opts.sourceText);
+  const queryStrictEntities = strictEntityTerms(opts.query);
+  const sourceStrictEntities = strictEntityTerms(opts.sourceText);
+  const missingStrictEntities = queryStrictEntities.filter((term) => !sourceStrictEntities.includes(term));
+  if (queryStrictEntities.length > 0 && missingStrictEntities.length > 0) {
+    return {
+      mode: "mismatch",
+      score: 0,
+      matchedTerms: [],
+      queryTerms: unique([...queryTerms, ...queryStrictEntities], 20),
+      sourceTerms: unique([...sourceTerms, ...sourceStrictEntities], 24),
+      genericMatchedTerms: [],
+      reason: `Strict query entities did not match the source: ${missingStrictEntities.join(", ")}.`,
+    };
+  }
   const importantQueryTerms = queryTerms.filter((term) => !GENERIC_TERMS.has(term));
   const genericQueryTerms = queryTerms.filter((term) => GENERIC_TERMS.has(term));
   const matchedTerms = importantQueryTerms.filter((queryTerm) =>
