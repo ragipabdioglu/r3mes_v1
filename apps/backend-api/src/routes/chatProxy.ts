@@ -164,6 +164,23 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
+const NON_PRIMARY_QUERY_IDENTIFIER_TOKENS = new Set([
+  "SPK",
+  "CMB",
+  "KAP",
+  "TL",
+  "TRY",
+  "PDF",
+  "YK",
+  "VUK",
+]);
+
+function hasExplicitQueryIdentifier(query: string): boolean {
+  if (/\b\d{6,}\b/u.test(query)) return true;
+  return [...new Set(query.match(/\b[A-ZÇĞİÖŞÜ]{3,6}\b/gu) ?? [])]
+    .some((token) => !NON_PRIMARY_QUERY_IDENTIFIER_TOKENS.has(token));
+}
+
 function candidateQualityLabel(candidate: KnowledgeMetadataRouteCandidate): string {
   if (candidate.sourceQuality === "structured") return "structured profile";
   if (candidate.sourceQuality === "inferred") return "inferred profile";
@@ -338,10 +355,19 @@ async function resolveRetrievalBackedSuggestionIds(opts: {
 }
 
 function shouldSkipSourceSuggestions(opts: {
+  query: string;
   requestedCollectionIds: string[];
   retrievalSources: ChatSourceCitation[];
   groundingConfidence: "high" | "medium" | "low";
 }): boolean {
+  if (
+    opts.requestedCollectionIds.length > 0 &&
+    opts.retrievalSources.length === 0 &&
+    opts.groundingConfidence === "low" &&
+    hasExplicitQueryIdentifier(opts.query)
+  ) {
+    return true;
+  }
   return (
     opts.requestedCollectionIds.length > 0 &&
     opts.retrievalSources.length > 0 &&
@@ -1585,6 +1611,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const groundedComposerMode = getGroundedComposerMode();
       const responseMode = getChatResponseMode();
       const skipSourceSuggestions = shouldSkipSourceSuggestions({
+        query: retrievalQuery,
         requestedCollectionIds,
         retrievalSources: retrieval.sources,
         groundingConfidence: retrieval.groundingConfidence,

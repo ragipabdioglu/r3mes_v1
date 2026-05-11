@@ -140,7 +140,7 @@ function rerankerCandidateLimitForBudget(budgetMode: RetrievalBudgetMode): numbe
   if (budgetMode === "deep_rag") {
     return parsePositiveInt(process.env.R3MES_RERANKER_DEEP_CANDIDATE_LIMIT, 8);
   }
-  return parsePositiveInt(process.env.R3MES_RERANKER_NORMAL_CANDIDATE_LIMIT, 5);
+  return parsePositiveInt(process.env.R3MES_RERANKER_NORMAL_CANDIDATE_LIMIT, 4);
 }
 
 function minRerankScore(): number {
@@ -312,6 +312,10 @@ function targetDisclosureIndexes(query: string): string[] {
   return [indexedSymbol ?? allIndexes[0]].filter(Boolean);
 }
 
+function hasExplicitIdentifierScope(query: string): boolean {
+  return targetDisclosureIndexes(query).length > 0 || Boolean(primaryQuerySymbol(query));
+}
+
 const NON_PRIMARY_UPPERCASE_TOKENS = new Set([
   "SPK",
   "CMB",
@@ -364,6 +368,42 @@ function candidateMatchesExplicitIdentifierScope(query: string, candidate: { chu
   return true;
 }
 
+function candidateHasExplicitIdentifierSignal(candidate: { chunk: HybridKnowledgeChunk }): boolean {
+  return (
+    disclosureIndexes(candidate.chunk.document.title).length > 0 ||
+    disclosureIndexes(candidate.chunk.content.slice(0, 1200)).length > 0 ||
+    Boolean(candidateTitleSymbol(candidate.chunk.document.title))
+  );
+}
+
+async function explicitIdentifierPreflight(
+  query: string,
+  accessibleCollectionIds: string[],
+): Promise<"no_scope" | "matched" | "missing" | "unknown"> {
+  if (!hasExplicitIdentifierScope(query)) return "no_scope";
+  const targetIndexes = targetDisclosureIndexes(query);
+  const primarySymbol = primaryQuerySymbol(query);
+  const documents = await prisma.knowledgeDocument.findMany({
+    where: { collectionId: { in: accessibleCollectionIds } },
+    select: { title: true },
+    take: 500,
+  });
+  let hasIdentifierDocuments = false;
+  for (const document of documents) {
+    const titleIndexes = disclosureIndexes(document.title);
+    const titleSymbol = candidateTitleSymbol(document.title);
+    if (titleIndexes.length === 0 && !titleSymbol) continue;
+    hasIdentifierDocuments = true;
+    const indexMatches =
+      targetIndexes.length === 0 ||
+      titleIndexes.length === 0 ||
+      targetIndexes.some((index) => titleIndexes.includes(index));
+    const symbolMatches = !primarySymbol || !titleSymbol || titleSymbol === primarySymbol;
+    if (indexMatches && symbolMatches) return "matched";
+  }
+  return hasIdentifierDocuments ? "missing" : "unknown";
+}
+
 function sourceLanguageKey(title: string): "tr" | "en" | "unknown" {
   const normalized = normalize(title);
   if (/(profit distribution|dividend distribution|withholding|board|table)/u.test(normalized)) return "en";
@@ -387,7 +427,7 @@ function diversifyMultilingualDisclosureCandidates<T extends { chunk: HybridKnow
   limit: number,
 ): T[] {
   if (!asksForMultilingualDisclosure(query)) return accepted.slice(0, limit);
-  const targetIndexes = disclosureIndexes(query);
+  const targetIndexes = targetDisclosureIndexes(query);
   if (targetIndexes.length === 0) return accepted.slice(0, limit);
 
   const byDocument = new Map<string, T>();
@@ -766,7 +806,10 @@ export function preRankHybridKnowledgeCandidates(opts: {
   const scopedCandidates = opts.candidates.filter((candidate) =>
     candidateMatchesExplicitIdentifierScope(opts.query, candidate),
   );
-  const rankingPool = scopedCandidates.length > 0 ? scopedCandidates : opts.candidates;
+  const shouldEnforceIdentifierScope =
+    hasExplicitIdentifierScope(opts.query) &&
+    opts.candidates.some((candidate) => candidateHasExplicitIdentifierSignal(candidate));
+  const rankingPool = scopedCandidates.length > 0 || shouldEnforceIdentifierScope ? scopedCandidates : opts.candidates;
   return rankingPool
     .map((candidate) => ({
       ...candidate,
@@ -1042,6 +1085,36 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     };
   }
 
+  const identifierPreflight = await explicitIdentifierPreflight(evidenceQuery, accessibleCollectionIds);
+  if (identifierPreflight === "missing") {
+    return {
+      contextText: "",
+      sources: [],
+      lowGroundingConfidence: true,
+      groundingConfidence: "low",
+      evidence: null,
+      diagnostics: {
+        qdrantCandidateCount: 0,
+        prismaCandidateCount: 0,
+        dedupedCandidateCount: 0,
+        preRankedCandidateCount: 0,
+        rerankedCandidateCount: 0,
+        finalCandidateCount: 0,
+        alignment: emptyAlignmentDiagnostics({
+          fastFailed: true,
+        }),
+        reranker: emptyRerankDiagnostics(),
+        budget: buildBudgetDiagnostics({
+          budgetMode,
+          requestedSourceLimit,
+          finalSourceLimit: limit,
+          finalSourceCount: 0,
+        }),
+        retrievalMode: "true_hybrid",
+      },
+    };
+  }
+
   const strictRouteScope = isStrictRouteScope(routePlan);
   const [qdrantResult, prismaResult] = await Promise.allSettled([
     collectQdrantCandidates({ query, accessibleCollectionIds, routePlan }),
@@ -1108,6 +1181,41 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         alignment: alignedPreRanked.diagnostics,
         reranker: emptyRerankDiagnostics({
           inputCandidateCount: candidatesForRerank.length,
+        }),
+        budget: buildBudgetDiagnostics({
+          budgetMode,
+          requestedSourceLimit,
+          finalSourceLimit: limit,
+          finalSourceCount: 0,
+        }),
+        retrievalMode: "true_hybrid",
+      },
+    };
+  }
+  const identifierScopedNoMatch =
+    hasExplicitIdentifierScope(evidenceQuery) &&
+    deduped.some((candidate) => candidateHasExplicitIdentifierSignal(candidate)) &&
+    preRanked.length === 0;
+  if (identifierScopedNoMatch) {
+    return {
+      contextText: "",
+      sources: [],
+      lowGroundingConfidence: true,
+      groundingConfidence: "low",
+      evidence: null,
+      diagnostics: {
+        qdrantCandidateCount: qdrantCandidates.length,
+        prismaCandidateCount: prismaCandidates.length,
+        dedupedCandidateCount: deduped.length,
+        preRankedCandidateCount: 0,
+        rerankedCandidateCount: 0,
+        finalCandidateCount: 0,
+        alignment: {
+          ...alignedPreRanked.diagnostics,
+          fastFailed: true,
+        },
+        reranker: emptyRerankDiagnostics({
+          inputCandidateCount: 0,
         }),
         budget: buildBudgetDiagnostics({
           budgetMode,
