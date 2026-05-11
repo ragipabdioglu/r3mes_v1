@@ -10,7 +10,9 @@ export interface RouteDecisionLogSourceSelection {
   selectionMode: "none" | "selected" | "public" | "selected_plus_public";
   requestedCollectionIds: string[];
   accessibleCollectionIds: string[];
+  searchedCollectionIds?: string[];
   usedCollectionIds: string[];
+  groundedCollectionIds?: string[];
   unusedSelectedCollectionIds: string[];
   suggestedCollections: Array<{ id: string; name: string; reason: string }>;
   metadataRouteCandidates: KnowledgeMetadataRouteCandidate[];
@@ -39,7 +41,9 @@ export interface RouteDecisionLogEvent {
     includePublic: boolean;
     requestedCollectionIds: string[];
     accessibleCollectionIds: string[];
+    searchedCollectionIds?: string[];
     usedCollectionIds: string[];
+    groundedCollectionIds?: string[];
     unusedSelectedCollectionIds: string[];
     suggestedCollectionIds: string[];
     metadataRouteCandidates: Array<{
@@ -103,7 +107,9 @@ export function buildRouteDecisionLogEvent(opts: {
       includePublic: opts.sourceSelection.includePublic,
       requestedCollectionIds: opts.sourceSelection.requestedCollectionIds,
       accessibleCollectionIds: opts.sourceSelection.accessibleCollectionIds,
+      searchedCollectionIds: opts.sourceSelection.searchedCollectionIds,
       usedCollectionIds: opts.sourceSelection.usedCollectionIds,
+      groundedCollectionIds: opts.sourceSelection.groundedCollectionIds,
       unusedSelectedCollectionIds: opts.sourceSelection.unusedSelectedCollectionIds,
       suggestedCollectionIds: opts.sourceSelection.suggestedCollections.map((collection) => collection.id),
       metadataRouteCandidates: opts.sourceSelection.metadataRouteCandidates.map((candidate) => ({

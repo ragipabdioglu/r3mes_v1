@@ -217,4 +217,28 @@ describe("buildAnswerSpec", () => {
     expect(spec.assessment).toContain("okuluna göndermeyiniz");
     expect(spec.assessment).not.toMatch(/bilgilendirere(?:\s|$)/u);
   });
+
+  it("keeps both source-title facts ahead of table rows for disclosure matching questions", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "finance",
+      groundingConfidence: "high",
+      userQuery: "EREGL 1576833 için Türkçe tablo ile İngilizce profit distribution table aynı bildirim indeksine mi ait? Kaynak başlıklarına göre cevapla.",
+      evidence: evidence({
+        answerIntent: "explain",
+        directAnswerFacts: [
+          "en-doc: İngilizce kaynak başlığı: EREGL 1576833 Profit Distribution Table.pdf",
+          "en-doc: 3. Profit for the Period 3.497.911.571",
+          "tr-doc: Türkçe kaynak başlığı: EREGL 1576833 Yılı Kar Dağıtım Tablosu.pdf",
+        ],
+        supportingContext: [],
+        usableFacts: [],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.assessment).toContain("İngilizce kaynak başlığı");
+    expect(spec.action).toContain("Türkçe kaynak başlığı");
+    expect(spec.facts.join(" ")).toContain("1576833");
+  });
 });

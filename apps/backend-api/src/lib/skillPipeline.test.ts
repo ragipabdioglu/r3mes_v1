@@ -368,6 +368,29 @@ Rollback planı production migration öncesi gerekli değil, doğrudan migration
     expect(extraction.missingInfo).toEqual([]);
   });
 
+  it("uses source titles as evidence for multilingual disclosure matching questions", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "EREGL 1576833 için Türkçe tablo ile İngilizce profit distribution table aynı bildirim indeksine mi ait? Kaynak başlıklarına göre cevapla.",
+      cards: [
+        {
+          sourceId: "tr-doc",
+          title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Yılı Kar Dağıtım Tablosu.pdf",
+          rawContent: "Source Summary: 5. Net Dönem Kârı 511.801.109",
+        },
+        {
+          sourceId: "en-doc",
+          title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Profit Distribution Table.pdf",
+          rawContent: "Source Summary: 5. Net Profit for the Period 511.801.109",
+        },
+      ],
+    });
+
+    const facts = extraction.directAnswerFacts.join(" ");
+    expect(facts).toContain("1576833");
+    expect(facts).toContain("Türkçe kaynak başlığı");
+    expect(facts).toContain("İngilizce kaynak başlığı");
+  });
+
   it("prefers complete actionable document snippets over PDF headings and clipped fragments", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",

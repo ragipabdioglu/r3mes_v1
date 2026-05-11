@@ -188,6 +188,16 @@ function factTokens(value: string): string[] {
     .filter((token) => token.length >= 3 && !FACT_STOPWORDS.has(token));
 }
 
+function asksForSourceTitleEvidence(query: string): boolean {
+  const normalized = normalizeForFactMatch(query);
+  return (
+    (normalized.includes("kaynak") && normalized.includes("baslik")) ||
+    normalized.includes("bildirim indeksi") ||
+    normalized.includes("ayni bildirim") ||
+    (normalized.includes("turkce") && normalized.includes("ingilizce"))
+  );
+}
+
 function hasNumericTableValue(value: string): boolean {
   return /(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+\s*%|%\s*\d+|\(\s*\d)/u.test(value);
 }
@@ -199,6 +209,16 @@ function factQualityScore(value: string, userQuery: string): number {
   const overlap = tokens.filter((token) => queryTokens.has(token)).length;
   const normalizedValue = normalizeForFactMatch(value);
   const normalizedQuery = normalizeForFactMatch(userQuery);
+  const sourceTitleBonus =
+    asksForSourceTitleEvidence(userQuery) && normalizedValue.includes("kaynak basligi")
+      ? 35
+      : 0;
+  const sourceLanguageBonus =
+    asksForSourceTitleEvidence(userQuery) &&
+    ((normalizedQuery.includes("turkce") && normalizedValue.includes("turkce")) ||
+      (normalizedQuery.includes("ingilizce") && normalizedValue.includes("ingilizce")))
+      ? 12
+      : 0;
   const directActionBonus = /(göndermeyiniz|göndermeyin|bilgilendir|başvur|kontrol|hazırla|sakla|denenmel|planlan|yapılmal|edilmel)/iu.test(value)
     ? 4
     : 0;
@@ -232,6 +252,8 @@ function factQualityScore(value: string, userQuery: string): number {
     numericTableBonus +
     exactFinanceBonus +
     plainPeriodProfitBonus +
+    sourceTitleBonus +
+    sourceLanguageBonus +
     sentenceBonus +
     lengthBonus -
     truncationPenalty -
@@ -308,8 +330,14 @@ export function buildAnswerSpec(opts: {
           hasNumericTableValue(fact) &&
           factQualityScore(fact, opts.userQuery) >= 1)
       : undefined;
+  const sourceTitleFollowUpFact = asksForSourceTitleEvidence(opts.userQuery)
+    ? [...directFacts, ...usableFacts].find((fact) =>
+        fact !== assessment &&
+        normalizeForFactMatch(fact).includes("kaynak basligi"))
+    : undefined;
   const action =
     queryContextFact ??
+    sourceTitleFollowUpFact ??
     numericFollowUpFact ??
     firstUsefulFact(supportingFacts, opts.userQuery, [assessment]) ??
     firstUsefulFact(directFacts, opts.userQuery, [assessment]) ??

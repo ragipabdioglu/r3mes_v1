@@ -72,25 +72,27 @@ interface ChatRetrievalDebug {
     selectionMode: "none" | "selected" | "public" | "selected_plus_public";
     requestedCollectionIds: string[];
     accessibleCollectionIds: string[];
+    searchedCollectionIds: string[];
+    usedCollectionIds: string[];
+    groundedCollectionIds: string[];
+    unusedSelectedCollectionIds: string[];
+    suggestedCollections: Array<{ id: string; name: string; reason: string }>;
+    metadataRouteCandidates: KnowledgeMetadataRouteCandidate[];
+    includePublic: boolean;
+    routeDomain: DomainRoutePlan["domain"] | null;
+    hasSources: boolean;
+    warning: string | null;
+    routeDecision: {
+      mode: "strict" | "broad" | "suggest" | "no_source";
+      primaryDomain: DomainRoutePlan["domain"] | null;
+      confidence: "low" | "medium" | "high";
+      selectedCollectionIds: string[];
       usedCollectionIds: string[];
-      unusedSelectedCollectionIds: string[];
-      suggestedCollections: Array<{ id: string; name: string; reason: string }>;
-      metadataRouteCandidates: KnowledgeMetadataRouteCandidate[];
-      includePublic: boolean;
-      routeDomain: DomainRoutePlan["domain"] | null;
-      hasSources: boolean;
-      warning: string | null;
-      routeDecision: {
-        mode: "strict" | "broad" | "suggest" | "no_source";
-        primaryDomain: DomainRoutePlan["domain"] | null;
-        confidence: "low" | "medium" | "high";
-        selectedCollectionIds: string[];
-        usedCollectionIds: string[];
-        suggestedCollectionIds: string[];
-        rejectedCollectionIds: string[];
-        reasons: string[];
-      };
-      shadowRuntime?: FeedbackShadowRuntimeReport;
+      suggestedCollectionIds: string[];
+      rejectedCollectionIds: string[];
+      reasons: string[];
+    };
+    shadowRuntime?: FeedbackShadowRuntimeReport;
   };
   quality: {
     sourceCount: number;
@@ -189,9 +191,17 @@ function buildSourceSelectionSummary(opts: {
   retrievalSuggestedCollectionIds?: string[];
   skipSuggestions?: boolean;
 }): ChatRetrievalDebug["sourceSelection"] {
-  const usedCollectionIds = uniqueStrings(opts.sources.map((source) => source.collectionId));
+  const groundedCollectionIds = uniqueStrings(opts.sources.map((source) => source.collectionId));
+  const selectedSearchedCollectionIds = uniqueStrings(
+    opts.requestedCollectionIds.filter((id) => opts.accessibleCollectionIds.includes(id)),
+  );
+  const searchedCollectionIds = uniqueStrings(opts.accessibleCollectionIds);
+  const usedCollectionIds =
+    groundedCollectionIds.length > 0
+      ? groundedCollectionIds
+      : selectedSearchedCollectionIds;
   const unusedSelectedCollectionIds = opts.requestedCollectionIds.filter(
-    (id) => !usedCollectionIds.includes(id),
+    (id) => !groundedCollectionIds.includes(id),
   );
   const selectionMode =
     opts.requestedCollectionIds.length > 0 && opts.includePublic
@@ -226,7 +236,7 @@ function buildSourceSelectionSummary(opts: {
     ...metadataRouteCandidates
       .filter((candidate) => candidate.sourceQuality === "thin")
       .map((candidate) => candidate.id),
-    ...usedCollectionIds.filter((id) => {
+    ...groundedCollectionIds.filter((id) => {
       const collection = opts.suggestibleCollections.find((item) => item.id === id);
       return collection ? readKnowledgeCollectionSourceQuality(collection) === "thin" : false;
     }),
@@ -250,7 +260,7 @@ function buildSourceSelectionSummary(opts: {
   const usedCollectionsMatchRoute =
     !opts.routePlan?.domain ||
     opts.routePlan.domain === "general" ||
-    usedCollectionIds.some((id) => {
+    groundedCollectionIds.some((id) => {
       const collection = opts.suggestibleCollections.find((item) => item.id === id);
       const candidate = metadataCandidateById.get(id);
       if (candidate && candidate.sourceQuality !== "thin" && candidate.score >= 70) return true;
@@ -259,7 +269,7 @@ function buildSourceSelectionSummary(opts: {
   const warning =
     opts.accessibleCollectionIds.length === 0
       ? "Knowledge kaynağı seçilmedi; cevap RAG kullanmadan üretilebilir."
-      : usedCollectionIds.length === 0
+      : groundedCollectionIds.length === 0
         ? "Seçilen/erişilebilir kaynaklardan bu soru için yeterli kanıt bulunamadı."
         : unusedSelectedCollectionIds.length > 0
           ? "Bazı seçili kaynaklardan bu soru için kanıt kullanılmadı."
@@ -275,20 +285,22 @@ function buildSourceSelectionSummary(opts: {
     suggestedCollections,
     metadataRouteCandidates,
     thinProfileCollectionIds,
-    hasSources: usedCollectionIds.length > 0,
+    hasSources: groundedCollectionIds.length > 0,
   });
 
   return {
     selectionMode,
     requestedCollectionIds: opts.requestedCollectionIds,
     accessibleCollectionIds: opts.accessibleCollectionIds,
+    searchedCollectionIds,
     usedCollectionIds,
+    groundedCollectionIds,
     unusedSelectedCollectionIds,
     suggestedCollections,
     metadataRouteCandidates,
     includePublic: opts.includePublic,
     routeDomain: opts.routePlan?.domain ?? null,
-    hasSources: usedCollectionIds.length > 0,
+    hasSources: groundedCollectionIds.length > 0,
     warning,
     routeDecision,
   };
@@ -662,7 +674,9 @@ function summarizeSourceSelectionForTrace(
     includePublic: sourceSelection.includePublic,
     requestedCollectionCount: sourceSelection.requestedCollectionIds.length,
     accessibleCollectionCount: sourceSelection.accessibleCollectionIds.length,
+    searchedCollectionCount: sourceSelection.searchedCollectionIds.length,
     usedCollectionCount: sourceSelection.usedCollectionIds.length,
+    groundedCollectionCount: sourceSelection.groundedCollectionIds.length,
     unusedSelectedCollectionCount: sourceSelection.unusedSelectedCollectionIds.length,
     suggestedCollectionCount: sourceSelection.suggestedCollections.length,
     metadataRouteCandidateCount: sourceSelection.metadataRouteCandidates.length,
@@ -1651,10 +1665,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               confidence: sourceSelection.routeDecision.mode === "suggest" ? "high" : routePlan?.confidence ?? "medium",
             }
           : routePlan,
-        selectedCollectionDomain: retrieval.sources.length > 0
+        selectedCollectionDomain: sourceSelection.usedCollectionIds.length > 0
           ? inferKnowledgeCollectionAnswerDomain({
               collections: accessibleCollections,
-              usedCollectionIds: retrieval.sources.map((source) => source.collectionId),
+              usedCollectionIds: sourceSelection.usedCollectionIds,
             })
           : null,
       });

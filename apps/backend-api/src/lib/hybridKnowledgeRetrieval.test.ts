@@ -421,6 +421,76 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.diagnostics.mode).toBe("pruned");
   });
 
+  it("diversifies multilingual disclosure sources by document language and dedupes citations", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "deterministic");
+    vi.stubEnv("R3MES_RAG_MIN_RERANK_SCORE", "0.1");
+    vi.stubEnv("R3MES_RAG_RELATIVE_SCORE_FLOOR", "0.1");
+    const collectionId = "multi-kap-test";
+    const docs = [
+      {
+        id: "en-1",
+        documentId: "eregl-1576833-en",
+        chunkIndex: 0,
+        content: "Topic: EREGL 1576833 Profit Distribution Table\nTags: eregl, 1576833, english\nSource Summary: Profit distribution table.",
+        tokenCount: 20,
+        autoMetadata: { domain: "finance", keywords: ["EREGL", "1576833", "profit", "distribution"] },
+        document: {
+          title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Profit Distribution Table.pdf",
+          collectionId,
+          autoMetadata: { domain: "finance", keywords: ["EREGL", "1576833", "english"] },
+        },
+        embedding: { values: [] },
+      },
+      {
+        id: "en-2",
+        documentId: "eregl-1576833-en",
+        chunkIndex: 1,
+        content: "Topic: EREGL 1576833 Profit Distribution Table\nTags: eregl, 1576833, english\nSource Summary: Net Profit for the Period.",
+        tokenCount: 20,
+        autoMetadata: { domain: "finance", keywords: ["EREGL", "1576833", "profit"] },
+        document: {
+          title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Profit Distribution Table.pdf",
+          collectionId,
+          autoMetadata: { domain: "finance", keywords: ["EREGL", "1576833", "english"] },
+        },
+        embedding: { values: [] },
+      },
+      {
+        id: "tr-1",
+        documentId: "eregl-1576833-tr",
+        chunkIndex: 0,
+        content: "Topic: EREGL 1576833 Kar Payı Dağıtım Tablosu\nTags: eregl, 1576833, turkce\nSource Summary: Kar payı dağıtım tablosu.",
+        tokenCount: 20,
+        autoMetadata: { domain: "finance", keywords: ["EREGL", "1576833", "kar", "payı"] },
+        document: {
+          title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Yılı Kar Dağıtım Tablosu.pdf",
+          collectionId,
+          autoMetadata: { domain: "finance", keywords: ["EREGL", "1576833", "turkce"] },
+        },
+        embedding: { values: [] },
+      },
+    ];
+    const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue(docs as never);
+    const qdrant = vi.mocked(searchQdrantKnowledge).mockResolvedValue([]);
+    const query =
+      "EREGL 1576833 için Türkçe kar dağıtım tablosu ile İngilizce profit distribution table aynı bildirim indeksine mi ait?";
+    const result = await retrieveKnowledgeContextTrueHybrid({
+      query,
+      evidenceQuery: query,
+      accessibleCollectionIds: [collectionId],
+      limit: 3,
+      budgetMode: "deep_rag",
+    });
+
+    const titles = result.sources.map((source) => source.title).join(" ");
+    expect(result.sources.length).toBeLessThanOrEqual(3);
+    expect(titles).toContain("1576833");
+    expect(titles).toContain("Kar Payı Dağıtım");
+    expect(titles).toContain("Profit Distribution");
+    findMany.mockRestore();
+    qdrant.mockRestore();
+  });
+
   it("keeps pruning diagnostics generic for noisy mixed-domain evidence", () => {
     vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "240");
     const result = buildPrunedEvidenceInputWithDiagnostics({

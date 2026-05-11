@@ -458,6 +458,16 @@ function evidenceRelevanceScore(query: string, fact: string): number {
   const normalizedFact = normalizeConceptText(fact);
   const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
   const coreOverlap = queryCoreOverlapScore(queryTokens, fact);
+  const titleEvidenceBonus =
+    asksForSourceTitleEvidence(query) && normalizedFact.includes("kaynak basligi")
+      ? 30
+      : 0;
+  const languageEvidenceBonus =
+    asksForSourceTitleEvidence(query) &&
+    ((normalizedQuery.includes("turkce") && normalizedFact.includes("turkce")) ||
+      (normalizedQuery.includes("ingilizce") && normalizedFact.includes("ingilizce")))
+      ? 12
+      : 0;
   const tableValueBonus = hasFinancialTableValue(fact) ? 3 : 0;
   const tableRowBonus = isLikelyFinancialTableRow(fact) ? 5 : 0;
   const exactPhraseBonus =
@@ -486,6 +496,8 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     tableRowBonus +
     exactPhraseBonus +
     plainPeriodProfitBonus +
+    titleEvidenceBonus +
+    languageEvidenceBonus +
     shortRelevantBonus -
     headerPenalty -
     unrequestedNetDistributablePenalty;
@@ -496,6 +508,30 @@ function rankEvidenceFacts(query: string, facts: string[]): string[] {
     .map((fact, index) => ({ fact, index, score: evidenceRelevanceScore(query, fact) }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map(({ fact }) => fact);
+}
+
+function asksForSourceTitleEvidence(query: string): boolean {
+  const normalized = normalizeConceptText(query);
+  return (
+    (normalized.includes("kaynak") && normalized.includes("baslik")) ||
+    normalized.includes("bildirim indeksi") ||
+    normalized.includes("ayni bildirim") ||
+    (normalized.includes("turkce") && normalized.includes("ingilizce"))
+  );
+}
+
+function sourceTitleLanguageLabel(title: string): "Türkçe" | "İngilizce" | "Belirsiz" {
+  const normalized = normalizeConceptText(title);
+  if (/(profit distribution|dividend distribution|withholding|board|table)/u.test(normalized)) return "İngilizce";
+  if (/(kar payi|kâr payi|dagitim|dağıtım|islemlerine|işlemlerine|bildirim)/u.test(normalized)) return "Türkçe";
+  return "Belirsiz";
+}
+
+function buildSourceTitleEvidence(title: string): string | null {
+  const clean = title.trim();
+  if (!clean) return null;
+  const language = sourceTitleLanguageLabel(clean);
+  return `${language} kaynak başlığı: ${clean}`;
 }
 
 function tokenizeForOverlap(text: string): string[] {
@@ -1033,6 +1069,14 @@ export function buildDeterministicEvidenceExtraction(
   for (const card of input.cards) {
     const sourceLabel = card.title || card.sourceId;
     sourceIds.push(card.sourceId);
+    if (asksForSourceTitleEvidence(input.userQuery)) {
+      const titleEvidence = buildSourceTitleEvidence(sourceLabel);
+      if (titleEvidence) {
+        const line = compactEvidenceLine(evidenceLine(sourceLabel, titleEvidence), 520);
+        usableFacts.push(line);
+        directAnswerFacts.push(line);
+      }
+    }
     if (cardHasQueryScopedExclusion(card, queryTokens)) {
       uncertainOrUnusable.push(
         compactEvidenceLine(evidenceLine(sourceLabel, "Kaynak kendi kapsamına göre bu soruya doğrudan dayanak olmadığını belirtiyor.")),

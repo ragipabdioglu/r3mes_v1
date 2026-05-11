@@ -301,6 +301,67 @@ function contentHashKey(content: string): string {
   return normalize(content).replace(/\s+/g, " ").slice(0, 500);
 }
 
+function disclosureIndexes(value: string): string[] {
+  return [...new Set(value.match(/\b\d{6,}\b/g) ?? [])];
+}
+
+function sourceLanguageKey(title: string): "tr" | "en" | "unknown" {
+  const normalized = normalize(title);
+  if (/(profit distribution|dividend distribution|withholding|board|table)/u.test(normalized)) return "en";
+  if (/(kar payi|kâr payi|dagitim|dağıtım|islemlerine|işlemlerine|bildirim)/u.test(normalized)) return "tr";
+  return "unknown";
+}
+
+function asksForMultilingualDisclosure(query: string): boolean {
+  const normalized = normalize(query);
+  return (
+    normalized.includes("turkce") && normalized.includes("ingilizce") ||
+    normalized.includes("same disclosure") ||
+    normalized.includes("ayni bildirim")
+  );
+}
+
+function diversifyMultilingualDisclosureCandidates<T extends { chunk: HybridKnowledgeChunk }>(
+  query: string,
+  accepted: T[],
+  candidates: T[],
+  limit: number,
+): T[] {
+  if (!asksForMultilingualDisclosure(query)) return accepted.slice(0, limit);
+  const targetIndexes = disclosureIndexes(query);
+  if (targetIndexes.length === 0) return accepted.slice(0, limit);
+
+  const byDocument = new Map<string, T>();
+  const add = (candidate: T) => {
+    if (byDocument.size >= limit) return;
+    if (byDocument.has(candidate.chunk.documentId)) return;
+    byDocument.set(candidate.chunk.documentId, candidate);
+  };
+  for (const candidate of accepted) add(candidate);
+
+  for (const index of targetIndexes) {
+    const presentLanguages = new Set(
+      [...byDocument.values()]
+        .filter((candidate) => candidate.chunk.document.title.includes(index))
+        .map((candidate) => sourceLanguageKey(candidate.chunk.document.title)),
+    );
+    for (const language of ["tr", "en"] as const) {
+      if (presentLanguages.has(language) || byDocument.size >= limit) continue;
+      const match = candidates.find((candidate) =>
+        candidate.chunk.document.title.includes(index) &&
+        sourceLanguageKey(candidate.chunk.document.title) === language &&
+        !byDocument.has(candidate.chunk.documentId)
+      );
+      if (match) {
+        add(match);
+        presentLanguages.add(language);
+      }
+    }
+  }
+
+  return [...byDocument.values()].slice(0, limit);
+}
+
 function payloadToChunk(payload: QdrantKnowledgePayload): HybridKnowledgeChunk {
   return {
     id: payload.chunkId,
@@ -943,18 +1004,23 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     embeddingScore: candidate.vectorScore ?? 0,
     fusedScore: candidate.preRankScore,
   }));
-  const rerankRun = await rerankKnowledgeCardsWithDiagnostics(query, rerankInput, Math.max(limit, 3), {
-    candidateLimit: rerankerCandidateLimitForBudget(budgetMode),
+  const rerankerCandidateLimit = rerankerCandidateLimitForBudget(budgetMode);
+  const rerankReturnLimit = asksForMultilingualDisclosure(evidenceQuery)
+    ? Math.max(limit, rerankerCandidateLimit)
+    : Math.max(limit, 3);
+  const rerankRun = await rerankKnowledgeCardsWithDiagnostics(query, rerankInput, rerankReturnLimit, {
+    candidateLimit: rerankerCandidateLimit,
   });
   const reranked = rerankRun.candidates;
   const topScore = reranked[0]?.rerankScore ?? 0;
-  const accepted = reranked
+  const scoreAccepted = reranked
     .filter((candidate, index) => {
       if (candidate.rerankScore < minRerankScore()) return false;
       if (index > 0 && topScore > 0 && candidate.rerankScore < topScore * relativeScoreFloor()) return false;
       return true;
     })
     .slice(0, limit);
+  const accepted = diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit);
   const alignedAccepted = alignHybridKnowledgeCandidates({
     query: evidenceQuery,
     candidates: accepted,
@@ -1000,13 +1066,19 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   const groundingConfidence = deriveGroundingConfidence(finalCandidates.map((candidate) => candidate.rerankScore));
   const lowGroundingConfidence = groundingConfidence === "low" || finalCandidates.length === 0;
 
-  const sources: ChatSourceCitation[] = finalCandidates.map(({ chunk }) => ({
-    collectionId: chunk.document.collectionId,
-    documentId: chunk.documentId,
-    title: chunk.document.title,
-    chunkIndex: chunk.chunkIndex,
-    excerpt: chunk.content.slice(0, 220),
-  }));
+  const sources: ChatSourceCitation[] = [];
+  const seenSourceDocuments = new Set<string>();
+  for (const { chunk } of finalCandidates) {
+    if (seenSourceDocuments.has(chunk.documentId)) continue;
+    seenSourceDocuments.add(chunk.documentId);
+    sources.push({
+      collectionId: chunk.document.collectionId,
+      documentId: chunk.documentId,
+      title: chunk.document.title,
+      chunkIndex: chunk.chunkIndex,
+      excerpt: chunk.content.slice(0, 220),
+    });
+  }
   const prunedEvidenceInputs = finalCandidates.map((candidate) => ({
     candidate,
     ...buildPrunedEvidenceInputWithDiagnostics({ query: evidenceQuery, candidate, budgetMode }),
