@@ -5,6 +5,8 @@ import {
   isSupportedKnowledgeFilename,
   listKnowledgeParserAdapters,
   listKnowledgeParserCapabilities,
+  normalizeParsedKnowledgeText,
+  chunkKnowledgeText,
   parseKnowledgeBuffer,
 } from "./knowledgeText.js";
 
@@ -121,5 +123,54 @@ describe("knowledge parser adapters", () => {
     expect(parsed.parser.id).toBe("json-normalized-v1");
     expect(parsed.text).toContain('"b": 2');
     expect(parsed.text).toContain('"a": 1');
+  });
+
+  it("normalizes parser text without destroying markdown tables and lists", () => {
+    const normalized = normalizeParsedKnowledgeText(
+      [
+        "# Klinik Not",
+        "",
+        "Hasta kasık ağrısı",
+        "ve akıntı tarif ediyor",
+        "",
+        "| Bulgu | Yorum |",
+        "| --- | --- |",
+        "| Ateş | hızlı değerlendirme |",
+        "",
+        "- Şiddetli ağrı varsa başvur.",
+        "- Kanama varsa bekleme.",
+      ].join("\r\n"),
+      "MARKDOWN",
+    );
+
+    expect(normalized).toContain("Hasta kasık ağrısı ve akıntı tarif ediyor");
+    expect(normalized).toContain("| Bulgu | Yorum |");
+    expect(normalized).toContain("| Ateş | hızlı değerlendirme |");
+    expect(normalized).toContain("- Şiddetli ağrı varsa başvur.");
+  });
+
+  it("keeps JSON parser output byte-for-byte except trimming", () => {
+    const text = '{\n  "a": 1\n}';
+
+    expect(normalizeParsedKnowledgeText(`\n${text}\n`, "JSON")).toBe(text);
+  });
+
+  it("splits long markdown tables while repeating the table header", () => {
+    const table = [
+      "| Bulgu | Yorum |",
+      "| --- | --- |",
+      "| Ateş | hızlı değerlendirme gerekir |",
+      "| Kanama | beklemeden değerlendirilmelidir |",
+      "| Ağrı | süre ve şiddet takip edilmelidir |",
+      "| Akıntı | koku ve kaşıntı ile birlikte değerlendirilir |",
+    ].join("\n");
+
+    const chunks = chunkKnowledgeText(table, 130);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.content).toContain("| Bulgu | Yorum |");
+      expect(chunk.content).toContain("| --- | --- |");
+    }
   });
 });

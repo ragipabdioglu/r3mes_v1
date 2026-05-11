@@ -51,7 +51,7 @@ function parsedDocument(opts: {
   originalBytes: number;
   warnings?: string[];
 }): ParsedKnowledgeDocument {
-  const text = opts.text.trim();
+  const text = normalizeParsedKnowledgeText(opts.text, opts.adapter.sourceType).trim();
   if (!text) {
     throw new Error("Boş bilgi dosyası yüklenemez");
   }
@@ -68,6 +68,67 @@ function parsedDocument(opts: {
       warnings: opts.warnings ?? [],
     },
   };
+}
+
+const STRUCTURAL_LINE_PATTERN =
+  /^(?:#{1,6}\s+\S|[-*]\s+\S|\d+[.)]\s+\S|(?:Topic|Tags|Source Summary|Key Takeaway|Patient Summary|Clinical Takeaway|Safe Guidance|Red Flags|Do Not Infer|Başlık|Etiketler|Temel Bilgi|Triage|Uyarı Bulguları|Çıkarım Yapma|Soru|Cevap|Kaynak|Özet|Ozet)\s*:)/iu;
+const MARKDOWN_TABLE_LINE_PATTERN = /^\s*\|.*\|\s*$/u;
+const MARKDOWN_TABLE_SEPARATOR_PATTERN = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/u;
+
+function isStructuralLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    !trimmed ||
+    STRUCTURAL_LINE_PATTERN.test(trimmed) ||
+    MARKDOWN_TABLE_LINE_PATTERN.test(trimmed) ||
+    MARKDOWN_TABLE_SEPARATOR_PATTERN.test(trimmed)
+  );
+}
+
+function shouldJoinSoftWrappedLine(previous: string, next: string): boolean {
+  const left = previous.trim();
+  const right = next.trim();
+  if (!left || !right) return false;
+  if (isStructuralLine(left) || isStructuralLine(right)) return false;
+  if (/[.!?:;)]$/u.test(left)) return false;
+  if (/^[A-ZÇĞİÖŞÜ0-9][\p{L}\p{N}\s-]{0,48}:$/u.test(right)) return false;
+  return true;
+}
+
+function joinSoftWrappedLines(text: string): string {
+  const output: string[] = [];
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.replace(/\s+$/u, "");
+    if (output.length === 0) {
+      output.push(line.trim());
+      continue;
+    }
+    const previous = output[output.length - 1] ?? "";
+    if (shouldJoinSoftWrappedLine(previous, line)) {
+      output[output.length - 1] = previous.endsWith("-")
+        ? `${previous.slice(0, -1)}${line.trimStart()}`
+        : `${previous} ${line.trimStart()}`;
+    } else {
+      output.push(line.trim());
+    }
+  }
+  return output.join("\n");
+}
+
+export function normalizeParsedKnowledgeText(text: string, sourceType: KnowledgeSourceType): string {
+  if (sourceType === "JSON") return text.trim();
+  return joinSoftWrappedLines(
+    text
+      .normalize("NFKC")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\u00a0/g, " ")
+      .replace(/[\u200B-\u200D\uFEFF]/g, "")
+      .replace(/\f+/g, "\n\n")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n"),
+  )
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 const TEXT_PARSER: KnowledgeParserAdapter = {
@@ -296,6 +357,12 @@ function chunkParagraphs(paragraphs: string[], maxChars: number): string[] {
   };
 
   for (const paragraph of paragraphs) {
+    if (paragraph.length > maxChars) {
+      flush();
+      chunks.push(...splitOversizedText(paragraph, maxChars));
+      continue;
+    }
+
     if (!current) {
       current = paragraph;
       continue;
@@ -314,7 +381,48 @@ function chunkParagraphs(paragraphs: string[], maxChars: number): string[] {
   return chunks;
 }
 
+function isMarkdownTableBlock(text: string): boolean {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return (
+    lines.length >= 3 &&
+    MARKDOWN_TABLE_LINE_PATTERN.test(lines[0] ?? "") &&
+    MARKDOWN_TABLE_SEPARATOR_PATTERN.test(lines[1] ?? "") &&
+    lines.slice(2).some((line) => MARKDOWN_TABLE_LINE_PATTERN.test(line))
+  );
+}
+
+function splitMarkdownTable(text: string, maxChars: number): string[] {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!isMarkdownTableBlock(text)) return [];
+  const header = lines.slice(0, 2);
+  const rows = lines.slice(2);
+  const chunks: string[] = [];
+  let currentRows: string[] = [];
+
+  const flush = () => {
+    if (currentRows.length === 0) return;
+    chunks.push([...header, ...currentRows].join("\n"));
+    currentRows = [];
+  };
+
+  for (const row of rows) {
+    const candidate = [...header, ...currentRows, row].join("\n");
+    if (currentRows.length > 0 && candidate.length > maxChars) {
+      flush();
+    }
+    currentRows.push(row);
+  }
+
+  flush();
+  return chunks;
+}
+
 function splitOversizedText(text: string, maxChars: number): string[] {
+  const tableChunks = splitMarkdownTable(text, maxChars);
+  if (tableChunks.length > 0) {
+    return tableChunks;
+  }
+
   const sentences = text
     .split(/(?<=[.!?])\s+/)
     .map((part) => part.trim())
