@@ -6,7 +6,7 @@ import { extractQuerySignals, routeQuery, type DomainRoutePlan } from "./queryRo
 import { explainWeightedRouterScore, getRouterWeights, type RouterScoreBreakdown } from "./routerConfig.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
-import { buildQueryUnderstanding } from "./queryUnderstanding.js";
+import { buildQueryUnderstanding, type QueryUnderstandingProfileInput } from "./queryUnderstanding.js";
 
 interface KnowledgeMetadataProfile {
   domain: string;
@@ -216,6 +216,22 @@ function collectionProfileText(collection: KnowledgeCollectionAccessItem): strin
 
 function collectionMetadataProfiles(collection: KnowledgeCollectionAccessItem): KnowledgeMetadataProfile[] {
   return readCollectionProfileCache(collection).profiles;
+}
+
+export function queryUnderstandingProfilesForCollections(
+  collections: KnowledgeCollectionAccessItem[],
+  limit = 12,
+): QueryUnderstandingProfileInput[] {
+  return collections
+    .flatMap((collection) => collectionMetadataProfiles(collection))
+    .slice(0, limit)
+    .map((profile) => ({
+      answerableConcepts: profile.answerableConcepts,
+      topicPhrases: profile.topicPhrases,
+      entities: profile.entities,
+      sampleQueries: profile.questionsAnswered,
+      tableConcepts: profile.tableConcepts,
+    }));
 }
 
 function normalize(text: string): string {

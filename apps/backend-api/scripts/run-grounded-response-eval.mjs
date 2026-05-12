@@ -149,7 +149,7 @@ function scoreCase(testCase, response) {
   const retrievalDebug = response?.retrieval_debug;
   const chatTrace = response?.chat_trace;
   const queryUnderstandingTrace = Array.isArray(chatTrace?.stages)
-    ? chatTrace.stages.find((stage) => stage?.name === "query_understanding")?.detail
+    ? [...chatTrace.stages].reverse().find((stage) => stage?.name === "query_understanding")?.detail
     : null;
   const evidence = retrievalDebug?.evidence;
   const compiledEvidence = retrievalDebug?.compiledEvidence;

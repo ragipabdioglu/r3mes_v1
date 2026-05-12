@@ -24,6 +24,7 @@ import {
   inferKnowledgeCollectionAnswerDomain,
   rankMetadataRouteCandidates,
   rankSuggestedKnowledgeCollections,
+  queryUnderstandingProfilesForCollections,
   readKnowledgeCollectionStrictRouteEligible,
   readKnowledgeCollectionSourceQuality,
   resolveAccessibleKnowledgeCollections,
@@ -1498,11 +1499,27 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         );
       }
 
+      const queryUnderstandingProfiles = queryUnderstandingProfilesForCollections(accessibleCollections);
+      const retrievalQueryUnderstanding = queryUnderstandingProfiles.length > 0
+        ? buildQueryUnderstanding(retrievalQuery, { profiles: queryUnderstandingProfiles })
+        : queryUnderstanding;
+      if (queryUnderstandingProfiles.length > 0) {
+        chatTrace.recordNow("query_understanding", "ok", {
+          name: "profile_aware_query_understanding",
+          profileCount: queryUnderstandingProfiles.length,
+          ...summarizeQueryUnderstandingForTrace(retrievalQueryUnderstanding),
+        });
+      }
+
       const queryPlanningTrace = chatTrace.start("query_planning");
       const queryPlan = retrievalQuery
         ? await runQueryPlannerSkill({ userQuery: retrievalQuery, language: "tr" })
         : null;
-      const plannedRetrievalQuery = queryPlan?.output.retrievalQuery || retrievalQuery;
+      const profileExpandedRetrievalQuery = [
+        queryPlan?.output.retrievalQuery || retrievalQuery,
+        ...retrievalQueryUnderstanding.profileConcepts.slice(0, 8),
+      ].filter(Boolean).join(" ");
+      const plannedRetrievalQuery = profileExpandedRetrievalQuery || retrievalQuery;
       const routePlan = queryPlan?.output.routePlan ?? null;
       const suggestibleCollections = retrievalQuery
         ? await resolveSuggestibleKnowledgeCollections({
@@ -1525,7 +1542,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         requestedCollectionIds,
         includePublic,
         query: retrievalQuery,
-        queryUnderstanding,
+        queryUnderstanding: retrievalQueryUnderstanding,
       });
       const retrieval =
         retrievalQuery && accessibleCollectionIds.length > 0
