@@ -34,6 +34,7 @@
     "eval:production-rag": "node --env-file=.env scripts/run-production-rag-eval.mjs",
     "eval:generate-100": "node ../../infrastructure/scripts/generate-eval-100.mjs",
     "eval:100": "pnpm run eval:generate-100 && node scripts/run-grounded-response-eval.mjs --file artifacts/evals/eval-100/golden.jsonl --out artifacts/evals/eval-100/latest.json",
+    "eval:beta-reality": "node scripts/analyze-beta-reality.mjs",
     "eval:readiness-baseline": "node ../../infrastructure/scripts/run-production-readiness-baseline.mjs",
     "eval:profile-health": "node --env-file=.env scripts/run-knowledge-profile-health-eval.mjs",
     "eval:parse-quality": "pnpm exec tsc -p tsconfig.json && node scripts/run-parse-quality-eval.mjs",
