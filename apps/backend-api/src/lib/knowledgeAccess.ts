@@ -72,7 +72,10 @@ export interface KnowledgeRouteDecision {
   reasons: string[];
 }
 
-function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
+function readMetadataProfile(
+  value: unknown,
+  opts: { includeFallbackEmbedding?: boolean } = {},
+): KnowledgeMetadataProfile | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const stringArray = (input: unknown): string[] =>
@@ -82,6 +85,7 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
     const domains = stringArray(profile.domains);
     if (domains.length > 0) {
       const profileText = typeof profile.profileText === "string" ? profile.profileText : undefined;
+      const includeFallbackEmbedding = opts.includeFallbackEmbedding !== false;
       return {
         domain: domains[0],
         domains,
@@ -94,7 +98,9 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
         tableConcepts: stringArray(profile.tableConcepts),
         summary: typeof profile.summary === "string" ? profile.summary : "",
         profileText,
-        profileEmbedding: numberArray(profile.profileEmbedding) ?? (profileText ? embedKnowledgeText(profileText) : undefined),
+        profileEmbedding: numberArray(profile.profileEmbedding) ?? (
+          includeFallbackEmbedding && profileText ? embedKnowledgeText(profileText) : undefined
+        ),
         summaryEmbedding: numberArray(profile.summaryEmbedding),
         sampleQuestionsEmbedding: numberArray(profile.sampleQuestionsEmbedding),
         keywordsEmbedding: numberArray(profile.keywordsEmbedding),
@@ -123,9 +129,37 @@ function readMetadataProfile(value: unknown): KnowledgeMetadataProfile | null {
   };
 }
 
+function readProfileVersionMetadata(value: unknown): Pick<
+  KnowledgeMetadataProfile,
+  "profileVersion" | "lastProfiledAt" | "sourceQuality" | "confidence" | "tableConcepts"
+> | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const profile = record.profile && typeof record.profile === "object"
+    ? record.profile as Record<string, unknown>
+    : record;
+  const stringArray = (input: unknown): string[] =>
+    Array.isArray(input) ? input.filter((item): item is string => typeof item === "string") : [];
+  return {
+    profileVersion: typeof profile.profileVersion === "number" ? profile.profileVersion : undefined,
+    lastProfiledAt: typeof profile.lastProfiledAt === "string" ? profile.lastProfiledAt : undefined,
+    sourceQuality: profile.sourceQuality === "structured" || profile.sourceQuality === "inferred" || profile.sourceQuality === "thin"
+      ? profile.sourceQuality
+      : undefined,
+    confidence: profile.confidence === "high" || profile.confidence === "medium" || profile.confidence === "low"
+      ? profile.confidence
+      : undefined,
+    tableConcepts: stringArray(profile.tableConcepts),
+  };
+}
+
 function metadataText(value: unknown): string {
-  const profile = readMetadataProfile(value);
+  const profile = readMetadataProfile(value, { includeFallbackEmbedding: false });
   if (!profile) return "";
+  return metadataTextFromProfile(profile);
+}
+
+function metadataTextFromProfile(profile: KnowledgeMetadataProfile): string {
   const compact = (input: string, limit: number) => input.slice(0, limit);
   const parts = [
     ...profile.domains.slice(0, 8),
@@ -154,19 +188,11 @@ function collectionMetadataText(collection: KnowledgeCollectionAccessItem): stri
 }
 
 function collectionProfileText(collection: KnowledgeCollectionAccessItem): string {
-  const docs = collection.documents ?? [];
-  return [
-    collection.name,
-    metadataText(collection.autoMetadata),
-    ...docs.slice(0, 5).flatMap((doc) => [doc.title, metadataText(doc.autoMetadata)]),
-  ].join(" ");
+  return readCollectionProfileCache(collection).profileText;
 }
 
 function collectionMetadataProfiles(collection: KnowledgeCollectionAccessItem): KnowledgeMetadataProfile[] {
-  return [
-    readMetadataProfile(collection.autoMetadata),
-    ...(collection.documents ?? []).map((document) => readMetadataProfile(document.autoMetadata)),
-  ].filter((item): item is KnowledgeMetadataProfile => Boolean(item)).slice(0, 6);
+  return readCollectionProfileCache(collection).profiles;
 }
 
 function normalize(text: string): string {
@@ -189,9 +215,13 @@ const metadataRouteCandidateCache = new Map<
   string,
   { expiresAt: number; candidates: KnowledgeMetadataRouteCandidate[] }
 >();
+const collectionProfileCache = new Map<
+  string,
+  { expiresAt: number; profiles: KnowledgeMetadataProfile[]; profileText: string }
+>();
 
 function collectionProfileVersion(value: unknown): string {
-  const profile = readMetadataProfile(value);
+  const profile = readProfileVersionMetadata(value);
   return [
     profile?.profileVersion ?? "0",
     profile?.lastProfiledAt ?? "",
@@ -199,6 +229,57 @@ function collectionProfileVersion(value: unknown): string {
     profile?.confidence ?? "",
     profile?.tableConcepts.slice(0, 8).join("|") ?? "",
   ].join(":");
+}
+
+function collectionCacheKey(collection: KnowledgeCollectionAccessItem): string {
+  return [
+    collection.id,
+    timestampKey(collection.updatedAt),
+    collectionProfileVersion(collection.autoMetadata),
+    ...(collection.documents ?? []).slice(0, 6).map((document) => [
+      document.title,
+      timestampKey(document.updatedAt),
+      collectionProfileVersion(document.autoMetadata),
+    ].join("~")),
+  ].join("::");
+}
+
+function readCollectionProfileCache(collection: KnowledgeCollectionAccessItem): {
+  profiles: KnowledgeMetadataProfile[];
+  profileText: string;
+} {
+  const key = collectionCacheKey(collection);
+  const cached = collectionProfileCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return {
+      profiles: cached.profiles,
+      profileText: cached.profileText,
+    };
+  }
+  if (cached) collectionProfileCache.delete(key);
+  if (collectionProfileCache.size >= METADATA_ROUTE_CACHE_MAX_ENTRIES) {
+    const oldestKey = collectionProfileCache.keys().next().value;
+    if (oldestKey) collectionProfileCache.delete(oldestKey);
+  }
+  const docs = collection.documents ?? [];
+  const profiles = [
+    readMetadataProfile(collection.autoMetadata, { includeFallbackEmbedding: false }),
+    ...docs.map((document) => readMetadataProfile(document.autoMetadata, { includeFallbackEmbedding: false })),
+  ].filter((item): item is KnowledgeMetadataProfile => Boolean(item)).slice(0, 6);
+  const profileText = [
+    collection.name,
+    profiles[0] ? metadataTextFromProfile(profiles[0]) : "",
+    ...docs.slice(0, 5).flatMap((doc, index) => [
+      doc.title,
+      profiles[index + 1] ? metadataTextFromProfile(profiles[index + 1]) : "",
+    ]),
+  ].join(" ");
+  collectionProfileCache.set(key, {
+    expiresAt: Date.now() + METADATA_ROUTE_CACHE_TTL_MS,
+    profiles,
+    profileText,
+  });
+  return { profiles, profileText };
 }
 
 function timestampKey(value: Date | string | undefined): string {
@@ -272,7 +353,7 @@ function writeMetadataRouteCandidateCache(key: string, candidates: KnowledgeMeta
 export function readKnowledgeCollectionSourceQuality(
   collection: KnowledgeCollectionAccessItem,
 ): "structured" | "inferred" | "thin" | null {
-  return readMetadataProfile(collection.autoMetadata)?.sourceQuality ?? null;
+  return readProfileVersionMetadata(collection.autoMetadata)?.sourceQuality ?? null;
 }
 
 function normalizeProfileDomain(value: string): AnswerDomain | null {
@@ -364,6 +445,12 @@ function containsTerm(text: string, term: string): boolean {
   const normalizedTerm = normalize(term);
   if (!normalizedTerm) return false;
   return normalize(text).includes(normalizedTerm);
+}
+
+function containsTermInNormalizedText(normalizedText: string, term: string): boolean {
+  const normalizedTerm = normalize(term);
+  if (!normalizedTerm) return false;
+  return normalizedText.includes(normalizedTerm);
 }
 
 const QUERY_STOPWORDS = new Set([
@@ -507,7 +594,17 @@ function cheapMetadataCandidateScoreFromProfileText(
         ]
       : [];
   const terms = unique([...queryTerms, ...routeTerms]).slice(0, 48);
-  const lexicalMatches = terms.filter((term) => containsTerm(text, term)).length;
+  return cheapMetadataCandidateScoreFromTerms(collection, normalize(text), primaryProfile, routePlan, terms);
+}
+
+function cheapMetadataCandidateScoreFromTerms(
+  collection: KnowledgeCollectionAccessItem,
+  normalizedText: string,
+  primaryProfile: KnowledgeMetadataProfile | undefined,
+  routePlan: DomainRoutePlan | null,
+  terms: string[],
+): number {
+  const lexicalMatches = terms.filter((term) => containsTermInNormalizedText(normalizedText, term)).length;
   const profileQuality = primaryProfile ? sourceQualityScore(primaryProfile) : 0;
   const domainBonus =
     routePlan && routePlan.domain !== "general" && profileHasDirectDomainSupport(primaryProfile, routePlan.domain)
@@ -1071,30 +1168,34 @@ export function rankMetadataRouteCandidates(opts: {
   if (cached) return cached;
   const candidatePool = opts.collections.filter((collection) => !excludedIds.has(collection.id));
   if (opts.fast === true) {
+    const fastQueryTerms = opts.query?.trim() ? queryAdaptiveTerms(opts.query) : [];
+    const fastRouteTerms =
+      opts.routePlan && opts.routePlan.domain !== "general"
+        ? [
+            opts.routePlan.domain,
+            ...opts.routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+            ...opts.routePlan.mustIncludeTerms,
+            ...opts.routePlan.retrievalHints,
+          ]
+        : [];
+    const fastTerms = unique([...fastQueryTerms, ...fastRouteTerms]).slice(0, 48);
     const fastCandidates: KnowledgeMetadataRouteCandidate[] = [];
     for (const collection of candidatePool) {
       const profiles = collectionMetadataProfiles(collection);
       const profile = profiles[0];
       const profileText = collectionProfileText(collection);
-      const score = cheapMetadataCandidateScoreFromProfileText(
+      const normalizedProfileText = normalize(profileText);
+      const score = cheapMetadataCandidateScoreFromTerms(
         collection,
-        profileText,
+        normalizedProfileText,
         profile,
         opts.routePlan,
-        opts.query,
+        fastTerms,
       );
       if (!profile || score < 20) continue;
-      const text = normalize(metadataText(profile));
-      const routeTerms =
-        opts.routePlan && opts.routePlan.domain !== "general"
-          ? [
-              ...opts.routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
-              ...opts.routePlan.mustIncludeTerms,
-              ...opts.routePlan.retrievalHints,
-            ]
-          : [];
-      const queryTerms = opts.query?.trim() ? queryAdaptiveTerms(opts.query) : [];
-      const matchedTerms = unique([...queryTerms, ...routeTerms].filter((term) => containsTerm(text, term))).slice(0, 8);
+      const matchedTerms = unique(
+        fastTerms.filter((term) => containsTermInNormalizedText(normalizedProfileText, term)),
+      ).slice(0, 8);
       fastCandidates.push({
         id: collection.id,
         name: collection.name,

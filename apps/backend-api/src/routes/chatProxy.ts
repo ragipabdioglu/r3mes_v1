@@ -280,6 +280,7 @@ function buildSourceSelectionSummary(opts: {
         : explainMetadataCandidateSuggestion(candidate),
     }));
   const usedCollectionsMatchRoute =
+    suggestedCollections.length === 0 ||
     !opts.routePlan?.domain ||
     opts.routePlan.domain === "general" ||
     groundedCollectionIds.some((id) => {
