@@ -231,6 +231,9 @@ function buildSourceSelectionSummary(opts: {
         : "none";
   const excluded = new Set([...usedCollectionIds, ...opts.requestedCollectionIds]);
   const retrievalSuggestedIds = opts.retrievalSuggestedCollectionIds ?? [];
+  const useFastMetadataSuggestions =
+    groundedCollectionIds.length === 0 &&
+    opts.requestedCollectionIds.length > 0;
   const metadataRouteCandidates = opts.skipSuggestions
     ? []
     : rankMetadataRouteCandidates({
@@ -239,6 +242,7 @@ function buildSourceSelectionSummary(opts: {
         query: opts.query,
         excludedIds: new Set(opts.requestedCollectionIds),
         limit: 8,
+        fast: useFastMetadataSuggestions,
       });
   const metadataCandidateById = new Map(metadataRouteCandidates.map((candidate) => [candidate.id, candidate]));
   const rankedSuggestedCollections = metadataRouteCandidates

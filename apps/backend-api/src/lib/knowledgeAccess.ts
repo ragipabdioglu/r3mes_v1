@@ -153,6 +153,15 @@ function collectionMetadataText(collection: KnowledgeCollectionAccessItem): stri
   return parts.join(" ");
 }
 
+function collectionProfileText(collection: KnowledgeCollectionAccessItem): string {
+  const docs = collection.documents ?? [];
+  return [
+    collection.name,
+    metadataText(collection.autoMetadata),
+    ...docs.slice(0, 5).flatMap((doc) => [doc.title, metadataText(doc.autoMetadata)]),
+  ].join(" ");
+}
+
 function collectionMetadataProfiles(collection: KnowledgeCollectionAccessItem): KnowledgeMetadataProfile[] {
   return [
     readMetadataProfile(collection.autoMetadata),
@@ -171,6 +180,10 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
 const METADATA_ROUTE_CACHE_TTL_MS = parsePositiveInt(process.env.R3MES_METADATA_ROUTE_CACHE_TTL_MS, 60_000);
 const METADATA_ROUTE_CACHE_MAX_ENTRIES = parsePositiveInt(process.env.R3MES_METADATA_ROUTE_CACHE_MAX_ENTRIES, 200);
+const METADATA_ROUTE_SCORING_POOL_LIMIT = parsePositiveInt(
+  process.env.R3MES_METADATA_ROUTE_SCORING_POOL_LIMIT,
+  16,
+);
 
 const metadataRouteCandidateCache = new Map<
   string,
@@ -199,6 +212,7 @@ function metadataRouteCacheKey(opts: {
   query?: string;
   excludedIds: Set<string>;
   limit: number;
+  fast?: boolean;
 }): string {
   const route = opts.routePlan
     ? [
@@ -228,6 +242,7 @@ function metadataRouteCacheKey(opts: {
     route,
     excluded,
     opts.limit,
+    opts.fast === true ? "fast" : "full",
     collectionSignature,
   ].join("||");
 }
@@ -462,6 +477,62 @@ function metadataProfileMatchesDomain(profile: KnowledgeMetadataProfile, domain:
 function percentScore(matches: number, possible: number): number {
   if (possible <= 0) return 0;
   return Math.min(100, (matches / possible) * 100);
+}
+
+function cheapMetadataCandidateScore(
+  collection: KnowledgeCollectionAccessItem,
+  routePlan: DomainRoutePlan | null,
+  query?: string,
+): number {
+  const text = collectionProfileText(collection);
+  const primaryProfile = collectionMetadataProfiles(collection)[0];
+  return cheapMetadataCandidateScoreFromProfileText(collection, text, primaryProfile, routePlan, query);
+}
+
+function cheapMetadataCandidateScoreFromProfileText(
+  collection: KnowledgeCollectionAccessItem,
+  text: string,
+  primaryProfile: KnowledgeMetadataProfile | undefined,
+  routePlan: DomainRoutePlan | null,
+  query?: string,
+): number {
+  const queryTerms = query?.trim() ? queryAdaptiveTerms(query) : [];
+  const routeTerms =
+    routePlan && routePlan.domain !== "general"
+      ? [
+          routePlan.domain,
+          ...routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+          ...routePlan.mustIncludeTerms,
+          ...routePlan.retrievalHints,
+        ]
+      : [];
+  const terms = unique([...queryTerms, ...routeTerms]).slice(0, 48);
+  const lexicalMatches = terms.filter((term) => containsTerm(text, term)).length;
+  const profileQuality = primaryProfile ? sourceQualityScore(primaryProfile) : 0;
+  const domainBonus =
+    routePlan && routePlan.domain !== "general" && profileHasDirectDomainSupport(primaryProfile, routePlan.domain)
+      ? 35
+      : 0;
+  return Math.min(120, lexicalMatches * 12 + domainBonus + profileQuality * 0.08 + Math.min(collection.documents?.length ?? 0, 5));
+}
+
+function trimMetadataScoringPool(
+  collections: KnowledgeCollectionAccessItem[],
+  routePlan: DomainRoutePlan | null,
+  query: string | undefined,
+  limit: number,
+): KnowledgeCollectionAccessItem[] {
+  const poolLimit = Math.max(limit * 2, METADATA_ROUTE_SCORING_POOL_LIMIT);
+  if (collections.length <= poolLimit) return collections;
+  return collections
+    .map((collection, index) => ({
+      collection,
+      index,
+      score: cheapMetadataCandidateScore(collection, routePlan, query),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, poolLimit)
+    .map(({ collection }) => collection);
 }
 
 function routeHintScoreWeight(): number {
@@ -772,6 +843,12 @@ function collectionHasMetadataDomainSupport(
   return collectionMetadataProfiles(collection).some((profile) => metadataProfileMatchesDomain(profile, domain));
 }
 
+function profileHasDirectDomainSupport(profile: KnowledgeMetadataProfile | undefined, domain: string): boolean {
+  if (!profile) return false;
+  const normalizedDomain = normalize(domain);
+  return profile.domains.map(normalize).includes(normalizedDomain) || normalize(profile.domain) === normalizedDomain;
+}
+
 function collectionHasMetadataSubtopicSupport(
   collection: KnowledgeCollectionAccessItem,
   routePlan: DomainRoutePlan,
@@ -978,6 +1055,7 @@ export function rankMetadataRouteCandidates(opts: {
   query?: string;
   excludedIds?: Set<string>;
   limit?: number;
+  fast?: boolean;
 }): KnowledgeMetadataRouteCandidate[] {
   const excludedIds = opts.excludedIds ?? new Set<string>();
   const limit = opts.limit ?? 5;
@@ -987,15 +1065,78 @@ export function rankMetadataRouteCandidates(opts: {
     query: opts.query,
     excludedIds,
     limit,
+    fast: opts.fast,
   });
   const cached = readMetadataRouteCandidateCache(cacheKey);
   if (cached) return cached;
   const candidatePool = opts.collections.filter((collection) => !excludedIds.has(collection.id));
+  if (opts.fast === true) {
+    const fastCandidates: KnowledgeMetadataRouteCandidate[] = [];
+    for (const collection of candidatePool) {
+      const profiles = collectionMetadataProfiles(collection);
+      const profile = profiles[0];
+      const profileText = collectionProfileText(collection);
+      const score = cheapMetadataCandidateScoreFromProfileText(
+        collection,
+        profileText,
+        profile,
+        opts.routePlan,
+        opts.query,
+      );
+      if (!profile || score < 20) continue;
+      const text = normalize(metadataText(profile));
+      const routeTerms =
+        opts.routePlan && opts.routePlan.domain !== "general"
+          ? [
+              ...opts.routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+              ...opts.routePlan.mustIncludeTerms,
+              ...opts.routePlan.retrievalHints,
+            ]
+          : [];
+      const queryTerms = opts.query?.trim() ? queryAdaptiveTerms(opts.query) : [];
+      const matchedTerms = unique([...queryTerms, ...routeTerms].filter((term) => containsTerm(text, term))).slice(0, 8);
+      fastCandidates.push({
+        id: collection.id,
+        name: collection.name,
+        score,
+        scoreBreakdown: {
+          finalScore: score,
+          weights: getRouterWeights(),
+          signals: {
+            lexicalKeyword: Math.min(100, matchedTerms.length * 18),
+            domainHint: opts.routePlan && profileHasDirectDomainSupport(profile, opts.routePlan.domain) ? 80 : 0,
+            sourceQuality: sourceQualityScore(profile),
+          },
+          contributions: {},
+          missingSignals: ["profileEmbedding", "sampleQuestion"],
+          scoringMode: "query_profile" as const,
+        },
+        domain: profile.domain,
+        subtopics: profile.subtopics.slice(0, 6),
+        matchedTerms,
+        sourceQuality: profile.sourceQuality ?? null,
+        reason:
+          matchedTerms.length > 0
+            ? `Fast metadata eşleşmesi: ${matchedTerms.slice(0, 4).join(", ")}`
+            : `Fast metadata skoru ${Math.round(score)}; kaynak önerisi için aday.`,
+      });
+    }
+    fastCandidates
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
+      .splice(limit);
+    writeMetadataRouteCandidateCache(cacheKey, fastCandidates);
+    return fastCandidates;
+  }
   const domainScopedPool =
     opts.routePlan && opts.routePlan.domain !== "general" && opts.routePlan.confidence !== "low"
       ? candidatePool.filter((collection) => collectionHasMetadataDomainSupport(collection, opts.routePlan!.domain))
       : [];
-  const scoringPool = domainScopedPool.length >= Math.min(limit, 3) ? domainScopedPool : candidatePool;
+  const scoringPool = trimMetadataScoringPool(
+    domainScopedPool.length >= Math.min(limit, 3) ? domainScopedPool : candidatePool,
+    opts.routePlan,
+    opts.query,
+    limit,
+  );
   const candidates = scoringPool
     .map((collection) =>
       adaptiveMetadataCandidate(collection, opts.routePlan, opts.query),
