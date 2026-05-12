@@ -254,6 +254,10 @@ function scoreCase(testCase, response) {
   }
 
   const reranker = retrievalDebug?.retrievalDiagnostics?.reranker;
+  if (readBooleanEnv("R3MES_REQUIRE_REAL_RERANKER", false) && reranker?.fallbackUsed === true) {
+    failures.push(`reranker_real_required_fallback:${reranker?.fallbackReason ?? reranker?.mode ?? "unknown"}`);
+  }
+
   if (testCase.expectedRerankerMode && reranker?.mode !== testCase.expectedRerankerMode) {
     failures.push(`reranker_mode:${reranker?.mode ?? "missing"}`);
   }
