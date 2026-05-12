@@ -10,6 +10,13 @@ const checks = [
     },
   },
   {
+    name: "bge-m3-provider",
+    script: "smoke-bge-m3-provider.mjs",
+    env: {
+      R3MES_REQUIRE_REAL_EMBEDDINGS: "1",
+    },
+  },
+  {
     name: "reranker-provider",
     script: "smoke-reranker-provider.mjs",
     env: {

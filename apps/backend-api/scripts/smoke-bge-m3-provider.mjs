@@ -26,6 +26,10 @@ const samples = [
   "Okulda BEP planı için veli ve rehberlik servisiyle görüşme yapılır.",
 ];
 
+function isBgeM3Model(value) {
+  return typeof value === "string" && value.toLowerCase().includes("bge-m3");
+}
+
 try {
   const result = await embedTextsForQdrantWithDiagnostics(samples);
   const [queryVector, positiveVector, negativeVector] = result.vectors;
@@ -35,6 +39,7 @@ try {
   const passed =
     !result.diagnostics.fallbackUsed &&
     result.diagnostics.actualProvider === "bge-m3" &&
+    isBgeM3Model(result.diagnostics.model) &&
     result.diagnostics.dimension === expectedDimension &&
     positiveSimilarity > negativeSimilarity;
 
@@ -49,7 +54,7 @@ try {
   console.log(JSON.stringify(report, null, 2));
 
   if (!passed) {
-    console.error("BGE-M3 smoke failed: provider must be real bge-m3, dimension must match Qdrant, and positive similarity must beat negative similarity.");
+    console.error("BGE-M3 smoke failed: provider/model must be real bge-m3, dimension must match Qdrant, and positive similarity must beat negative similarity.");
     process.exit(1);
   }
 } finally {
