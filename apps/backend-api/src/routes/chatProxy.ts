@@ -9,6 +9,7 @@ import { EMPTY_GROUNDED_MEDICAL_ANSWER, type GroundedMedicalAnswer } from "../li
 import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
+import { shouldExposeChatDebugFromHeaders } from "../lib/chatDebugBoundary.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
 import type { ConversationalIntentDecision } from "../lib/conversationalIntent.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
@@ -441,10 +442,7 @@ function shouldUseRagFastPath(opts: {
 }
 
 function shouldExposeChatDebug(req: FastifyRequest): boolean {
-  if (process.env.R3MES_EXPOSE_CHAT_DEBUG === "1") return true;
-  const header = req.headers["x-r3mes-debug"];
-  const value = Array.isArray(header) ? header[0] : header;
-  return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+  return shouldExposeChatDebugFromHeaders(req.headers);
 }
 
 function extractRetrievalQuery(body: Record<string, unknown>): string {
