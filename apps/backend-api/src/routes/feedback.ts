@@ -459,6 +459,7 @@ function summarizeGateReport(value: unknown): KnowledgeFeedbackApplyRecordItem["
   const failedChecks = normalizedChecks
     .filter((check) => check.ok === false)
     .map((check) => typeof check.name === "string" && check.name.trim() ? check.name.trim() : "unnamed_check");
+  const productionGate = normalizedChecks.find((check) => check.name === "production_rag_gate");
   return {
     ok: typeof report.ok === "boolean" ? report.ok : null,
     checksTotal: normalizedChecks.length,
@@ -467,6 +468,18 @@ function summarizeGateReport(value: unknown): KnowledgeFeedbackApplyRecordItem["
     failedChecks,
     durationMs: typeof report.durationMs === "number" && Number.isFinite(report.durationMs) ? report.durationMs : null,
     quick: typeof report.quick === "boolean" ? report.quick : null,
+    applyAllowed: typeof report.applyAllowed === "boolean" ? report.applyAllowed : null,
+    feedbackCaseCount:
+      typeof report.feedbackCaseCount === "number" && Number.isFinite(report.feedbackCaseCount)
+        ? Math.max(0, Math.floor(report.feedbackCaseCount))
+        : null,
+    feedbackCaseCoverageOk:
+      typeof report.feedbackCaseCoverageOk === "boolean" ? report.feedbackCaseCoverageOk : null,
+    approvedProposalCount:
+      typeof report.approvedProposalCount === "number" && Number.isFinite(report.approvedProposalCount)
+        ? Math.max(0, Math.floor(report.approvedProposalCount))
+        : null,
+    productionGateRan: productionGate ? productionGate.skipped !== true : null,
     generatedAt: typeof report.generatedAt === "string" ? report.generatedAt : null,
   };
 }

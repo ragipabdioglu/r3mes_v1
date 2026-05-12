@@ -1243,6 +1243,20 @@ describe("knowledge feedback routes", () => {
       rolledBackAt: null,
       createdAt: new Date("2026-05-05T12:06:00.000Z"),
       updatedAt: new Date("2026-05-05T12:07:00.000Z"),
+      gateReport: {
+        ok: true,
+        applyAllowed: true,
+        approvedProposalCount: 1,
+        feedbackCaseCount: 4,
+        feedbackCaseCoverageOk: true,
+        quick: false,
+        durationMs: 12000,
+        generatedAt: "2026-05-05T12:07:00.000Z",
+        checks: [
+          { name: "feedback_regression", ok: true },
+          { name: "production_rag_gate", ok: true, skipped: false },
+        ],
+      },
     } as never);
 
     const { buildApp } = await import("./app.js");
@@ -1255,7 +1269,17 @@ describe("knowledge feedback routes", () => {
         ok: true,
         report: {
           ok: true,
-          checks: [{ name: "rag_quality_gates", ok: true }],
+          applyAllowed: true,
+          approvedProposalCount: 1,
+          feedbackCaseCount: 4,
+          feedbackCaseCoverageOk: true,
+          quick: false,
+          durationMs: 12000,
+          generatedAt: "2026-05-05T12:07:00.000Z",
+          checks: [
+            { name: "feedback_regression", ok: true },
+            { name: "production_rag_gate", ok: true, skipped: false },
+          ],
         },
         reason: "gate passed in test",
       },
@@ -1266,12 +1290,30 @@ describe("knowledge feedback routes", () => {
       gatePassed?: boolean;
       mutationApplied?: boolean;
       nextSafeAction?: string;
-      record?: { status?: string };
+      record?: {
+        status?: string;
+        gateReportSummary?: {
+          applyAllowed?: boolean | null;
+          feedbackCaseCount?: number | null;
+          feedbackCaseCoverageOk?: boolean | null;
+          approvedProposalCount?: number | null;
+          productionGateRan?: boolean | null;
+          checksTotal?: number;
+        } | null;
+      };
     };
     expect(body.gatePassed).toBe(true);
     expect(body.mutationApplied).toBe(false);
     expect(body.nextSafeAction).toBe("manual_apply_review");
     expect(body.record).toMatchObject({ status: "GATE_PASSED" });
+    expect(body.record?.gateReportSummary).toMatchObject({
+      applyAllowed: true,
+      feedbackCaseCount: 4,
+      feedbackCaseCoverageOk: true,
+      approvedProposalCount: 1,
+      productionGateRan: true,
+      checksTotal: 2,
+    });
     expect(prisma.knowledgeFeedbackApplyRecord.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

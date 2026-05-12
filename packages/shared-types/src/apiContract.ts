@@ -265,6 +265,11 @@ export interface KnowledgeFeedbackApplyRecordItem {
     failedChecks: string[];
     durationMs: number | null;
     quick: boolean | null;
+    applyAllowed: boolean | null;
+    feedbackCaseCount: number | null;
+    feedbackCaseCoverageOk: boolean | null;
+    approvedProposalCount: number | null;
+    productionGateRan: boolean | null;
     generatedAt: string | null;
   } | null;
   reason: string | null;
