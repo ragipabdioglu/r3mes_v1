@@ -10,6 +10,7 @@ import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
 import { shouldExposeChatDebugFromHeaders } from "../lib/chatDebugBoundary.js";
+import { stripChatDebugFields } from "../lib/chatResponseBoundary.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
 import type { ConversationalIntentDecision } from "../lib/conversationalIntent.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
@@ -795,7 +796,8 @@ function applyRenderedAnswer(
   retrievalDebug: ChatRetrievalDebug | null = null,
   opts: { useFallbackTemplate?: boolean; exposeDebug?: boolean; chatTrace?: ChatTraceBuilder; answerPath?: string } = {},
 ): Record<string, unknown> {
-  const next = structuredClone(payload) as Record<string, unknown>;
+  const cloned = structuredClone(payload) as Record<string, unknown>;
+  const next = opts.exposeDebug === true ? cloned : stripChatDebugFields(cloned);
   const enrichedAnswer = enrichAnswerWithEvidence({
     ...answer,
     answer_domain: retrievalDebug?.domain ?? answer.answer_domain,
@@ -2059,10 +2061,11 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               ),
             );
           }
-          parsed.sources = retrieval.sources;
+          const safeParsed = exposeDebug ? parsed : stripChatDebugFields(parsed);
+          safeParsed.sources = retrieval.sources;
           if (exposeDebug && retrievalDebug) parsed.retrieval_debug = retrievalDebug;
           if (exposeDebug) {
-            parsed.chat_trace = chatTrace.snapshot({
+            safeParsed.chat_trace = chatTrace.snapshot({
               retrieval: retrievalDebug
                 ? {
                     mode: retrievalDebug.retrievalMode,
@@ -2077,7 +2080,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               },
             });
           }
-          return reply.type(ct).send(parsed);
+          return reply.type(ct).send(safeParsed);
         } catch {
           // fall through to raw buffer
         }
