@@ -1790,6 +1790,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         : null;
 
       const retrievalWasUsed = retrieval.contextText.length > 0;
+      const hasContradictoryCompiledEvidence =
+        "compiledEvidence" in retrieval && (retrieval.compiledEvidence?.contradictionCount ?? 0) > 0;
       if (
         !stream &&
         retrievalQuery &&
@@ -1826,6 +1828,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         );
       }
       if (
+        (hasContradictoryCompiledEvidence && !stream && retrievalWasUsed && retrieval.sources.length > 0) ||
         shouldUseRagFastPath({
           stream,
           hasRetrieval: retrievalWasUsed,
@@ -1836,7 +1839,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         })
       ) {
         chatTrace.recordNow("answer_path", "ok", {
-          name: "rag_fast_path",
+          name: hasContradictoryCompiledEvidence ? "contradiction_fast_path" : "rag_fast_path",
           retrievalWasUsed,
           sourceCount: retrieval.sources.length,
         });

@@ -466,6 +466,19 @@ function asksForMultilingualDisclosure(query: string): boolean {
   );
 }
 
+function asksForContradictionReview(query: string): boolean {
+  const normalized = normalize(query);
+  return (
+    normalized.includes("celis") ||
+    normalized.includes("tutarsiz") ||
+    normalized.includes("uyumlu mu") ||
+    normalized.includes("birbiriyle uyumlu") ||
+    normalized.includes("tek dogru") ||
+    normalized.includes("kesin konusmadan") ||
+    normalized.includes("net ve kesin")
+  );
+}
+
 function diversifyMultilingualDisclosureCandidates<T extends { chunk: HybridKnowledgeChunk }>(
   query: string,
   accepted: T[],
@@ -502,6 +515,32 @@ function diversifyMultilingualDisclosureCandidates<T extends { chunk: HybridKnow
         presentLanguages.add(language);
       }
     }
+  }
+
+  return [...byDocument.values()].slice(0, limit);
+}
+
+function diversifyContradictionReviewCandidates<T extends { chunk: HybridKnowledgeChunk }>(
+  query: string,
+  accepted: T[],
+  candidates: T[],
+  limit: number,
+): T[] {
+  if (!asksForContradictionReview(query) || limit < 2) return accepted.slice(0, limit);
+
+  const byDocument = new Map<string, T>();
+  const add = (candidate: T) => {
+    if (byDocument.size >= limit) return;
+    if (byDocument.has(candidate.chunk.documentId)) return;
+    byDocument.set(candidate.chunk.documentId, candidate);
+  };
+
+  for (const candidate of accepted) add(candidate);
+  if (byDocument.size >= 2) return [...byDocument.values()].slice(0, limit);
+
+  for (const candidate of candidates) {
+    add(candidate);
+    if (byDocument.size >= 2) break;
   }
 
   return [...byDocument.values()].slice(0, limit);
@@ -1526,7 +1565,10 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     disclosureIndexes(evidenceQuery).length > 0 || primaryQuerySymbol(evidenceQuery)
       ? Math.min(rerankerCandidateLimit, parsePositiveInt(process.env.R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT, 5))
       : rerankerCandidateLimit;
-  const rerankReturnLimit = asksForMultilingualDisclosure(evidenceQuery) || criticalEvidenceTermGroups(evidenceQuery).length > 0
+  const rerankReturnLimit =
+    asksForMultilingualDisclosure(evidenceQuery) ||
+    asksForContradictionReview(evidenceQuery) ||
+    criticalEvidenceTermGroups(evidenceQuery).length > 0
     ? Math.max(limit, scopedRerankerCandidateLimit)
     : Math.max(limit, 3);
   const rerankRun = await rerankKnowledgeCardsWithDiagnostics(query, rerankInput, rerankReturnLimit, {
@@ -1550,7 +1592,12 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   ];
   const accepted = diversifyCriticalEvidenceCandidates(
     evidenceQuery,
-    diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit),
+    diversifyContradictionReviewCandidates(
+      evidenceQuery,
+      diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit),
+      reranked,
+      limit,
+    ),
     criticalRerankPool,
     limit,
   );

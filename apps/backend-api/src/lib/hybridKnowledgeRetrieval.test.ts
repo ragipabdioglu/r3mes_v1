@@ -506,6 +506,67 @@ describe("true hybrid retrieval helpers", () => {
     qdrant.mockRestore();
   });
 
+  it("keeps multiple documents for contradiction-review queries", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "deterministic");
+    vi.stubEnv("R3MES_RAG_MIN_RERANK_SCORE", "0.1");
+    vi.stubEnv("R3MES_RAG_RELATIVE_SCORE_FLOOR", "0.75");
+    const collectionId = "contradiction-review-test";
+    const docs = [
+      {
+        id: "safe",
+        documentId: "safe-doc",
+        chunkIndex: 0,
+        content: [
+          "Topic: migration güvenliği",
+          "Tags: technical, migration, rollback",
+          "Source Summary: Production migration öncesinde yedek alınmalı, staging denenmeli ve rollback planı hazırlanmalıdır.",
+          "Key Takeaway: Rollback planı olmadan production migration çalıştırılmamalıdır.",
+        ].join("\n"),
+        tokenCount: 20,
+        autoMetadata: { domain: "technical", keywords: ["migration", "rollback", "yedek"] },
+        document: {
+          title: "migration-safe",
+          collectionId,
+          autoMetadata: { domain: "technical", keywords: ["migration", "rollback"] },
+        },
+        embedding: { values: [] },
+      },
+      {
+        id: "unsafe",
+        documentId: "unsafe-doc",
+        chunkIndex: 0,
+        content: [
+          "Topic: migration eski not",
+          "Tags: technical, migration, rollback",
+          "Source Summary: Eski not, küçük migrationlarda yedek ve rollback planına gerek olmadığını iddia eder.",
+          "Key Takeaway: Rollback planı production migration için gerekli değildir iddiası diğer kaynakla çelişir.",
+        ].join("\n"),
+        tokenCount: 20,
+        autoMetadata: { domain: "technical", keywords: ["migration", "rollback", "çelişki"] },
+        document: {
+          title: "migration-unsafe",
+          collectionId,
+          autoMetadata: { domain: "technical", keywords: ["migration", "rollback"] },
+        },
+        embedding: { values: [] },
+      },
+    ];
+    const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue(docs as never);
+    const qdrant = vi.mocked(searchQdrantKnowledge).mockResolvedValue([]);
+    const result = await retrieveKnowledgeContextTrueHybrid({
+      query: "Bu kaynaklara göre production migration için rollback planı gerekli mi? Kesin konuşmadan açıkla.",
+      evidenceQuery: "Bu kaynaklara göre production migration için rollback planı gerekli mi? Kesin konuşmadan açıkla.",
+      accessibleCollectionIds: [collectionId],
+      limit: 2,
+      budgetMode: "fast_grounded",
+    });
+
+    expect(result.sources.map((source) => source.documentId).sort()).toEqual(["safe-doc", "unsafe-doc"]);
+    expect(result.compiledEvidence?.contradictionCount).toBeGreaterThan(0);
+    findMany.mockRestore();
+    qdrant.mockRestore();
+  });
+
   it("keeps pruning diagnostics generic for noisy mixed-domain evidence", () => {
     vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "240");
     const result = buildPrunedEvidenceInputWithDiagnostics({
