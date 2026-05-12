@@ -148,6 +148,44 @@ function profileSignal(item: KnowledgeCollectionListItem): string {
   return `${quality} / ${confidence} / ${version}${health}`;
 }
 
+function productHealth(item: KnowledgeCollectionListItem): {
+  title: string;
+  summary: string;
+  nextAction: string;
+  className: string;
+} {
+  if (item.documentCount === 0) {
+    return {
+      title: "Veri bekliyor",
+      summary: "Bu collection henüz chat için kullanılacak doküman içermiyor.",
+      nextAction: "Önce TXT/MD/JSON/PDF/DOCX kaynak yükleyin.",
+      className: "border-zinc-800 bg-zinc-950/45 text-zinc-400",
+    };
+  }
+  if (item.sourceQuality === "thin" || item.profileConfidence === "low" || item.profileHealthLevel === "weak") {
+    return {
+      title: "Temkinli kullanılmalı",
+      summary: "Sistem bu kaynağı görebiliyor ama profil sinyali zayıf; auto source yanlış kilitlenmemek için geniş/suggest davranır.",
+      nextAction: "Daha açıklayıcı başlık, konu etiketi veya birkaç destekleyici doküman eklemek kaliteyi artırır.",
+      className: "border-amber-500/20 bg-amber-950/10 text-amber-100/85",
+    };
+  }
+  if (item.profileHealthLevel === "healthy" || item.sourceQuality === "structured" || item.profileConfidence === "high") {
+    return {
+      title: "Chat için hazır",
+      summary: "Profil, konu ve kaynak sinyalleri güçlü; auto source bu collection'ı güvenle aday gösterebilir.",
+      nextAction: item.visibility === "PUBLIC" ? "Public kullanım açık; gerekirse private'a alın." : "Sadece size açık; isterseniz publish ile public yapın.",
+      className: "border-emerald-500/20 bg-emerald-950/10 text-emerald-100/85",
+    };
+  }
+  return {
+    title: "Kullanılabilir",
+    summary: "Collection indeksli ve chat hattına girebilir; zor sorularda sistem ek kaynak veya öneri isteyebilir.",
+    nextAction: "İlk birkaç gerçek soru ile feedback vererek profile ve router sinyallerini güçlendirin.",
+    className: "border-cyan-500/20 bg-cyan-950/10 text-cyan-100/85",
+  };
+}
+
 function profileWarnings(item: KnowledgeCollectionListItem): string[] {
   return (item.profileHealthWarnings ?? []).slice(0, 4);
 }
@@ -417,6 +455,21 @@ export function KnowledgeStatusBoard() {
               key={item.id}
               className="space-y-3 rounded-xl border border-r3mes-border bg-r3mes-surface/50 px-4 py-3"
             >
+              {(() => {
+                const health = productHealth(item);
+                return (
+                  <div className={`rounded-xl border px-3 py-2 text-[11px] leading-relaxed ${health.className}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold text-current">{health.title}</p>
+                      <span className="text-[10px] uppercase tracking-wider opacity-60">
+                        Chat hazırlığı
+                      </span>
+                    </div>
+                    <p className="mt-1 opacity-80">{health.summary}</p>
+                    <p className="mt-1 opacity-60">{health.nextAction}</p>
+                  </div>
+                );
+              })()}
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
