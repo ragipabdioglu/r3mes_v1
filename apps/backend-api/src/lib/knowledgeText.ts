@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON";
 export type KnowledgeParserInputMode = "utf8" | "binary";
+export type KnowledgeExternalParserProfile = "docling" | "marker" | "external";
 
 export interface ParsedKnowledgeDocument {
   sourceType: KnowledgeSourceType;
@@ -37,6 +38,7 @@ export interface KnowledgeParserCapability {
   inputMode: KnowledgeParserInputMode;
   available: boolean;
   kind: "built_in" | "external";
+  profile?: KnowledgeExternalParserProfile | null;
   reason?: string | null;
 }
 
@@ -213,6 +215,22 @@ function externalParserTimeoutMs(): number {
   return Number.isFinite(value) && value > 0 ? Math.min(value, 120000) : 30000;
 }
 
+function externalParserProfile(): KnowledgeExternalParserProfile {
+  const raw = process.env.R3MES_DOCUMENT_PARSER_PROFILE?.trim().toLowerCase();
+  if (raw === "docling" || raw === "marker") return raw;
+  return "external";
+}
+
+function missingExternalParserReason(profile: KnowledgeExternalParserProfile): string {
+  if (profile === "docling") {
+    return "R3MES_DOCUMENT_PARSER_COMMAND not configured; recommended profile is docling for PDF/DOCX structured markdown";
+  }
+  if (profile === "marker") {
+    return "R3MES_DOCUMENT_PARSER_COMMAND not configured; recommended profile is marker for PDF/DOCX structured markdown";
+  }
+  return "R3MES_DOCUMENT_PARSER_COMMAND not configured";
+}
+
 function externalParserArgs(inputPath: string): string[] {
   const template = process.env.R3MES_DOCUMENT_PARSER_ARGS?.trim() || "{input}";
   return splitCommandLineArgs(template).map((arg) => arg.replaceAll("{input}", inputPath));
@@ -276,6 +294,7 @@ export function listKnowledgeParserAdapters(): Array<Pick<KnowledgeParserAdapter
 
 export function listKnowledgeParserCapabilities(): KnowledgeParserCapability[] {
   const externalConfigured = Boolean(process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim());
+  const profile = externalParserProfile();
   return [
     ...BUILT_IN_KNOWLEDGE_PARSERS.map((parser) => ({
       id: parser.id,
@@ -295,7 +314,8 @@ export function listKnowledgeParserCapabilities(): KnowledgeParserCapability[] {
       inputMode: "binary",
       available: externalConfigured,
       kind: "external",
-      reason: externalConfigured ? null : "R3MES_DOCUMENT_PARSER_COMMAND not configured",
+      profile,
+      reason: externalConfigured ? null : missingExternalParserReason(profile),
     },
   ];
 }

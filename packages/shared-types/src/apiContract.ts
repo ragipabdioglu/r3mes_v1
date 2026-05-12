@@ -117,6 +117,7 @@ export interface KnowledgeParserCapabilityItem {
   inputMode: "utf8" | "binary";
   available: boolean;
   kind: "built_in" | "external";
+  profile?: "docling" | "marker" | "external" | null;
   reason?: string | null;
 }
 

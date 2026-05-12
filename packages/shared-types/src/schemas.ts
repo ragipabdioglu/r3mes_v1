@@ -174,6 +174,7 @@ export const KnowledgeParserCapabilityItemSchema: z.ZodType<KnowledgeParserCapab
   inputMode: z.enum(["utf8", "binary"]),
   available: z.boolean(),
   kind: z.enum(["built_in", "external"]),
+  profile: z.enum(["docling", "marker", "external"]).nullable().optional(),
   reason: z.string().nullable().optional(),
 });
 

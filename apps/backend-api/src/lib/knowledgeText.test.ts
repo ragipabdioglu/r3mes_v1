@@ -13,12 +13,15 @@ import {
 describe("knowledge parser adapters", () => {
   const originalParserCommand = process.env.R3MES_DOCUMENT_PARSER_COMMAND;
   const originalParserArgs = process.env.R3MES_DOCUMENT_PARSER_ARGS;
+  const originalParserProfile = process.env.R3MES_DOCUMENT_PARSER_PROFILE;
 
   afterEach(() => {
     if (originalParserCommand === undefined) delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
     else process.env.R3MES_DOCUMENT_PARSER_COMMAND = originalParserCommand;
     if (originalParserArgs === undefined) delete process.env.R3MES_DOCUMENT_PARSER_ARGS;
     else process.env.R3MES_DOCUMENT_PARSER_ARGS = originalParserArgs;
+    if (originalParserProfile === undefined) delete process.env.R3MES_DOCUMENT_PARSER_PROFILE;
+    else process.env.R3MES_DOCUMENT_PARSER_PROFILE = originalParserProfile;
   });
 
   it("lists stable built-in parser adapters", () => {
@@ -82,6 +85,32 @@ describe("knowledge parser adapters", () => {
     expect(withExternal.find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
       available: true,
       reason: null,
+    });
+  });
+
+  it("reports the configured external parser profile without making it a hard dependency", () => {
+    process.env.R3MES_DOCUMENT_PARSER_PROFILE = "docling";
+    delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
+
+    expect(listKnowledgeParserCapabilities().find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
+      available: false,
+      profile: "docling",
+      reason: expect.stringContaining("docling"),
+    });
+
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    expect(listKnowledgeParserCapabilities().find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
+      available: true,
+      profile: "docling",
+      reason: null,
+    });
+  });
+
+  it("falls back to the generic external parser profile for unknown profile values", () => {
+    process.env.R3MES_DOCUMENT_PARSER_PROFILE = "custom-lab-parser";
+
+    expect(listKnowledgeParserCapabilities().find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
+      profile: "external",
     });
   });
 

@@ -19,14 +19,21 @@ function parseArgs() {
   return {
     file: resolve(root, file),
     failOnNoisy: process.argv.includes("--fail-on-noisy"),
+    failOnThin: process.argv.includes("--fail-on-thin"),
+    failOnStrictIneligible: process.argv.includes("--fail-on-strict-ineligible"),
   };
 }
 
 async function main() {
   const opts = parseArgs();
-  const [{ parseKnowledgeBuffer, chunkKnowledgeText, listKnowledgeParserAdapters }, { scoreKnowledgeParseQuality }] = await Promise.all([
+  const [
+    { parseKnowledgeBuffer, chunkKnowledgeText, listKnowledgeParserAdapters },
+    { scoreKnowledgeParseQuality },
+    { buildIngestionQualityReport },
+  ] = await Promise.all([
     import(pathToFileURL(resolve(backendRoot, "dist/lib/knowledgeText.js")).href),
     import(pathToFileURL(resolve(backendRoot, "dist/lib/knowledgeParseQuality.js")).href),
+    import(pathToFileURL(resolve(backendRoot, "dist/lib/knowledgeAutoMetadata.js")).href),
   ]);
   const buffer = await readFile(opts.file);
   const parsed = parseKnowledgeBuffer(basename(opts.file), buffer);
@@ -37,12 +44,18 @@ async function main() {
     text: parsed.text,
     chunks,
   });
+  const sourceQuality = quality.level === "clean" ? "structured" : quality.level === "usable" ? "inferred" : "thin";
+  const ingestionQuality = buildIngestionQualityReport({
+    parseQuality: quality,
+    sourceQuality,
+  });
   const report = {
     file: opts.file,
     parser: parsed.parser,
     sourceType: parsed.sourceType,
     diagnostics: parsed.diagnostics,
     parseQuality: quality,
+    ingestionQuality,
     chunkCount: chunks.length,
     chunkPreview: chunks.slice(0, 3).map((chunk) => ({
       chunkIndex: chunk.chunkIndex,
@@ -52,7 +65,12 @@ async function main() {
     availableParsers: listKnowledgeParserAdapters(),
   };
   console.log(JSON.stringify(report, null, 2));
-  process.exitCode = opts.failOnNoisy && quality.level === "noisy" ? 2 : 0;
+  process.exitCode =
+    (opts.failOnNoisy && quality.level === "noisy") ||
+    (opts.failOnThin && ingestionQuality.thinSource) ||
+    (opts.failOnStrictIneligible && !ingestionQuality.strictRouteEligible)
+      ? 2
+      : 0;
 }
 
 main().catch((error) => {
