@@ -1138,6 +1138,18 @@ function financeLineItemScore(query: string, sentence: string): number {
   return score;
 }
 
+function evidenceMaxFactSentences(): number {
+  return parsePositiveInt(process.env.R3MES_EVIDENCE_MAX_FACT_SENTENCES, 6);
+}
+
+function isStructuredEvidenceSentence(sentence: string): boolean {
+  return /^(?:Topic|Tags|Source Summary|Key Takeaway|Patient Summary|Clinical Takeaway|Safe Guidance|Red Flags|Do Not Infer|Başlık|Etiketler|Temel Bilgi|Triage|Uyarı Bulguları|Çıkarım Yapma)\s*:/iu.test(sentence);
+}
+
+function isRiskEvidenceSentence(sentence: string): boolean {
+  return /\b(?:risk|dikkat|acil|şiddetli|siddetli|uyarı|uyari|kesin|çıkarım|cikarim|do not infer)\b/iu.test(sentence);
+}
+
 function pickRelevantSentences(query: string, text: string, maxChars: number): {
   text: string;
   candidateSentenceCount: number;
@@ -1148,20 +1160,31 @@ function pickRelevantSentences(query: string, text: string, maxChars: number): {
   const parts = sentenceParts(text);
   const scored = parts
     .map((sentence, index) => {
-      const sentenceTokens = tokenize(sentence);
+      const sentenceTokens = Array.from(new Set([
+        ...tokenize(sentence),
+        ...buildExpandedQueryTokens(sentence, null, 64),
+      ]));
       const overlap = sentenceTokens.filter((token) => queryTokens.has(token)).length;
-      const structureBonus = /^(?:Topic|Tags|Source Summary|Key Takeaway|Patient Summary|Clinical Takeaway|Safe Guidance|Red Flags|Do Not Infer|Başlık|Etiketler|Temel Bilgi|Triage|Uyarı Bulguları|Çıkarım Yapma)\s*:/iu.test(sentence)
-        ? 2
-        : 0;
-      const riskBonus = /\b(?:risk|dikkat|acil|şiddetli|siddetli|uyarı|uyari|kesin|çıkarım|cikarim|do not infer)\b/iu.test(sentence)
-        ? 1
-        : 0;
-      return { sentence, index, score: overlap * 3 + structureBonus + riskBonus + financeLineItemScore(query, sentence) };
+      const structureBonus = isStructuredEvidenceSentence(sentence) ? 2 : 0;
+      const riskBonus = isRiskEvidenceSentence(sentence) ? 1 : 0;
+      const financeScore = financeLineItemScore(query, sentence);
+      const isEarlyMetadata = structureBonus > 0 && index <= 2;
+      const keep =
+        overlap > 0 ||
+        financeScore > 0 ||
+        isEarlyMetadata ||
+        (riskBonus > 0 && overlap > 0);
+      return {
+        sentence,
+        index,
+        overlap,
+        score: keep ? overlap * 4 + structureBonus + riskBonus + financeScore : 0,
+      };
     })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  const selected = scored.slice(0, 8).sort((a, b) => a.index - b.index).map((item) => item.sentence);
+  const selected = scored.slice(0, evidenceMaxFactSentences()).sort((a, b) => a.index - b.index).map((item) => item.sentence);
   const fallback = parts.slice(0, 6);
   const lines = (selected.length > 0 ? selected : fallback);
   let out = "";

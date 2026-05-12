@@ -531,4 +531,44 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.text).not.toContain("kasık ağrısı");
     expect(result.diagnostics.droppedSentenceCount).toBeGreaterThan(0);
   });
+
+  it("keeps only query-aligned fact sentences after initial metadata", () => {
+    vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "420");
+    vi.stubEnv("R3MES_EVIDENCE_MAX_FACT_SENTENCES", "5");
+    const mixedCandidate = candidate({
+      id: "mixed-facts",
+      title: "karma runbook",
+      content: [
+        "Topic: migration runbook",
+        "Tags: technical, migration, rollback",
+        "Source Summary: Migration öncesi yedek ve rollback planı doğrulanmalıdır.",
+        "Bu cümle ofis içi izin takvimi ve yemek listesi hakkındadır.",
+        "Rollback planı staging ortamında denenmelidir.",
+        "Bu cümle kira depozitosu ve velayet anlaşması hakkındadır.",
+        "Yedeksiz işlem veri kaybı riski oluşturabilir.",
+      ].join("\n"),
+    });
+    mixedCandidate.card = {
+      topic: "migration runbook",
+      tags: ["technical", "migration", "rollback"],
+      patientSummary: "Migration öncesi yedek ve rollback planı doğrulanmalıdır.",
+      clinicalTakeaway: "Rollback planı staging ortamında denenmelidir.",
+      safeGuidance: "Bu cümle ofis içi izin takvimi ve yemek listesi hakkındadır.",
+      redFlags: "Yedeksiz işlem veri kaybı riski oluşturabilir.",
+      doNotInfer: "Bu cümle kira depozitosu ve velayet anlaşması hakkındadır.",
+    };
+    const result = buildPrunedEvidenceInputWithDiagnostics({
+      query: "Production migration için rollback ve yedek kontrolü nasıl yapılır?",
+      budgetMode: "fast_grounded",
+      candidate: mixedCandidate,
+    });
+
+    expect(result.text).toContain("migration");
+    expect(result.text).toContain("rollback");
+    expect(result.text).toContain("Yedeksiz işlem");
+    expect(result.text).not.toContain("yemek listesi");
+    expect(result.text).not.toContain("kira depozitosu");
+    expect(result.diagnostics.selectedSentenceCount).toBeLessThanOrEqual(5);
+    expect(result.diagnostics.droppedSentenceCount).toBeGreaterThan(0);
+  });
 });
