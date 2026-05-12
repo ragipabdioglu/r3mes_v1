@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
+import { buildCompiledEvidenceBrief, buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import type { KnowledgeCard } from "./knowledgeCard.js";
 
 function card(overrides: Partial<KnowledgeCard>): KnowledgeCard {
@@ -62,6 +62,34 @@ describe("buildGroundedBrief", () => {
     expect(brief).toContain("DESTEKLEYICI BAGLAM:");
     expect(brief).toContain("BELIRSIZ / KULLANILAMAYAN:");
     expect(brief).toContain("RED FLAGS:");
+    expect(brief).toContain("source-a: migration-card");
+  });
+
+  it("builds a standardized compiled-evidence brief for model synthesis", () => {
+    const brief = buildCompiledEvidenceBrief(
+      {
+        facts: ["source-a: Rollback planı hazırlanmalıdır.", "source-a: Staging ortamında denenmelidir."],
+        risks: ["source-a: Yedeksiz işlem risklidir."],
+        unknowns: ["source-a: Kesin süre kaynakta yok."],
+        contradictions: ["source-b: Kaynaklar arasında çelişki sinyali var."],
+        sourceIds: ["source-a", "source-b"],
+        confidence: "low",
+        usableFactCount: 2,
+        riskFactCount: 1,
+        unknownCount: 1,
+        contradictionCount: 1,
+      },
+      {
+        answerIntent: "steps",
+        sourceRefs: [{ id: "source-a", title: "migration-card" }],
+      },
+    );
+
+    expect(brief).toContain("GROUNDING DURUMU: LOW");
+    expect(brief).toContain("KULLANILABILIR GERCEKLER:");
+    expect(brief).toContain("RISK / DIKKAT:");
+    expect(brief).toContain("CELISKI SINYALLERI:");
+    expect(brief).toContain("kesin konuşma");
     expect(brief).toContain("source-a: migration-card");
   });
 });

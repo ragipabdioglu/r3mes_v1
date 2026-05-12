@@ -3,7 +3,7 @@ import type { ChatSourceCitation } from "@r3mes/shared-types";
 import { getAlignmentConfig } from "./alignmentConfig.js";
 import type { GroundingConfidence } from "./answerSchema.js";
 import { compileEvidence, type CompiledEvidence } from "./compiledEvidence.js";
-import { buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
+import { buildCompiledEvidenceBrief, buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
 import { normalizeConceptText } from "./conceptNormalizer.js";
@@ -1669,7 +1669,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   const brief =
     getRagContextMode() === "detailed"
       ? renderDetailedEvidenceBrief(evidenceRun.output, { groundingConfidence, lowGroundingConfidence })
-      : evidenceRun.output.usableFacts.length > 0 || evidenceRun.output.notSupported.length > 0
+      : compiledEvidence.usableFactCount > 0 || compiledEvidence.unknownCount > 0
+        ? buildCompiledEvidenceBrief(compiledEvidence, {
+            groundingConfidence: compiledEvidence.confidence,
+            lowGroundingConfidence: compiledEvidence.confidence === "low",
+            answerIntent: evidenceRun.output.answerIntent,
+            sourceRefs,
+          })
+        : evidenceRun.output.usableFacts.length > 0 || evidenceRun.output.notSupported.length > 0
         ? buildEvidenceGroundedBrief(evidenceRun.output, {
             groundingConfidence,
             lowGroundingConfidence,

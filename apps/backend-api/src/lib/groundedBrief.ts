@@ -1,5 +1,6 @@
 import type { KnowledgeCard } from "./knowledgeCard.js";
 import type { GroundingConfidence } from "./answerSchema.js";
+import type { CompiledEvidence } from "./compiledEvidence.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 interface GroundedBriefOptions {
@@ -71,6 +72,40 @@ export function buildEvidenceGroundedBrief(
   lines.push("- Belirsiz/kullanılamayan bilgiden tanı, karar veya neden üretme.");
   lines.push("- Emin değilsen bunu açıkça söyle.");
   lines.push("- Kısa, sade ve güvenli kal.");
+  return lines.join("\n");
+}
+
+export function buildCompiledEvidenceBrief(
+  evidence: CompiledEvidence,
+  opts: GroundedBriefOptions = {},
+): string {
+  const groundingConfidence = opts.groundingConfidence ?? evidence.confidence;
+  const lines: string[] = [`GROUNDING DURUMU: ${groundingConfidence.toUpperCase()}`];
+  lines.push(`CEVAP NIYETI: ${opts.answerIntent ?? "explain"}`);
+
+  bulletSection(lines, "KULLANILABILIR GERCEKLER:", evidence.facts, 4);
+  bulletSection(lines, "RISK / DIKKAT:", evidence.risks, 3);
+  bulletSection(lines, "BELIRSIZ / KULLANILAMAYAN:", evidence.unknowns, 3);
+  bulletSection(lines, "CELISKI SINYALLERI:", evidence.contradictions, 2);
+
+  if (opts.sourceRefs && opts.sourceRefs.length > 0) {
+    lines.push("KAYNAK KIMLIKLARI:");
+    for (const ref of opts.sourceRefs.slice(0, 2)) {
+      lines.push(`- ${ref.id}: ${ref.title}`);
+    }
+  } else if (evidence.sourceIds.length > 0) {
+    lines.push("KAYNAK KIMLIKLARI:");
+    for (const sourceId of evidence.sourceIds.slice(0, 2)) {
+      lines.push(`- ${sourceId}`);
+    }
+  }
+
+  lines.push("YANIT KURALLARI:");
+  lines.push("- Yalnızca kullanılabilir gerçeklere dayan.");
+  lines.push("- Riskleri karar gibi değil, dikkat edilmesi gereken durum gibi açıkla.");
+  lines.push("- Belirsiz/kullanılamayan bilgiden tanı, karar, süre, fiyat veya neden uydurma.");
+  lines.push("- Çelişki sinyali varsa kesin konuşma; kaynaklarda tutarsızlık olduğunu söyle.");
+  lines.push("- Kısa, doğal ve kullanıcı diline yakın kal.");
   return lines.join("\n");
 }
 
