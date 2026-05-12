@@ -189,6 +189,17 @@ function evidenceHasOnlyScopeExclusion(evidence: EvidenceExtractorOutput): boole
   ].some((term) => notSupported.includes(normalizeConceptText(term)));
 }
 
+function evidenceHasUsableGrounding(evidence: EvidenceExtractorOutput): boolean {
+  return evidence.usableFacts.length > 0 || evidence.directAnswerFacts.length > 0 || evidence.supportingContext.length > 0;
+}
+
+function filterSourcesByEvidence(sources: ChatSourceCitation[], evidence: EvidenceExtractorOutput): ChatSourceCitation[] {
+  if (!evidenceHasUsableGrounding(evidence)) return [];
+  const usedSourceIds = new Set(evidence.sourceIds);
+  if (usedSourceIds.size === 0) return [];
+  return sources.filter((source) => usedSourceIds.has(source.documentId));
+}
+
 function emptyAlignmentDiagnostics(overrides: Partial<AlignmentDiagnostics> = {}): AlignmentDiagnostics {
   const config = getAlignmentConfig();
   return {
@@ -1595,13 +1606,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     userQuery: evidenceQuery,
     cards: evidenceCards,
   });
-  const sourceRefs = finalCandidates.map(({ chunk }) => ({ id: chunk.documentId, title: chunk.document.title }));
+  const filteredSources = filterSourcesByEvidence(sources, evidenceRun.output);
+  const sourceRefs = filteredSources.map((source) => ({ id: source.documentId, title: source.title }));
   const compiledEvidence = compileEvidence({
     evidence: evidenceRun.output,
     sourceRefs,
     groundingConfidence,
   });
-  if (evidenceHasOnlyScopeExclusion(evidenceRun.output)) {
+  if (evidenceHasOnlyScopeExclusion(evidenceRun.output) || !evidenceHasUsableGrounding(evidenceRun.output)) {
     const scopedOutAlignmentDiagnostics = {
       ...finalAlignmentDiagnostics,
       droppedCandidateCount: finalAlignmentDiagnostics.droppedCandidateCount + finalCandidates.length,
@@ -1660,10 +1672,10 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
             },
           );
 
-  const contextText = finalCandidates.length > 0 ? brief : "";
+  const contextText = filteredSources.length > 0 ? brief : "";
   return {
     contextText,
-    sources,
+    sources: filteredSources,
     lowGroundingConfidence,
     groundingConfidence,
     evidence: evidenceRun.output,
@@ -1674,14 +1686,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       dedupedCandidateCount: deduped.length,
       preRankedCandidateCount: preRanked.length,
       rerankedCandidateCount: reranked.length,
-      finalCandidateCount: finalCandidates.length,
+      finalCandidateCount: filteredSources.length,
       alignment: finalAlignmentDiagnostics,
       reranker: rerankRun.diagnostics,
       budget: buildBudgetDiagnostics({
         budgetMode,
         requestedSourceLimit,
         finalSourceLimit: limit,
-        finalSourceCount: finalCandidates.length,
+        finalSourceCount: filteredSources.length,
         contextText,
         evidenceInputChars,
         evidencePrunedInputChars,

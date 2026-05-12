@@ -483,6 +483,7 @@ Do Not Infer: Kaynakta açık dayanak yoksa baş ağrısı nedeni çıkarma.`,
     });
 
     expect(extraction.usableFacts).toEqual([]);
+    expect(extraction.sourceIds).toEqual([]);
     expect(extraction.notSupported.join(" ")).toContain("doğrudan dayanak");
   });
 

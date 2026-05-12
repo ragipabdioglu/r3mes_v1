@@ -1269,6 +1269,12 @@ export function buildDeterministicEvidenceExtraction(
 
   for (const card of input.cards) {
     const sourceLabel = card.title || card.sourceId;
+    if (cardHasQueryScopedExclusion(card, queryTokens)) {
+      uncertainOrUnusable.push(
+        compactEvidenceLine(evidenceLine(sourceLabel, "Kaynak kendi kapsamına göre bu soruya doğrudan dayanak olmadığını belirtiyor.")),
+      );
+      continue;
+    }
     sourceIds.push(card.sourceId);
     if (asksForSourceTitleEvidence(input.userQuery)) {
       const titleEvidence = buildSourceTitleEvidence(sourceLabel);
@@ -1277,12 +1283,6 @@ export function buildDeterministicEvidenceExtraction(
         usableFacts.push(line);
         directAnswerFacts.push(line);
       }
-    }
-    if (cardHasQueryScopedExclusion(card, queryTokens)) {
-      uncertainOrUnusable.push(
-        compactEvidenceLine(evidenceLine(sourceLabel, "Kaynak kendi kapsamına göre bu soruya doğrudan dayanak olmadığını belirtiyor.")),
-      );
-      continue;
     }
 
     for (const section of cardSections(card)) {
