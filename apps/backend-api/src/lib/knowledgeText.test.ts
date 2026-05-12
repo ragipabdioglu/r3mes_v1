@@ -202,4 +202,27 @@ describe("knowledge parser adapters", () => {
       expect(chunk.content).toContain("| --- | --- |");
     }
   });
+
+  it("preserves heading context when splitting embedded markdown tables", () => {
+    const table = [
+      "# KAP Kar Dağıtım Tablosu",
+      "Bildirim: EREGL 1578858",
+      "| Satır | Tutar |",
+      "| --- | --- |",
+      "| Net dönem kârı | 511.801.109 |",
+      "| Olağanüstü yedekler | 3.850.000.000 |",
+      "| Dağıtılması öngörülen diğer kaynaklar | 3.352.908.083 |",
+      "| Bağışlar eklenmiş net dağıtılabilir dönem kârı | 579.151.463 |",
+    ].join("\n");
+
+    const chunks = chunkKnowledgeText(table, 160);
+    const tableChunks = chunks.filter((chunk) => chunk.content.includes("| Satır | Tutar |"));
+
+    expect(tableChunks.length).toBeGreaterThan(1);
+    for (const chunk of tableChunks) {
+      expect(chunk.content).toContain("Bildirim: EREGL 1578858");
+      expect(chunk.content).toContain("| Satır | Tutar |");
+      expect(chunk.content).toContain("| --- | --- |");
+    }
+  });
 });

@@ -437,12 +437,18 @@ function splitMarkdownTable(text: string, maxChars: number): string[] {
   return chunks;
 }
 
-function splitOversizedText(text: string, maxChars: number): string[] {
-  const tableChunks = splitMarkdownTable(text, maxChars);
-  if (tableChunks.length > 0) {
-    return tableChunks;
+function tableContextFromLines(lines: string[]): string {
+  const candidates = lines
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-4);
+  while (candidates.join("\n").length > 420 && candidates.length > 1) {
+    candidates.shift();
   }
+  return candidates.join("\n");
+}
 
+function splitPlainOversizedText(text: string, maxChars: number): string[] {
   const sentences = text
     .split(/(?<=[.!?])\s+/)
     .map((part) => part.trim())
@@ -476,6 +482,63 @@ function splitOversizedText(text: string, maxChars: number): string[] {
   }
 
   return chunks;
+}
+
+function splitEmbeddedMarkdownTables(text: string, maxChars: number): string[] {
+  const lines = text.split(/\r?\n/);
+  const chunks: string[] = [];
+  let proseLines: string[] = [];
+  let foundTable = false;
+
+  const flushProse = () => {
+    const prose = proseLines.join("\n").trim();
+    if (prose) chunks.push(...splitPlainOversizedText(prose, maxChars));
+    proseLines = [];
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]?.trim() ?? "";
+    const next = lines[i + 1]?.trim() ?? "";
+    if (MARKDOWN_TABLE_LINE_PATTERN.test(line) && MARKDOWN_TABLE_SEPARATOR_PATTERN.test(next)) {
+      foundTable = true;
+      const context = tableContextFromLines(proseLines);
+      flushProse();
+
+      const tableLines = [line, next];
+      i += 2;
+      while (i < lines.length && MARKDOWN_TABLE_LINE_PATTERN.test(lines[i]?.trim() ?? "")) {
+        tableLines.push(lines[i]?.trim() ?? "");
+        i += 1;
+      }
+      i -= 1;
+
+      const tableBudget = context ? Math.max(180, maxChars - context.length - 2) : maxChars;
+      const tableChunks = splitMarkdownTable(tableLines.join("\n"), tableBudget);
+      for (const tableChunk of tableChunks) {
+        chunks.push(context ? `${context}\n\n${tableChunk}` : tableChunk);
+      }
+      continue;
+    }
+
+    proseLines.push(lines[i] ?? "");
+  }
+
+  flushProse();
+  return foundTable ? chunks.filter(Boolean) : [];
+}
+
+function splitOversizedText(text: string, maxChars: number): string[] {
+  const tableChunks = splitMarkdownTable(text, maxChars);
+  if (tableChunks.length > 0) {
+    return tableChunks;
+  }
+
+  const embeddedTableChunks = splitEmbeddedMarkdownTables(text, maxChars);
+  if (embeddedTableChunks.length > 0) {
+    return embeddedTableChunks;
+  }
+
+  return splitPlainOversizedText(text, maxChars);
 }
 
 function splitRecordSection(section: string, maxChars: number): string[] {
