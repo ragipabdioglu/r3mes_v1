@@ -30,6 +30,12 @@ interface KnowledgeMetadataProfile {
   questionsAnswered: string[];
   confidence?: "low" | "medium" | "high";
   sourceQuality?: "structured" | "inferred" | "thin";
+  ingestionQuality?: {
+    tableRisk?: "none" | "low" | "medium" | "high";
+    ocrRisk?: "none" | "low" | "medium" | "high";
+    thinSource?: boolean;
+    strictRouteEligible?: boolean;
+  };
 }
 
 export interface KnowledgeCollectionAccessItem {
@@ -80,6 +86,7 @@ function readMetadataProfile(
   const record = value as Record<string, unknown>;
   const stringArray = (input: unknown): string[] =>
     Array.isArray(input) ? input.filter((item): item is string => typeof item === "string") : [];
+  const ingestionQuality = readIngestionQuality(record.ingestionQuality);
   const profile = record.profile && typeof record.profile === "object" ? record.profile as Record<string, unknown> : null;
   if (profile) {
     const domains = stringArray(profile.domains);
@@ -110,6 +117,7 @@ function readMetadataProfile(
         questionsAnswered: stringArray(profile.sampleQuestions),
         confidence: profile.confidence === "high" || profile.confidence === "medium" || profile.confidence === "low" ? profile.confidence : undefined,
         sourceQuality: profile.sourceQuality === "structured" || profile.sourceQuality === "inferred" || profile.sourceQuality === "thin" ? profile.sourceQuality : undefined,
+        ingestionQuality,
       };
     }
   }
@@ -126,12 +134,13 @@ function readMetadataProfile(
     tableConcepts: [],
     summary: typeof record.summary === "string" ? record.summary : "",
     questionsAnswered: stringArray(record.questionsAnswered),
+    ingestionQuality,
   };
 }
 
 function readProfileVersionMetadata(value: unknown): Pick<
   KnowledgeMetadataProfile,
-  "profileVersion" | "lastProfiledAt" | "sourceQuality" | "confidence" | "tableConcepts"
+  "profileVersion" | "lastProfiledAt" | "sourceQuality" | "confidence" | "tableConcepts" | "ingestionQuality"
 > | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -150,6 +159,20 @@ function readProfileVersionMetadata(value: unknown): Pick<
       ? profile.confidence
       : undefined,
     tableConcepts: stringArray(profile.tableConcepts),
+    ingestionQuality: readIngestionQuality(record.ingestionQuality),
+  };
+}
+
+function readIngestionQuality(value: unknown): KnowledgeMetadataProfile["ingestionQuality"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const validRisk = (input: unknown): "none" | "low" | "medium" | "high" | undefined =>
+    input === "none" || input === "low" || input === "medium" || input === "high" ? input : undefined;
+  return {
+    tableRisk: validRisk(record.tableRisk),
+    ocrRisk: validRisk(record.ocrRisk),
+    thinSource: typeof record.thinSource === "boolean" ? record.thinSource : undefined,
+    strictRouteEligible: typeof record.strictRouteEligible === "boolean" ? record.strictRouteEligible : undefined,
   };
 }
 
@@ -227,6 +250,10 @@ function collectionProfileVersion(value: unknown): string {
     profile?.lastProfiledAt ?? "",
     profile?.sourceQuality ?? "",
     profile?.confidence ?? "",
+    profile?.ingestionQuality?.strictRouteEligible === false ? "strict:false" : "",
+    profile?.ingestionQuality?.thinSource === true ? "thin:true" : "",
+    profile?.ingestionQuality?.ocrRisk ?? "",
+    profile?.ingestionQuality?.tableRisk ?? "",
     profile?.tableConcepts.slice(0, 8).join("|") ?? "",
   ].join(":");
 }
@@ -354,6 +381,18 @@ export function readKnowledgeCollectionSourceQuality(
   collection: KnowledgeCollectionAccessItem,
 ): "structured" | "inferred" | "thin" | null {
   return readProfileVersionMetadata(collection.autoMetadata)?.sourceQuality ?? null;
+}
+
+export function readKnowledgeCollectionStrictRouteEligible(
+  collection: KnowledgeCollectionAccessItem,
+): boolean {
+  const metadata = readProfileVersionMetadata(collection.autoMetadata);
+  if (metadata?.sourceQuality === "thin") return false;
+  const ingestionQuality = metadata?.ingestionQuality;
+  if (ingestionQuality?.strictRouteEligible === false) return false;
+  if (ingestionQuality?.thinSource === true) return false;
+  if (ingestionQuality?.ocrRisk === "high") return false;
+  return true;
 }
 
 function normalizeProfileDomain(value: string): AnswerDomain | null {
@@ -654,10 +693,25 @@ function routeHintScoreWeight(): number {
 }
 
 function sourceQualityScore(profile: KnowledgeMetadataProfile): number {
-  if (profile.sourceQuality === "structured") return 100;
-  if (profile.sourceQuality === "inferred") return 65;
-  if (profile.sourceQuality === "thin") return 20;
-  return profile.confidence === "high" ? 75 : profile.confidence === "medium" ? 55 : 35;
+  const base =
+    profile.sourceQuality === "structured"
+      ? 100
+      : profile.sourceQuality === "inferred"
+        ? 65
+        : profile.sourceQuality === "thin"
+          ? 20
+          : profile.confidence === "high"
+            ? 75
+            : profile.confidence === "medium"
+              ? 55
+              : 35;
+  const ingestionQuality = profile.ingestionQuality;
+  if (!ingestionQuality) return base;
+  if (ingestionQuality.strictRouteEligible === false || ingestionQuality.thinSource === true) return Math.min(base, 28);
+  if (ingestionQuality.ocrRisk === "high") return Math.min(base, 30);
+  if (ingestionQuality.ocrRisk === "medium") return Math.min(base, 55);
+  if (ingestionQuality.tableRisk === "high") return Math.max(0, base - 4);
+  return base;
 }
 
 function profileEmbeddingScore(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number | null {
@@ -1041,10 +1095,11 @@ export function collectionHasSpecificRouteSupport(
   query?: string,
 ): boolean {
   if (!routePlan || routePlan.domain === "general") return true;
+  if (!readKnowledgeCollectionStrictRouteEligible(collection)) return false;
 
   const queryProfileScore = bestQueryProfileScore(collection, query);
   const routeProfileScore = bestRouteProfileScore(collection, routePlan, query);
-  if (Math.max(queryProfileScore, routeProfileScore) >= 70 && readKnowledgeCollectionSourceQuality(collection) !== "thin") {
+  if (Math.max(queryProfileScore, routeProfileScore) >= 70 && readKnowledgeCollectionStrictRouteEligible(collection)) {
     return true;
   }
 

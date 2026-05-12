@@ -555,6 +555,54 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(reason).toContain("temkinli");
   });
 
+  it("keeps noisy ingestion profiles out of strict route support", async () => {
+    const {
+      collectionHasSpecificRouteSupport,
+      readKnowledgeCollectionStrictRouteEligible,
+      rankMetadataRouteCandidates,
+    } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "Sözleşmedeki cezai şart için hangi belgeye bakmalıyım?";
+    const routePlan = routeQuery(query);
+    const collection = {
+      id: "noisy-contract-upload",
+      name: "OCR sözleşme notu",
+      visibility: "PRIVATE" as const,
+      autoMetadata: {
+        ingestionQuality: {
+          tableRisk: "none",
+          ocrRisk: "high",
+          thinSource: true,
+          strictRouteEligible: false,
+        },
+        profile: {
+          profileVersion: 3,
+          domains: ["legal"],
+          subtopics: ["sozlesme"],
+          keywords: ["sözleşme", "cezai şart"],
+          entities: [],
+          topicPhrases: ["cezai şart"],
+          answerableConcepts: ["sözleşmede cezai şart"],
+          sampleQuestions: ["Sözleşmedeki cezai şart için hangi belgeye bakmalıyım?"],
+          summary: "OCR kaynaklı sözleşme notu.",
+          sourceQuality: "structured",
+          confidence: "high",
+          profileEmbedding: embedKnowledgeText("sözleşme cezai şart belge"),
+          sampleQuestionsEmbedding: embedKnowledgeText(query),
+        },
+      },
+      documents: [],
+    };
+
+    const candidates = rankMetadataRouteCandidates({ routePlan, query, collections: [collection], limit: 1 });
+
+    expect(candidates[0]?.scoreBreakdown?.signals.sourceQuality).toBeLessThanOrEqual(30);
+    expect(readKnowledgeCollectionStrictRouteEligible(collection)).toBe(false);
+    expect(collectionHasSpecificRouteSupport(collection, routePlan, query)).toBe(false);
+  });
+
   it("uses profile v3 table concepts when suggesting data-heavy collections", async () => {
     const { rankMetadataRouteCandidates, rankSuggestedKnowledgeCollections } = await import("./knowledgeAccess.js");
     const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");

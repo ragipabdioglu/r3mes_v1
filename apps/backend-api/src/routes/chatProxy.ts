@@ -24,6 +24,7 @@ import {
   inferKnowledgeCollectionAnswerDomain,
   rankMetadataRouteCandidates,
   rankSuggestedKnowledgeCollections,
+  readKnowledgeCollectionStrictRouteEligible,
   readKnowledgeCollectionSourceQuality,
   resolveAccessibleKnowledgeCollections,
   resolveSuggestibleKnowledgeCollections,
@@ -246,7 +247,10 @@ function buildSourceSelectionSummary(opts: {
       .map((candidate) => candidate.id),
     ...groundedCollectionIds.filter((id) => {
       const collection = opts.suggestibleCollections.find((item) => item.id === id);
-      return collection ? readKnowledgeCollectionSourceQuality(collection) === "thin" : false;
+      return collection
+        ? readKnowledgeCollectionSourceQuality(collection) === "thin" ||
+            !readKnowledgeCollectionStrictRouteEligible(collection)
+        : false;
     }),
   ]);
   const suggestedCollections = [...rankedSuggestedCollections]
@@ -272,7 +276,7 @@ function buildSourceSelectionSummary(opts: {
     groundedCollectionIds.some((id) => {
       const collection = opts.suggestibleCollections.find((item) => item.id === id);
       const candidate = metadataCandidateById.get(id);
-      if (candidate && candidate.sourceQuality !== "thin" && candidate.score >= 70) return true;
+      if (candidate && candidate.sourceQuality !== "thin" && candidate.score >= 70 && (!collection || readKnowledgeCollectionStrictRouteEligible(collection))) return true;
       return collection ? collectionHasSpecificRouteSupport(collection, opts.routePlan, opts.query) : false;
     });
   const warning =

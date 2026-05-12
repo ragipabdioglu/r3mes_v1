@@ -26,6 +26,12 @@ describe("buildQdrantPayloadMetadata", () => {
         subtopics: ["dilekce"],
         keywords: ["delil"],
         riskLevel: "medium",
+        ingestionQuality: {
+          tableRisk: "high",
+          ocrRisk: "none",
+          thinSource: false,
+          strictRouteEligible: true,
+        },
       },
       chunkMetadata: {
         keywords: ["gelir belgesi"],
@@ -42,6 +48,10 @@ describe("buildQdrantPayloadMetadata", () => {
     expect(metadata.keywords).toEqual(expect.arrayContaining(["nafaka", "protokol", "delil", "gelir belgesi"]));
     expect(metadata.entities).toEqual(["aile mahkemesi"]);
     expect(metadata.sourceQuality).toBe("structured");
+    expect(metadata.tableRisk).toBe("high");
+    expect(metadata.ocrRisk).toBe("none");
+    expect(metadata.thinSource).toBe(false);
+    expect(metadata.strictRouteEligible).toBe(true);
     expect(metadata.metadataConfidence).toBe("high");
     expect(metadata.collectionProfileVersion).toBe(3);
     expect(metadata.collectionProfileTextHash).toBe("abc123");
@@ -64,10 +74,37 @@ describe("buildQdrantPayloadMetadata", () => {
       subtopics: ["migration"],
       tags: ["rollback"],
       sourceQuality: "thin",
+      tableRisk: "none",
+      ocrRisk: "none",
+      thinSource: false,
+      strictRouteEligible: true,
       metadataConfidence: "low",
       collectionProfileVersion: 0,
       collectionProfileTextHash: "",
       riskLevel: "low",
+    });
+  });
+
+  it("marks noisy ingestion metadata as not eligible for strict route payloads", () => {
+    const metadata = buildQdrantPayloadMetadata({
+      documentMetadata: {
+        sourceQuality: "inferred",
+        ingestionQuality: {
+          tableRisk: "low",
+          ocrRisk: "high",
+          thinSource: true,
+          strictRouteEligible: false,
+        },
+      },
+      fallbackDomain: "medical",
+    });
+
+    expect(metadata).toMatchObject({
+      sourceQuality: "inferred",
+      tableRisk: "low",
+      ocrRisk: "high",
+      thinSource: true,
+      strictRouteEligible: false,
     });
   });
 });

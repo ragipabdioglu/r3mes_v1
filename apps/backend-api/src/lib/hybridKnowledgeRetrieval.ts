@@ -670,6 +670,14 @@ function payloadToChunk(payload: QdrantKnowledgePayload): HybridKnowledgeChunk {
       answerableConcepts: payload.answerableConcepts ?? [],
       negativeHints: payload.negativeHints ?? [],
       sourceQuality: payload.sourceQuality,
+      ingestionQuality: {
+        version: 1,
+        tableRisk: payload.tableRisk ?? "none",
+        ocrRisk: payload.ocrRisk ?? "none",
+        thinSource: payload.thinSource === true,
+        strictRouteEligible: payload.strictRouteEligible !== false,
+        warnings: [],
+      },
       profile: {
         domains: payload.domains ?? [payload.domain],
         subtopics: payload.profileSubtopics ?? payload.subtopics,
@@ -713,8 +721,31 @@ function metadataText(value: unknown): string {
   return parts.filter((item): item is string => typeof item === "string").join(" ");
 }
 
+function strictRouteEligibleFromMetadata(value: unknown): boolean | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.sourceQuality === "thin") return false;
+  const ingestionQuality =
+    record.ingestionQuality && typeof record.ingestionQuality === "object"
+      ? record.ingestionQuality as Record<string, unknown>
+      : null;
+  if (!ingestionQuality) return null;
+  if (ingestionQuality.strictRouteEligible === false) return false;
+  if (ingestionQuality.thinSource === true) return false;
+  if (ingestionQuality.ocrRisk === "high") return false;
+  return true;
+}
+
+function candidateStrictRouteEligible(chunk: HybridKnowledgeChunk): boolean {
+  const chunkEligible = strictRouteEligibleFromMetadata(chunk.autoMetadata);
+  const documentEligible = strictRouteEligibleFromMetadata(chunk.document.autoMetadata);
+  if (chunkEligible === false || documentEligible === false) return false;
+  return true;
+}
+
 export function candidateMatchesRouteScope(card: KnowledgeCard, chunk: HybridKnowledgeChunk, routePlan?: DomainRoutePlan | null): boolean {
   if (!routePlan || routePlan.confidence === "low") return true;
+  if (!candidateStrictRouteEligible(chunk)) return false;
   const metadataHaystack = normalize([
     metadataText(chunk.autoMetadata),
     metadataText(chunk.document.autoMetadata),

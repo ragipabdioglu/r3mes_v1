@@ -29,6 +29,10 @@ export interface QdrantKnowledgePayload {
   audience: string;
   riskLevel: "low" | "medium" | "high";
   sourceQuality: "structured" | "inferred" | "thin";
+  tableRisk: "none" | "low" | "medium" | "high";
+  ocrRisk: "none" | "low" | "medium" | "high";
+  thinSource: boolean;
+  strictRouteEligible: boolean;
   metadataConfidence: "low" | "medium" | "high";
   collectionProfileVersion: number;
   collectionProfileTextHash: string;
@@ -101,6 +105,17 @@ function validConfidence(value: unknown): "low" | "medium" | "high" | null {
   return value === "low" || value === "medium" || value === "high" ? value : null;
 }
 
+function validIngestionRisk(value: unknown): "none" | "low" | "medium" | "high" | null {
+  return value === "none" || value === "low" || value === "medium" || value === "high" ? value : null;
+}
+
+function ingestionQuality(value: unknown): Record<string, unknown> | null {
+  const record = metadataRecord(value);
+  return record?.ingestionQuality && typeof record.ingestionQuality === "object"
+    ? record.ingestionQuality as Record<string, unknown>
+    : null;
+}
+
 function profileVersion(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
@@ -143,6 +158,10 @@ export function buildQdrantPayloadMetadata(opts: {
   | "audience"
   | "riskLevel"
   | "sourceQuality"
+  | "tableRisk"
+  | "ocrRisk"
+  | "thinSource"
+  | "strictRouteEligible"
   | "metadataConfidence"
   | "collectionProfileVersion"
   | "collectionProfileTextHash"
@@ -156,6 +175,31 @@ export function buildQdrantPayloadMetadata(opts: {
   const collectionProfile = metadataProfile(opts.collectionMetadata);
   const documentProfile = metadataProfile(opts.documentMetadata);
   const chunkProfile = metadataProfile(opts.chunkMetadata);
+  const collectionIngestion = ingestionQuality(opts.collectionMetadata);
+  const documentIngestion = ingestionQuality(opts.documentMetadata);
+  const chunkIngestion = ingestionQuality(opts.chunkMetadata);
+  const tableRisk =
+    validIngestionRisk(chunkIngestion?.tableRisk) ??
+    validIngestionRisk(documentIngestion?.tableRisk) ??
+    validIngestionRisk(collectionIngestion?.tableRisk) ??
+    "none";
+  const ocrRisk =
+    validIngestionRisk(chunkIngestion?.ocrRisk) ??
+    validIngestionRisk(documentIngestion?.ocrRisk) ??
+    validIngestionRisk(collectionIngestion?.ocrRisk) ??
+    "none";
+  const thinSource =
+    chunkIngestion?.thinSource === true ||
+    documentIngestion?.thinSource === true ||
+    collectionIngestion?.thinSource === true;
+  const strictRouteEligible =
+    chunkIngestion?.strictRouteEligible === false ||
+    documentIngestion?.strictRouteEligible === false ||
+    collectionIngestion?.strictRouteEligible === false ||
+    thinSource ||
+    ocrRisk === "high"
+      ? false
+      : true;
   const domains = uniqueStrings([
     ...stringArray(collectionProfile?.domains),
     ...stringArray(documentProfile?.domains),
@@ -229,6 +273,10 @@ export function buildQdrantPayloadMetadata(opts: {
       validSourceQuality(documentProfile?.sourceQuality) ??
       validSourceQuality(collectionProfile?.sourceQuality) ??
       "thin",
+    tableRisk,
+    ocrRisk,
+    thinSource,
+    strictRouteEligible,
     metadataConfidence:
       validConfidence(chunkProfile?.confidence) ??
       validConfidence(documentProfile?.confidence) ??
@@ -293,6 +341,8 @@ async function ensureQdrantPayloadIndexes(): Promise<void> {
     { field_name: "profileSubtopics", field_schema: "keyword" },
     { field_name: "keywords", field_schema: "keyword" },
     { field_name: "sourceQuality", field_schema: "keyword" },
+    { field_name: "tableRisk", field_schema: "keyword" },
+    { field_name: "ocrRisk", field_schema: "keyword" },
     { field_name: "metadataConfidence", field_schema: "keyword" },
     { field_name: "collectionProfileVersion", field_schema: "integer" },
     { field_name: "collectionProfileTextHash", field_schema: "keyword" },
