@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 const backendRoot = resolve(repoRoot, "apps/backend-api");
 const runner = resolve(backendRoot, "scripts/run-grounded-response-eval.mjs");
-const outFile = resolve(repoRoot, "artifacts/evals/production-rag/latest.json");
 
 const SUITES = [
   ["rag-quality-gates", "infrastructure/evals/rag-quality-gates/golden.jsonl"],
@@ -30,6 +29,12 @@ function argValues(name) {
     if (process.argv[i] === name && process.argv[i + 1]) values.push(process.argv[i + 1]);
   }
   return values;
+}
+
+function argValue(name, fallback) {
+  const index = process.argv.indexOf(name);
+  if (index === -1 || index + 1 >= process.argv.length) return fallback;
+  return process.argv[index + 1];
 }
 
 function hasFlag(name) {
@@ -111,6 +116,7 @@ function runSuite([id, file]) {
 
 const selected = new Set(argValues("--suite"));
 const suites = selected.size > 0 ? SUITES.filter(([id]) => selected.has(id)) : SUITES;
+const outFile = resolve(repoRoot, argValue("--out", "artifacts/evals/production-rag/latest.json"));
 const failOnWarn = hasFlag("--fail-on-warn");
 const dryRun = hasFlag("--dry-run");
 

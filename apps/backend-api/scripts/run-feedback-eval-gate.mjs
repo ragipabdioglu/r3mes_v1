@@ -21,17 +21,23 @@ const repoRoot = resolve(appRoot, "..", "..");
 const outFile = resolve(repoRoot, argValue("--out", "artifacts/evals/feedback-gate/latest.json"));
 const feedbackGolden = "artifacts/evals/feedback-regression/golden.jsonl";
 const feedbackOut = "artifacts/evals/feedback-regression/latest.json";
+const productionRagOut = "artifacts/evals/production-rag/feedback-gate.json";
 const baseUrl = argValue("--base-url", process.env.R3MES_BACKEND_URL || "http://127.0.0.1:3000");
 const requireApproved = hasArg("--require-approved");
 const quick = hasArg("--quick");
+const skipProductionRag = hasArg("--skip-production-rag");
 const commandTimeoutMs = Number(argValue("--timeout-ms", process.env.R3MES_FEEDBACK_GATE_TIMEOUT_MS || "240000"));
+const productionCommandTimeoutMs = Number(argValue(
+  "--production-timeout-ms",
+  process.env.R3MES_FEEDBACK_PRODUCTION_GATE_TIMEOUT_MS || "900000",
+));
 const applyRecordId = argValue("--apply-record-id", process.env.R3MES_FEEDBACK_APPLY_RECORD_ID || "");
 
 function commandToString(command, args) {
   return [command, ...args].join(" ");
 }
 
-function runCommand(name, command, args) {
+function runCommand(name, command, args, timeoutMs = commandTimeoutMs) {
   const started = Date.now();
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -43,7 +49,7 @@ function runCommand(name, command, args) {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const timeout = Number.isFinite(commandTimeoutMs) && commandTimeoutMs > 0
+    const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0
       ? setTimeout(() => {
           if (settled) return;
           settled = true;
@@ -55,11 +61,11 @@ function runCommand(name, command, args) {
             timedOut: true,
             exitCode: null,
             durationMs: Date.now() - started,
-            error: `command timed out after ${commandTimeoutMs}ms`,
+            error: `command timed out after ${timeoutMs}ms`,
             stdout: stdout.slice(-4000),
             stderr: stderr.slice(-4000),
           });
-        }, commandTimeoutMs)
+        }, timeoutMs)
       : null;
     child.stdout.on("data", (chunk) => {
       const text = chunk.toString();
@@ -245,10 +251,29 @@ async function main() {
     quick ? 3 : 0,
   )));
 
+  if (quick || skipProductionRag) {
+    checks.push({
+      name: "production_rag_gate",
+      command: "skipped",
+      ok: true,
+      skipped: true,
+      reason: quick ? "quick feedback gate skips full production RAG eval" : "explicitly skipped with --skip-production-rag",
+      durationMs: 0,
+    });
+  } else {
+    checks.push(await runCommand("production_rag_gate", "node", [
+      "--env-file=.env",
+      "scripts/run-production-rag-eval.mjs",
+      "--out",
+      productionRagOut,
+    ], productionCommandTimeoutMs));
+  }
+
   const evalSummaries = {
     feedbackRegression: await readJsonIfExists(feedbackOut),
     ragQualityGates: await readJsonIfExists("artifacts/evals/rag-quality-gates/latest.json"),
     collectionSuggestion: await readJsonIfExists("artifacts/evals/collection-suggestion/latest.json"),
+    productionRag: await readJsonIfExists(productionRagOut),
   };
   const approvedWithoutFeedbackCases = approvedCount > 0 && feedbackCaseCount === 0;
   if (approvedWithoutFeedbackCases) {
@@ -287,10 +312,12 @@ async function main() {
       feedbackRegression: evalSummaries.feedbackRegression?.summary ?? null,
       ragQualityGates: evalSummaries.ragQualityGates?.summary ?? null,
       collectionSuggestion: evalSummaries.collectionSuggestion?.summary ?? null,
+      productionRag: evalSummaries.productionRag?.totals ?? null,
     },
     durationMs: Date.now() - started,
     quick,
     commandTimeoutMs,
+    productionCommandTimeoutMs,
     generatedAt: new Date().toISOString(),
   };
 
