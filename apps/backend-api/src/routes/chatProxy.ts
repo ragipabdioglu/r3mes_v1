@@ -1525,6 +1525,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         requestedCollectionIds,
         includePublic,
         query: retrievalQuery,
+        queryUnderstanding,
       });
       const retrieval =
         retrievalQuery && accessibleCollectionIds.length > 0

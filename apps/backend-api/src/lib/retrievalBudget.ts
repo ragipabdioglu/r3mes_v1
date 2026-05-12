@@ -1,4 +1,5 @@
 import type { DomainRoutePlan } from "./queryRouter.js";
+import type { QueryUnderstanding } from "./queryUnderstanding.js";
 
 export type RetrievalBudgetMode = "fast_grounded" | "normal_rag" | "deep_rag";
 
@@ -43,6 +44,7 @@ export function resolveRetrievalBudget(opts: {
   requestedCollectionIds?: string[];
   includePublic?: boolean;
   query?: string;
+  queryUnderstanding?: QueryUnderstanding | null;
 }): RetrievalBudgetDecision {
   const fastLimit = parsePositiveInt(process.env.R3MES_RAG_FAST_SOURCE_LIMIT, 2);
   const normalLimit = parsePositiveInt(process.env.R3MES_RAG_NORMAL_SOURCE_LIMIT, 3);
@@ -61,6 +63,11 @@ export function resolveRetrievalBudget(opts: {
   if (!routePlan) deepReasons.push("missing route plan");
   if (routePlan?.confidence === "low") deepReasons.push("low-confidence route");
   if (routePlan?.domain === "general") deepReasons.push("general-domain route");
+  if (opts.queryUnderstanding?.quality.shape === "short") deepReasons.push("short query needs broader evidence search");
+  if (opts.queryUnderstanding?.quality.shape === "noisy") deepReasons.push("noisy or partial query needs broader evidence search");
+  if (typeof opts.queryUnderstanding?.quality.clarityScore === "number" && opts.queryUnderstanding.quality.clarityScore < 45) {
+    deepReasons.push("low query clarity");
+  }
   if (requestedCount === 0 && opts.includePublic !== false) {
     deepReasons.push("auto/public search without explicit selected collection");
   }

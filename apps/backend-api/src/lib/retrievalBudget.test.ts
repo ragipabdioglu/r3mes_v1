@@ -66,6 +66,74 @@ describe("resolveRetrievalBudget", () => {
     expect(decision).toMatchObject({ mode: "normal_rag", sourceLimit: 3 });
   });
 
+  it("uses deep retrieval for short or low-clarity knowledge turns", () => {
+    const decision = resolveRetrievalBudget({
+      requestedCollectionIds: ["kap"],
+      includePublic: false,
+      query: "LDL",
+      routePlan: {
+        domain: "medical",
+        subtopics: [],
+        riskLevel: "medium",
+        retrievalHints: [],
+        mustIncludeTerms: [],
+        mustExcludeTerms: [],
+        confidence: "medium",
+      },
+      queryUnderstanding: {
+        original: "LDL",
+        normalized: {
+          original: "LDL",
+          normalized: "ldl",
+          tokens: ["ldl"],
+          expandedTokens: ["ldl"],
+          variants: ["LDL", "ldl"],
+        },
+        signals: {
+          normalizedQuery: "ldl",
+          language: "unknown",
+          intent: "unknown",
+          riskLevel: "medium",
+          lexicalTerms: ["ldl"],
+          significantTerms: ["ldl"],
+          phraseHints: [],
+          namedEntities: ["LDL"],
+          possibleDomains: ["medical"],
+          routeHints: {
+            domain: "medical",
+            subtopics: [],
+            confidence: "medium",
+            authority: "weak",
+            retrievalHints: [],
+            mustIncludeTerms: [],
+          },
+        },
+        concepts: [],
+        profileConcepts: [],
+        quality: {
+          shape: "short",
+          clarityScore: 40,
+          tokenCount: 1,
+          expandedTokenCount: 1,
+          profileConceptCount: 0,
+          conceptCount: 0,
+          weakSignalCount: 1,
+        },
+        mode: "knowledge",
+        retrievalIntent: "knowledge_lookup",
+        conversationalIntent: null,
+        confidence: "low",
+        warnings: ["short_knowledge_query", "low_query_clarity"],
+      },
+    });
+
+    expect(decision.mode).toBe("deep_rag");
+    expect(decision.reasons).toEqual(expect.arrayContaining([
+      "short query needs broader evidence search",
+      "low query clarity",
+    ]));
+  });
+
   it("allows source limits to be tuned from env", () => {
     vi.stubEnv("R3MES_RAG_FAST_SOURCE_LIMIT", "1");
     vi.stubEnv("R3MES_RAG_DEEP_SOURCE_LIMIT", "5");

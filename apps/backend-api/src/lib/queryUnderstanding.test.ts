@@ -16,6 +16,7 @@ describe("queryUnderstanding", () => {
 
       expect(understanding.mode).toBe("knowledge");
       expect(understanding.concepts).toContain("concept:pelvic_pain");
+      expect(understanding.quality.clarityScore).toBeGreaterThanOrEqual(55);
       expect(understanding.normalized.expandedTokens).toEqual(
         expect.arrayContaining(["kasik agrisi", "pelvik agri"]),
       );
@@ -45,6 +46,15 @@ describe("queryUnderstanding", () => {
     expect(understanding.signals.routeHints.authority).toBe("weak");
     expect(understanding.mode).toBe("knowledge");
     expect(understanding.warnings).toContain("weak_query_understanding");
+    expect(understanding.quality.weakSignalCount).toBeLessThanOrEqual(1);
+  });
+
+  it("marks short knowledge turns as low-shape signals without hard routing them", () => {
+    const understanding = buildQueryUnderstanding("LDL");
+
+    expect(understanding.mode).toBe("knowledge");
+    expect(understanding.quality.shape).toBe("short");
+    expect(understanding.warnings).toContain("short_knowledge_query");
   });
 
   it("expands query concepts from collection profiles without a router keyword rule", () => {

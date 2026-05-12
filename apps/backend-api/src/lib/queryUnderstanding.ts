@@ -22,12 +22,25 @@ export interface QueryUnderstandingOptions {
   profiles?: QueryUnderstandingProfileInput[];
 }
 
+export type QueryShape = "empty" | "short" | "normal" | "noisy";
+
+export interface QueryQualitySignals {
+  shape: QueryShape;
+  clarityScore: number;
+  tokenCount: number;
+  expandedTokenCount: number;
+  profileConceptCount: number;
+  conceptCount: number;
+  weakSignalCount: number;
+}
+
 export interface QueryUnderstanding {
   original: string;
   normalized: TurkishQueryNormalization;
   signals: QuerySignals;
   concepts: string[];
   profileConcepts: string[];
+  quality: QueryQualitySignals;
   mode: QueryUnderstandingMode;
   retrievalIntent: QueryRetrievalIntent;
   conversationalIntent: ConversationalIntentDecision | null;
@@ -158,18 +171,58 @@ function inferConfidence(opts: {
   conversationalIntent: ConversationalIntentDecision | null;
   conceptCount: number;
   tokenCount: number;
+  clarityScore: number;
   routeConfidence: QuerySignals["routeHints"]["confidence"];
 }): QueryUnderstanding["confidence"] {
   if (opts.conversationalIntent?.confidence === "high") return "high";
-  if (opts.conceptCount > 0 && opts.routeConfidence !== "low") return "high";
-  if (opts.conceptCount > 0 || opts.tokenCount >= MIN_KNOWLEDGE_TOKEN_COUNT || opts.routeConfidence !== "low") {
+  if (opts.conceptCount > 0 && opts.routeConfidence !== "low" && opts.clarityScore >= 55) return "high";
+  if (opts.conceptCount > 0 || opts.tokenCount >= MIN_KNOWLEDGE_TOKEN_COUNT || opts.routeConfidence !== "low" || opts.clarityScore >= 45) {
     return "medium";
   }
   return "low";
 }
 
+function inferQueryQuality(opts: {
+  normalized: TurkishQueryNormalization;
+  conceptCount: number;
+  profileConceptCount: number;
+  routeConfidence: QuerySignals["routeHints"]["confidence"];
+}): QueryQualitySignals {
+  const tokenCount = opts.normalized.tokens.length;
+  const expandedTokenCount = opts.normalized.expandedTokens.length;
+  const weakSignalCount =
+    (opts.conceptCount > 0 ? 1 : 0) +
+    (opts.profileConceptCount > 0 ? 1 : 0) +
+    (opts.routeConfidence !== "low" ? 1 : 0) +
+    (tokenCount >= MIN_KNOWLEDGE_TOKEN_COUNT ? 1 : 0);
+  const expansionRatio = tokenCount === 0 ? 1 : expandedTokenCount / tokenCount;
+  const noisyExpansionPenalty = expansionRatio > 10 ? 18 : expansionRatio > 6 ? 10 : 0;
+  const shortPenalty = tokenCount === 0 ? 45 : tokenCount === 1 ? 20 : 0;
+  const signalBonus = Math.min(40, weakSignalCount * 10);
+  const conceptBonus = Math.min(30, (opts.conceptCount + opts.profileConceptCount) * 12);
+  const tokenBonus = Math.min(20, tokenCount * 5);
+  const clarityScore = Math.max(0, Math.min(100, 35 + signalBonus + conceptBonus + tokenBonus - shortPenalty - noisyExpansionPenalty));
+  const shape: QueryShape =
+    tokenCount === 0 ? "empty" :
+      tokenCount < MIN_KNOWLEDGE_TOKEN_COUNT ? "short" :
+        clarityScore < 45 || noisyExpansionPenalty >= 18 ? "noisy" :
+          "normal";
+
+  return {
+    shape,
+    clarityScore: Number(clarityScore.toFixed(3)),
+    tokenCount,
+    expandedTokenCount,
+    profileConceptCount: opts.profileConceptCount,
+    conceptCount: opts.conceptCount,
+    weakSignalCount,
+  };
+}
+
 function buildWarnings(opts: {
   mode: QueryUnderstandingMode;
+  queryShape: QueryShape;
+  clarityScore: number;
   profileConceptCount: number;
   tokenCount: number;
   conceptCount: number;
@@ -178,6 +231,12 @@ function buildWarnings(opts: {
   const warnings: string[] = [];
   if (opts.mode === "knowledge" && opts.tokenCount < MIN_KNOWLEDGE_TOKEN_COUNT) {
     warnings.push("short_knowledge_query");
+  }
+  if (opts.mode === "knowledge" && opts.queryShape === "noisy") {
+    warnings.push("noisy_or_partial_query");
+  }
+  if (opts.mode === "knowledge" && opts.clarityScore < 45) {
+    warnings.push("low_query_clarity");
   }
   if (opts.mode === "knowledge" && opts.conceptCount === 0 && opts.routeConfidence === "low") {
     warnings.push("weak_query_understanding");
@@ -215,6 +274,12 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
   );
   const conversationalIntent = detectConversationalIntent(query);
   const mode: QueryUnderstandingMode = conversationalIntent ? "conversation" : "knowledge";
+  const quality = inferQueryQuality({
+    normalized,
+    conceptCount: concepts.length,
+    profileConceptCount: profileConcepts.length,
+    routeConfidence: signals.routeHints.confidence,
+  });
   const retrievalIntent = inferRetrievalIntent({
     mode,
     tokenCount: normalized.tokens.length,
@@ -225,10 +290,13 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
     conversationalIntent,
     conceptCount: concepts.length + profileConcepts.length,
     tokenCount: normalized.tokens.length,
+    clarityScore: quality.clarityScore,
     routeConfidence: signals.routeHints.confidence,
   });
   const warnings = buildWarnings({
     mode,
+    queryShape: quality.shape,
+    clarityScore: quality.clarityScore,
     profileConceptCount: profileConcepts.length,
     tokenCount: normalized.tokens.length,
     conceptCount: concepts.length + profileConcepts.length,
@@ -241,6 +309,7 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
     signals,
     concepts,
     profileConcepts,
+    quality,
     mode,
     retrievalIntent,
     conversationalIntent,
@@ -258,6 +327,9 @@ export function summarizeQueryUnderstandingForTrace(
     normalized: understanding.normalized.normalized,
     tokenCount: understanding.normalized.tokens.length,
     expandedTokenCount: understanding.normalized.expandedTokens.length,
+    queryShape: understanding.quality.shape,
+    clarityScore: understanding.quality.clarityScore,
+    weakSignalCount: understanding.quality.weakSignalCount,
     conceptCount: understanding.concepts.length,
     profileConceptCount: understanding.profileConcepts.length,
     concepts: understanding.concepts.slice(0, 8),
