@@ -56,4 +56,23 @@ describe("queryUnderstanding", () => {
     expect(understanding.normalized.expandedTokens).toEqual(expect.arrayContaining(["karbon ayak izi azaltim plani"]));
     expect(understanding.warnings).toContain("profile_concept_expansion_used");
   });
+
+  it("matches profile concepts through generic typo-tolerant overlap", () => {
+    const understanding = buildQueryUnderstanding("karbon ayak izim icin bilgilendirere raporuna bak", {
+      profiles: [
+        {
+          answerableConcepts: ["karbon ayak izi bilgilendirme raporu"],
+          topicPhrases: ["sürdürülebilirlik bilgilendirme dokümanı"],
+        },
+      ],
+    });
+
+    expect(understanding.mode).toBe("knowledge");
+    expect(understanding.profileConcepts).toEqual(
+      expect.arrayContaining(["karbon ayak izi bilgilendirme raporu"]),
+    );
+    expect(understanding.normalized.expandedTokens).toEqual(
+      expect.arrayContaining(["karbon ayak izi bilgilendirme raporu"]),
+    );
+  });
 });

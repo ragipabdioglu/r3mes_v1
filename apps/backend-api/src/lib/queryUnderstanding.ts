@@ -83,14 +83,75 @@ function profileTermsMatchingQuery(base: TurkishQueryNormalization, terms: strin
     ...base.tokens,
     ...base.expandedTokens,
   ].join(" "));
+  const queryTerms = unique([
+    ...base.tokens,
+    ...base.expandedTokens,
+    ...expandSurfaceConceptTerms(base.normalized, 96),
+  ], 128);
   const matches: string[] = [];
   for (const term of terms) {
     const expanded = expandSurfaceConceptTerms(term, 24);
-    if (expanded.some((part) => part.length >= 3 && (queryText.includes(part) || part.includes(queryText)))) {
+    if (expanded.some((part) =>
+      part.length >= 3 &&
+      (
+        queryText.includes(part) ||
+        part.includes(queryText) ||
+        fuzzyTermOverlap(queryTerms, expandSurfaceConceptTerms(part, 24)) >= 0.64
+      )
+    )) {
       matches.push(term, ...expanded);
     }
   }
   return unique(matches, 32);
+}
+
+function fuzzyTermOverlap(leftTerms: string[], rightTerms: string[]): number {
+  const left = unique(leftTerms, 64).filter((term) => term.length >= 4);
+  const right = unique(rightTerms, 64).filter((term) => term.length >= 4);
+  if (left.length === 0 || right.length === 0) return 0;
+  let matched = 0;
+  for (const rightTerm of right) {
+    if (left.some((leftTerm) => tokenSimilarity(leftTerm, rightTerm) >= 0.72)) {
+      matched += 1;
+    }
+  }
+  return matched / Math.max(1, Math.min(right.length, 4));
+}
+
+function tokenSimilarity(left: string, right: string): number {
+  if (left === right) return 1;
+  if (left.includes(right) || right.includes(left)) {
+    const shorter = Math.min(left.length, right.length);
+    const longer = Math.max(left.length, right.length);
+    return shorter / Math.max(1, longer);
+  }
+  return trigramDice(left, right);
+}
+
+function trigrams(value: string): string[] {
+  const padded = `  ${value}  `;
+  const grams: string[] = [];
+  for (let index = 0; index <= padded.length - 3; index += 1) {
+    grams.push(padded.slice(index, index + 3));
+  }
+  return grams;
+}
+
+function trigramDice(left: string, right: string): number {
+  if (left.length < 4 || right.length < 4) return 0;
+  const leftGrams = trigrams(left);
+  const rightCounts = new Map<string, number>();
+  for (const gram of trigrams(right)) {
+    rightCounts.set(gram, (rightCounts.get(gram) ?? 0) + 1);
+  }
+  let intersection = 0;
+  for (const gram of leftGrams) {
+    const count = rightCounts.get(gram) ?? 0;
+    if (count <= 0) continue;
+    intersection += 1;
+    rightCounts.set(gram, count - 1);
+  }
+  return (2 * intersection) / Math.max(1, leftGrams.length + [...rightCounts.values()].reduce((sum, count) => sum + count, 0) + intersection);
 }
 
 function inferConfidence(opts: {
