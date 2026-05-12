@@ -85,6 +85,7 @@ interface ChatRetrievalDebug {
     unusedSelectedCollectionIds: string[];
     suggestedCollections: Array<{ id: string; name: string; reason: string }>;
     metadataRouteCandidates: KnowledgeMetadataRouteCandidate[];
+    thinProfileCollectionIds: string[];
     includePublic: boolean;
     routeDomain: DomainRoutePlan["domain"] | null;
     hasSources: boolean;
@@ -312,6 +313,7 @@ function buildSourceSelectionSummary(opts: {
     unusedSelectedCollectionIds,
     suggestedCollections,
     metadataRouteCandidates,
+    thinProfileCollectionIds,
     includePublic: opts.includePublic,
     routeDomain: opts.routePlan?.domain ?? null,
     hasSources: groundedCollectionIds.length > 0,
@@ -694,6 +696,8 @@ function summarizeSourceSelectionForTrace(
     unusedSelectedCollectionCount: sourceSelection.unusedSelectedCollectionIds.length,
     suggestedCollectionCount: sourceSelection.suggestedCollections.length,
     metadataRouteCandidateCount: sourceSelection.metadataRouteCandidates.length,
+    thinProfileCollectionIds: sourceSelection.thinProfileCollectionIds,
+    thinProfileCollectionCount: sourceSelection.thinProfileCollectionIds.length,
     topMetadataRouteCandidates: sourceSelection.metadataRouteCandidates.slice(0, 3).map((candidate) => ({
       id: candidate.id,
       score: Math.round(candidate.score * 100) / 100,

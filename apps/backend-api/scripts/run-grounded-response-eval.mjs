@@ -505,6 +505,14 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (Array.isArray(testCase.expectedThinProfileCollectionIds) && testCase.expectedThinProfileCollectionIds.length > 0) {
+    const thinIds = retrievalDebug?.sourceSelection?.thinProfileCollectionIds ?? [];
+    const missingThinIds = testCase.expectedThinProfileCollectionIds.filter((id) => !thinIds.includes(id));
+    if (missingThinIds.length > 0) {
+      failures.push(`thin_profile_missing:${missingThinIds.join(",")}`);
+    }
+  }
+
   if (Array.isArray(testCase.expectedMetadataCandidateIds) && testCase.expectedMetadataCandidateIds.length > 0) {
     const candidateIds = retrievalDebug?.sourceSelection?.metadataRouteCandidates?.map((collection) => collection.id) ?? [];
     const missingCandidates = testCase.expectedMetadataCandidateIds.filter((id) => !candidateIds.includes(id));
@@ -743,6 +751,9 @@ function scoreCase(testCase, response) {
     metadataRouteCandidateScoringModes: metadataRouteCandidates
       .map((collection) => collection.scoreBreakdown?.scoringMode ?? "missing")
       .filter(Boolean),
+    thinProfileCollectionIds: Array.isArray(retrievalDebug?.sourceSelection?.thinProfileCollectionIds)
+      ? retrievalDebug.sourceSelection.thinProfileCollectionIds
+      : [],
     metadataRouteCandidateTop: metadataRouteCandidates[0]
       ? {
           id: metadataRouteCandidates[0].id,

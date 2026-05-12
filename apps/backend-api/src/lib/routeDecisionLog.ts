@@ -16,6 +16,7 @@ export interface RouteDecisionLogSourceSelection {
   unusedSelectedCollectionIds: string[];
   suggestedCollections: Array<{ id: string; name: string; reason: string }>;
   metadataRouteCandidates: KnowledgeMetadataRouteCandidate[];
+  thinProfileCollectionIds?: string[];
   includePublic: boolean;
   hasSources: boolean;
   warning: string | null;
@@ -61,6 +62,7 @@ export interface RouteDecisionLogEvent {
         adaptiveBonus?: number;
       };
     }>;
+    thinProfileCollectionIds?: string[];
     hasSources: boolean;
     warning: string | null;
   };
@@ -140,6 +142,7 @@ export function buildRouteDecisionLogEvent(opts: {
             }
           : {}),
       })),
+      thinProfileCollectionIds: opts.sourceSelection.thinProfileCollectionIds,
       hasSources: opts.sourceSelection.hasSources,
       warning: opts.sourceSelection.warning,
     },
