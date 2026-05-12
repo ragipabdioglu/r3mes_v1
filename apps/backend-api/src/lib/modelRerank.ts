@@ -74,7 +74,7 @@ export interface ModelRerankOptions {
 const rerankScoreCache = new Map<string, RerankCacheEntry>();
 
 function rerankerMode(): string {
-  return (process.env.R3MES_RERANKER_MODE ?? "deterministic").trim().toLowerCase();
+  return (process.env.R3MES_RERANKER_MODE ?? "model").trim().toLowerCase();
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {

@@ -66,6 +66,48 @@ describe("rerankKnowledgeCardsWithFallback", () => {
     vi.unstubAllEnvs();
   });
 
+  it("uses the model reranker by default unless deterministic mode is explicitly selected", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ scores: [0.5], provider: "cross_encoder" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
+      "hangi kaynak alakalı",
+      [
+        {
+          fusedScore: 1,
+          lexicalScore: 1,
+          embeddingScore: 0,
+          chunk: {
+            id: "chunk-1",
+            content: "ilgili kaynak",
+            document: { title: "İlgili kaynak" },
+          },
+          card: {
+            topic: "ilgili konu",
+            tags: ["test"],
+            patientSummary: "",
+            clinicalTakeaway: "",
+            safeGuidance: "",
+            redFlags: "",
+            doNotInfer: "",
+          },
+        },
+      ],
+      1,
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result.diagnostics.mode).toBe("model");
+    expect(result.diagnostics.modelEnabled).toBe(true);
+
+    vi.unstubAllGlobals();
+  });
+
   it("sends bounded documents to the model reranker", async () => {
     vi.stubEnv("R3MES_RERANKER_MODE", "model");
     vi.stubEnv("R3MES_ALIGNMENT_MAX_RERANK_WORDS", "4");

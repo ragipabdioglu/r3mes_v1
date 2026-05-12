@@ -95,7 +95,7 @@ Runtime controls:
 
 | Env | Default | Purpose |
 | --- | --- | --- |
-| `R3MES_RERANKER_MODE` | `model` in quality profile | Set to `model` to call ai-engine `/v1/rerank`; deterministic is a fallback/smoke escape hatch. |
+| `R3MES_RERANKER_MODE` | `model` | Calls ai-engine `/v1/rerank` by default; set `deterministic` only as an explicit fallback/smoke escape hatch. |
 | `R3MES_REQUIRE_REAL_RERANKER` | `1` in quality profile | Makes reranker smoke fail if ai-engine reports fallback. |
 | `R3MES_RERANKER_CANDIDATE_LIMIT` | `5` | Caps cross-encoder work after cheap pruning. |
 | `R3MES_RERANKER_TIMEOUT_MS` | `8000` | Fallback to deterministic reranker if ai-engine is slow. |
