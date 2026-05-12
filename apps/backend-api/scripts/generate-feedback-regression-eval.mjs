@@ -111,8 +111,41 @@ function readStringArray(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()) : [];
 }
 
-function expectedSeverity(kind) {
-  return kind === "GOOD_SOURCE" || kind === "GOOD_ANSWER" ? ["pass", "warn"] : ["warn", "rewrite"];
+function uniqueStrings(values) {
+  return Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)));
+}
+
+function firstNonEmptyStringArray(...values) {
+  for (const value of values) {
+    const items = readStringArray(value);
+    if (items.length > 0) return uniqueStrings(items);
+  }
+  return [];
+}
+
+function readOptionalString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readConfidenceExpectation(metadata) {
+  const value = metadata.expectedConfidence ?? metadata.routeDecisionConfidence;
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  const values = readStringArray(value);
+  return values.length > 0 ? values : null;
+}
+
+function readOptionalStringOrArray(value) {
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  const values = readStringArray(value);
+  return values.length > 0 ? values : null;
+}
+
+function expectedSeverity(kind, metadata) {
+  const explicit = readOptionalStringOrArray(metadata.expectedSafetySeverity);
+  if (explicit) return explicit;
+  if (kind === "GOOD_SOURCE" || kind === "GOOD_ANSWER") return ["pass", "warn"];
+  if (kind === "BAD_ANSWER") return null;
+  return ["warn", "rewrite"];
 }
 
 function expectedIntent(metadata) {
@@ -130,11 +163,27 @@ function caseFromFeedback(row) {
   const query = readEvalQuery(metadata);
   if (!query) return null;
 
-  const collectionIds = row.collectionId ? [row.collectionId] : readStringArray(metadata.collectionIds);
+  const usedCollectionIds = firstNonEmptyStringArray(
+    metadata.usedCollectionIds,
+    metadata.collectionIds,
+    metadata.selectedCollectionIds,
+  );
+  const collectionIds = row.collectionId ? [row.collectionId] : usedCollectionIds;
   const expectedCollectionIds = row.expectedCollectionId
     ? [row.expectedCollectionId]
-    : readStringArray(metadata.expectedCollectionIds);
-  const rejectedCollectionIds = row.collectionId ? [row.collectionId] : readStringArray(metadata.rejectedCollectionIds);
+    : firstNonEmptyStringArray(
+      metadata.expectedCollectionIds,
+      metadata.suggestedCollectionIds,
+    );
+  const rejectedCollectionIds = row.collectionId
+    ? [row.collectionId]
+    : firstNonEmptyStringArray(metadata.rejectedCollectionIds);
+  const expectedRouteDecisionMode = readOptionalString(metadata.expectedRouteDecisionMode)
+    ?? readOptionalString(metadata.routeDecisionMode);
+  const expectedConfidence = readConfidenceExpectation(metadata);
+  const expectedRetrievalMode = readOptionalString(metadata.expectedRetrievalMode)
+    ?? (collectionIds.length > 0 ? "true_hybrid" : null);
+  const severityExpectation = expectedSeverity(row.kind, metadata);
   const kindId = stableIdPart(row.kind);
   const idParts = [
     "feedback",
@@ -150,10 +199,12 @@ function caseFromFeedback(row) {
     query,
     ...(collectionIds.length > 0 ? { collectionIds } : {}),
     includePublic: metadata.includePublic === true,
-    expectedRetrievalMode: "true_hybrid",
+    ...(expectedRetrievalMode ? { expectedRetrievalMode } : {}),
+    ...(expectedRouteDecisionMode ? { expectedRouteDecisionMode } : {}),
+    ...(expectedConfidence ? { expectedConfidence } : {}),
     ...(expectedIntent(metadata) ? { expectedIntent: expectedIntent(metadata) } : {}),
     mustPassSafety: false,
-    expectedSafetySeverity: expectedSeverity(row.kind),
+    ...(severityExpectation ? { expectedSafetySeverity: severityExpectation } : {}),
     mustNotHaveLowLanguageQuality: true,
     maxLatencyMs: Number(metadata.maxLatencyMs ?? 30000),
   };
@@ -163,8 +214,8 @@ function caseFromFeedback(row) {
       ...base,
       ...(expectedCollectionIds.length > 0 ? { expectedSuggestedCollectionIds: expectedCollectionIds } : {}),
       ...(rejectedCollectionIds.length > 0 ? { expectedRejectedCollectionIds: rejectedCollectionIds } : {}),
-      expectedRouteDecisionMode: "suggest",
-      expectedConfidence: ["low"],
+      expectedRouteDecisionMode: expectedRouteDecisionMode ?? "suggest",
+      expectedConfidence: expectedConfidence ?? ["low"],
       expectedFallbackMode: "source_suggestion",
       expectedSafetyRailIds: ["SUGGEST_MODE_NO_GROUNDED_SOURCES"],
       maxSources: 0,
@@ -177,8 +228,8 @@ function caseFromFeedback(row) {
     return {
       ...base,
       ...(expectedCollectionIds.length > 0 ? { expectedSuggestedCollectionIds: expectedCollectionIds } : {}),
-      expectedRouteDecisionMode: expectedCollectionIds.length > 0 ? "suggest" : undefined,
-      expectedConfidence: ["low"],
+      expectedRouteDecisionMode: expectedRouteDecisionMode ?? (expectedCollectionIds.length > 0 ? "suggest" : undefined),
+      expectedConfidence: expectedConfidence ?? ["low"],
       expectedFallbackMode: "source_suggestion",
       expectedSafetyRailIds: ["SUGGEST_MODE_NO_GROUNDED_SOURCES"],
       maxSources: 0,
@@ -190,7 +241,6 @@ function caseFromFeedback(row) {
   if (row.kind === "BAD_ANSWER") {
     return {
       ...base,
-      expectedSafetySeverity: ["warn", "rewrite"],
       forbiddenSafetyRailIds: ["LOW_LANGUAGE_QUALITY"],
       mustHaveSources: collectionIds.length > 0,
       minEvidenceFacts: collectionIds.length > 0 ? 1 : 0,
@@ -200,8 +250,8 @@ function caseFromFeedback(row) {
 
   return {
     ...base,
-    expectedConfidence: ["medium", "high"],
-    expectedRouteDecisionMode: collectionIds.length > 0 ? "strict" : undefined,
+    expectedConfidence: expectedConfidence ?? ["medium", "high"],
+    expectedRouteDecisionMode: expectedRouteDecisionMode ?? (collectionIds.length > 0 ? "strict" : undefined),
     forbiddenSafetyRailIds: ["MISSING_SOURCES", "NO_USABLE_FACTS", "SOURCE_METADATA_MISMATCH", "LOW_LANGUAGE_QUALITY"],
     ...(collectionIds.length > 0 ? { expectedUsedCollectionIds: collectionIds } : {}),
     mustHaveSources: collectionIds.length > 0,
