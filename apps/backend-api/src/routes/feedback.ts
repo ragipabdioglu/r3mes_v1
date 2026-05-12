@@ -642,9 +642,12 @@ function buildPromotionGateReport(
       gatePassedCount: 0,
       totalScoreDelta: 0,
       promotionCandidate: false,
-      blockedReasons: [],
+      promotionStage: "blocked",
+      rollbackRecommended: false,
+      nextSafeAction: "keep_passive",
+      blockedReasons: [] as string[],
       recommendation: "keep_passive" as const,
-      adjustmentIds: [],
+      adjustmentIds: [] as string[],
     };
     existing.activeAdjustmentCount += 1;
     existing.gatePassedCount += adjustment.applyRecord.status === "APPLIED" && gateSummary?.ok === true ? 1 : 0;
@@ -669,9 +672,27 @@ function buildPromotionGateReport(
       : item.totalScoreDelta === 0
         ? "review_only"
         : "keep_passive";
+    const rollbackRecommended =
+      blockedReasons.has("not all source apply records passed eval gate") ||
+      blockedReasons.has(`score delta exceeds promotion cap ${PROMOTION_MAX_ABS_DELTA}`);
+    const promotionStage: KnowledgeFeedbackPromotionGateItem["promotionStage"] = promotionCandidate
+      ? "eligible_shadow"
+      : recommendation === "review_only"
+        ? "review_only"
+        : "blocked";
+    const nextSafeAction: KnowledgeFeedbackPromotionGateItem["nextSafeAction"] = promotionCandidate
+      ? "eligible_for_shadow_observation"
+      : rollbackRecommended
+        ? "rollback_or_review"
+        : blocked.length > 0
+          ? "inspect_blockers"
+          : "keep_passive";
     return {
       ...item,
       promotionCandidate,
+      promotionStage,
+      rollbackRecommended,
+      nextSafeAction,
       blockedReasons: blocked,
       recommendation,
     };

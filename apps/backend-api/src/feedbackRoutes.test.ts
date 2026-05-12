@@ -1122,6 +1122,29 @@ describe("knowledge feedback routes", () => {
         },
       },
       {
+        id: "adjustment_3",
+        proposalId: "proposal_record_3",
+        applyRecordId: "apply_record_3",
+        status: "ACTIVE",
+        stepId: "proposal_record_3:boost:kc_risky",
+        kind: "BOOST_COLLECTION_SCORE",
+        mutationPath: "query_scoped_collection_adjustment",
+        collectionId: "kc_risky",
+        expectedCollectionId: null,
+        queryHash: "abc123def4567890",
+        scoreDelta: 0.5,
+        simulatedBefore: 0,
+        simulatedAfter: 0.5,
+        rollbackReason: null,
+        createdAt: new Date("2026-05-05T12:10:00.000Z"),
+        rolledBackAt: null,
+        updatedAt: new Date("2026-05-05T12:10:00.000Z"),
+        applyRecord: {
+          status: "APPLIED",
+          gateReport: { ok: true, checks: [{ name: "rag_quality_gates", ok: true }] },
+        },
+      },
+      {
         id: "adjustment_2",
         proposalId: "proposal_record_2",
         applyRecordId: "apply_record_2",
@@ -1160,6 +1183,9 @@ describe("knowledge feedback routes", () => {
       data?: Array<{
         collectionId?: string | null;
         promotionCandidate?: boolean;
+        promotionStage?: string;
+        rollbackRecommended?: boolean;
+        nextSafeAction?: string;
         recommendation?: string;
         blockedReasons?: string[];
       }>;
@@ -1169,14 +1195,29 @@ describe("knowledge feedback routes", () => {
     expect(body.data?.[0]).toMatchObject({
       collectionId: "kc_good",
       promotionCandidate: true,
+      promotionStage: "eligible_shadow",
+      rollbackRecommended: false,
+      nextSafeAction: "eligible_for_shadow_observation",
       recommendation: "eligible_for_shadow_runtime",
     });
     expect(body.data?.[1]).toMatchObject({
+      collectionId: "kc_risky",
+      promotionCandidate: false,
+      promotionStage: "blocked",
+      rollbackRecommended: true,
+      nextSafeAction: "rollback_or_review",
+      recommendation: "keep_passive",
+    });
+    expect(body.data?.[1]?.blockedReasons?.join(" ")).toContain("score delta exceeds promotion cap");
+    expect(body.data?.[2]).toMatchObject({
       collectionId: null,
       promotionCandidate: false,
+      promotionStage: "review_only",
+      rollbackRecommended: false,
+      nextSafeAction: "inspect_blockers",
       recommendation: "review_only",
     });
-    expect(body.data?.[1]?.blockedReasons?.join(" ")).toContain("missing target collection");
+    expect(body.data?.[2]?.blockedReasons?.join(" ")).toContain("missing target collection");
     expect(prisma.knowledgeFeedbackRouterAdjustment.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({

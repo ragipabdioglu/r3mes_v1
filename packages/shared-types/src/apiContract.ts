@@ -397,6 +397,13 @@ export interface KnowledgeFeedbackPromotionGateItem {
   gatePassedCount: number;
   totalScoreDelta: number;
   promotionCandidate: boolean;
+  promotionStage: "eligible_shadow" | "blocked" | "review_only";
+  rollbackRecommended: boolean;
+  nextSafeAction:
+    | "keep_passive"
+    | "inspect_blockers"
+    | "rollback_or_review"
+    | "eligible_for_shadow_observation";
   blockedReasons: string[];
   recommendation: "eligible_for_shadow_runtime" | "keep_passive" | "review_only";
   adjustmentIds: string[];
