@@ -126,6 +126,52 @@ describe("knowledge feedback routes", () => {
     await app.close();
   });
 
+  it("adds a server-redacted safe query for feedback regression without storing raw identifiers", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedback.create).mockResolvedValue({
+      id: "feedback_2",
+      kind: "BAD_ANSWER",
+      queryHash: "def123abc4567890",
+      collectionId: null,
+      expectedCollectionId: null,
+      createdAt: new Date("2026-05-05T12:00:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge",
+      headers: { "content-type": "application/json" },
+      payload: {
+        kind: "BAD_ANSWER",
+        query: "TC 12345678901, mail hasta@example.com, 0xabc123abc123abc123 ile başım ağrıyor",
+        metadata: {
+          routeMode: "normal_rag",
+          query: "metadata ham sorgu saklanmamalı",
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const createCall = vi.mocked(prisma.knowledgeFeedback.create).mock.calls[0]?.[0] as {
+      data?: { metadata?: Record<string, unknown>; queryHash?: string | null };
+    };
+    expect(createCall.data?.queryHash).toEqual(expect.stringMatching(/^[a-f0-9]{16}$/));
+    expect(createCall.data?.metadata).toMatchObject({
+      routeMode: "normal_rag",
+      evalQuerySource: "server_redacted_v1",
+    });
+    expect(createCall.data?.metadata?.safeQuery).toContain("[tckn]");
+    expect(createCall.data?.metadata?.safeQuery).toContain("[email]");
+    expect(createCall.data?.metadata?.safeQuery).toContain("[wallet]");
+    expect(JSON.stringify(createCall.data?.metadata)).not.toContain("12345678901");
+    expect(JSON.stringify(createCall.data?.metadata)).not.toContain("hasta@example.com");
+    expect(createCall.data?.metadata).not.toHaveProperty("query");
+    await app.close();
+  });
+
   it("rejects feedback for inaccessible collections", async () => {
     const { prisma } = await import("./lib/prisma.js");
     vi.mocked(prisma.knowledgeCollection.findFirst).mockResolvedValue(null);

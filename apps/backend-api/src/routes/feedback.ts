@@ -380,6 +380,7 @@ const FEEDBACK_METADATA_STRING_LIMIT = 1000;
 const FEEDBACK_METADATA_ARRAY_LIMIT = 25;
 const FEEDBACK_METADATA_OBJECT_KEYS_LIMIT = 80;
 const FEEDBACK_METADATA_BLOCKED_KEYS = new Set(["query", "rawQuery", "question", "prompt", "messages"]);
+const FEEDBACK_SAFE_QUERY_LIMIT = 500;
 
 function sanitizeFeedbackMetadata(value: unknown, depth = 0): Prisma.InputJsonValue | undefined {
   if (value === null) return undefined;
@@ -403,6 +404,48 @@ function sanitizeFeedbackMetadata(value: unknown, depth = 0): Prisma.InputJsonVa
     if (safeValue !== undefined) out[key] = safeValue;
   }
   return out;
+}
+
+function redactFeedbackQueryForEval(value: string | null | undefined): string | null {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.length < 3) return null;
+  const redacted = normalized
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email]")
+    .replace(/\bTR\d{2}(?:\s?[A-Z0-9]){16,30}\b/gi, "[iban]")
+    .replace(/\b0x[a-f0-9]{16,}\b/gi, "[wallet]")
+    .replace(/\b\d{11}\b/g, "[tckn]")
+    .replace(/\b(?:\+?\d[\s-]?){7,}\b/g, "[number]")
+    .replace(/\b[a-f0-9]{24,64}\b/gi, "[id]")
+    .replace(/\bhttps?:\/\/\S+\b/gi, "[url]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, FEEDBACK_SAFE_QUERY_LIMIT)
+    .trim();
+  return redacted.length >= 3 ? redacted : null;
+}
+
+function metadataHasSafeEvalQuery(metadata: Record<string, unknown>): boolean {
+  for (const key of ["evalQuery", "redactedQuery", "safeQuery"]) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim().length >= 3) return true;
+  }
+  return false;
+}
+
+function buildFeedbackMetadata(opts: {
+  metadata: unknown;
+  query?: string | null;
+}): Prisma.InputJsonValue | undefined {
+  const sanitized = sanitizeFeedbackMetadata(opts.metadata);
+  const metadata = asObject(sanitized) ? { ...asObject(sanitized) } : {};
+  if (!metadataHasSafeEvalQuery(metadata)) {
+    const safeQuery = redactFeedbackQueryForEval(opts.query);
+    if (safeQuery) {
+      metadata.safeQuery = safeQuery;
+      metadata.evalQuerySource = "server_redacted_v1";
+    }
+  }
+  return Object.keys(metadata).length > 0 ? metadata as Prisma.InputJsonObject : undefined;
 }
 
 function summarizeGateReport(value: unknown): KnowledgeFeedbackApplyRecordItem["gateReportSummary"] {
@@ -810,7 +853,7 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
         chunkId: normalizeOptionalString(body.chunkId),
         expectedCollectionId,
         reason: normalizeOptionalString(body.reason),
-        metadata: sanitizeFeedbackMetadata(body.metadata),
+        metadata: buildFeedbackMetadata({ metadata: body.metadata, query: body.query }),
       },
       select: {
         id: true,
