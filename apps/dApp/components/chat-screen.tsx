@@ -612,43 +612,52 @@ function FeedbackActions({
   onSubmit: (kind: KnowledgeFeedbackKind) => void;
 }) {
   const hasSources = Boolean(turn.sources?.length);
-  const actions: Array<{ kind: KnowledgeFeedbackKind; label: string; tone: "good" | "bad" | "neutral" }> = [
-    { kind: "GOOD_ANSWER", label: "Cevap iyi", tone: "good" },
-    { kind: "BAD_ANSWER", label: "Cevap sorunlu", tone: "bad" },
+  const feedbackHint = hasSources
+    ? "Cevap doğruysa onayla; kaynak yanlışsa özellikle kaynak feedback'i ver."
+    : "Kaynak bekliyorsan “Kaynak eksik” işaretle; bu case regression'a girer.";
+  const actions: Array<{ kind: KnowledgeFeedbackKind; label: string; hint: string; tone: "good" | "bad" | "neutral" }> = [
+    { kind: "GOOD_ANSWER", label: "Cevap iyi", hint: "Yanıt genel olarak işimi gördü", tone: "good" },
+    { kind: "BAD_ANSWER", label: "Cevap sorunlu", hint: "Cevap eksik, yanlış veya kalitesiz", tone: "bad" },
     hasSources
-      ? { kind: "GOOD_SOURCE", label: "Kaynak doğru", tone: "good" }
-      : { kind: "MISSING_SOURCE", label: "Kaynak eksik", tone: "neutral" },
-    ...(hasSources ? [{ kind: "WRONG_SOURCE" as const, label: "Kaynak yanlış", tone: "bad" as const }] : []),
+      ? { kind: "GOOD_SOURCE", label: "Kaynak doğru", hint: "Seçilen kaynak soruyla uyumlu", tone: "good" }
+      : { kind: "MISSING_SOURCE", label: "Kaynak eksik", hint: "Bu soru için kaynak bulunmalıydı", tone: "neutral" },
+    ...(hasSources ? [{ kind: "WRONG_SOURCE" as const, label: "Kaynak yanlış", hint: "Kaynak konu dışı veya yanıltıcı", tone: "bad" as const }] : []),
   ];
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-zinc-800/80 pt-2">
-      <span className="mr-1 text-[10px] uppercase tracking-wider text-zinc-600">
-        Feedback
-      </span>
-      {actions.map((action) => (
-        <button
-          key={action.kind}
-          type="button"
-          disabled={disabled || status === "sending"}
-          onClick={() => onSubmit(action.kind)}
-          className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
-            action.tone === "good"
-              ? "border-emerald-500/25 bg-emerald-950/10 text-emerald-100 hover:border-emerald-400/45"
-              : action.tone === "bad"
-                ? "border-amber-500/25 bg-amber-950/10 text-amber-100 hover:border-amber-400/45"
-                : "border-sky-500/25 bg-sky-950/10 text-sky-100 hover:border-sky-400/45"
-          }`}
-        >
-          {action.label}
-        </button>
-      ))}
+    <div className="mt-3 border-t border-zinc-800/80 pt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+          Feedback
+        </span>
+        <span className="text-[10px] text-zinc-500">{feedbackHint}</span>
+      </div>
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+        {actions.map((action) => (
+          <button
+            key={action.kind}
+            type="button"
+            disabled={disabled || status === "sending"}
+            onClick={() => onSubmit(action.kind)}
+            className={`rounded-xl border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              action.tone === "good"
+                ? "border-emerald-500/25 bg-emerald-950/10 text-emerald-100 hover:border-emerald-400/45"
+                : action.tone === "bad"
+                  ? "border-amber-500/25 bg-amber-950/10 text-amber-100 hover:border-amber-400/45"
+                  : "border-sky-500/25 bg-sky-950/10 text-sky-100 hover:border-sky-400/45"
+            }`}
+          >
+            <span className="block text-[11px] font-semibold">{action.label}</span>
+            <span className="mt-0.5 block text-[10px] opacity-65">{action.hint}</span>
+          </button>
+        ))}
+      </div>
       {status === "sent" ? (
-        <span className="text-[10px] text-emerald-300/80">Kaydedildi</span>
+        <span className="mt-2 block text-[10px] text-emerald-300/80">Kaydedildi</span>
       ) : status === "error" ? (
-        <span className="text-[10px] text-amber-200/90">Kaydedilemedi</span>
+        <span className="mt-2 block text-[10px] text-amber-200/90">Kaydedilemedi</span>
       ) : status === "sending" ? (
-        <span className="text-[10px] text-zinc-500">Gönderiliyor…</span>
+        <span className="mt-2 block text-[10px] text-zinc-500">Gönderiliyor…</span>
       ) : null}
     </div>
   );
