@@ -31,6 +31,16 @@ export interface AdapterListResponse {
 
 export type KnowledgeVisibility = "PRIVATE" | "PUBLIC";
 export type KnowledgeParseQualityLevel = "clean" | "usable" | "noisy";
+export type KnowledgeIngestionRiskLevel = "none" | "low" | "medium" | "high";
+
+export interface KnowledgeIngestionQualityReport {
+  version: 1;
+  tableRisk: KnowledgeIngestionRiskLevel;
+  ocrRisk: KnowledgeIngestionRiskLevel;
+  thinSource: boolean;
+  strictRouteEligible: boolean;
+  warnings: string[];
+}
 
 export interface KnowledgeCollectionListItem {
   id: string;
@@ -68,6 +78,7 @@ export interface KnowledgeDocumentListItem {
   parseQualityScore?: number | null;
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
+  ingestionQuality?: KnowledgeIngestionQualityReport | null;
   inferredTopic?: string | null;
   inferredTags?: string[];
   createdAt: string;
@@ -95,6 +106,7 @@ export interface KnowledgeUploadAcceptedResponse {
   parseQualityScore?: number | null;
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
+  ingestionQuality?: KnowledgeIngestionQualityReport | null;
 }
 
 export interface KnowledgeParserCapabilityItem {

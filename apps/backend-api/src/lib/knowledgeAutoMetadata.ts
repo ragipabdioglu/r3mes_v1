@@ -21,6 +21,7 @@ export interface KnowledgeAutoMetadata {
   questionsAnswered: string[];
   sourceQuality: "structured" | "inferred" | "thin";
   parseQuality?: KnowledgeParseQuality;
+  ingestionQuality?: IngestionQualityReport;
   parseAdapter?: {
     id: string;
     version: number;
@@ -31,6 +32,15 @@ export interface KnowledgeAutoMetadata {
     };
   };
   profile?: KnowledgeCollectionProfile;
+}
+
+export interface IngestionQualityReport {
+  version: 1;
+  tableRisk: "none" | "low" | "medium" | "high";
+  ocrRisk: "none" | "low" | "medium" | "high";
+  thinSource: boolean;
+  strictRouteEligible: boolean;
+  warnings: string[];
 }
 
 export interface KnowledgeCollectionProfile {
@@ -156,6 +166,79 @@ function aggregateParseQuality(items: KnowledgeAutoMetadata[]): KnowledgeParseQu
       numericDensity: Number((qualities.reduce((sum, item) => sum + (item.signals.numericDensity ?? 0), 0) / qualities.length).toFixed(5)),
       ocrRiskScore: Math.round(qualities.reduce((sum, item) => sum + (item.signals.ocrRiskScore ?? 0), 0) / qualities.length),
     },
+  };
+}
+
+function riskLevelFromScore(score: number, medium: number, high: number): "none" | "low" | "medium" | "high" {
+  if (score >= high) return "high";
+  if (score >= medium) return "medium";
+  if (score > 0) return "low";
+  return "none";
+}
+
+export function buildIngestionQualityReport(opts: {
+  parseQuality: KnowledgeParseQuality;
+  sourceQuality: KnowledgeAutoMetadata["sourceQuality"];
+}): IngestionQualityReport {
+  const tableSignals = opts.parseQuality.signals.tableSignalCount ?? 0;
+  const numericDensity = opts.parseQuality.signals.numericDensity ?? 0;
+  const tableRiskScore =
+    tableSignals >= 2
+      ? 70
+      : tableSignals === 1
+        ? 38
+        : numericDensity > 0.18
+          ? 52
+          : 0;
+  const ocrRisk = riskLevelFromScore(opts.parseQuality.signals.ocrRiskScore ?? 0, 12, 35);
+  const tableRisk = riskLevelFromScore(tableRiskScore, 35, 65);
+  const thinSource =
+    opts.sourceQuality === "thin" ||
+    opts.parseQuality.level === "noisy" ||
+    opts.parseQuality.score < 48 ||
+    opts.parseQuality.warnings.includes("very_short_text") ||
+    opts.parseQuality.warnings.includes("fragmented_lines");
+  const warnings = unique(
+    [
+      ...opts.parseQuality.warnings,
+      tableRisk === "high" ? "table_risk_high" : tableRisk === "medium" ? "table_risk_medium" : "",
+      ocrRisk === "high" ? "ocr_risk_high" : ocrRisk === "medium" ? "ocr_risk_medium" : "",
+      thinSource ? "thin_source" : "",
+    ],
+    20,
+  );
+  return {
+    version: 1,
+    tableRisk,
+    ocrRisk,
+    thinSource,
+    strictRouteEligible: !thinSource && opts.parseQuality.level !== "noisy",
+    warnings,
+  };
+}
+
+function aggregateIngestionQuality(items: KnowledgeAutoMetadata[], parseQuality?: KnowledgeParseQuality): IngestionQualityReport | undefined {
+  const reports = items.map((item) => item.ingestionQuality).filter((item): item is IngestionQualityReport => Boolean(item));
+  if (reports.length === 0 && !parseQuality) return undefined;
+  const sourceQuality = collectionSourceQualityForItems(items);
+  if (reports.length === 0 && parseQuality) {
+    return buildIngestionQualityReport({ parseQuality, sourceQuality });
+  }
+  const riskRank = { none: 0, low: 1, medium: 2, high: 3 } as const;
+  const maxRisk = (key: "tableRisk" | "ocrRisk"): IngestionQualityReport["tableRisk"] =>
+    reports.map((report) => report[key]).sort((a, b) => riskRank[b] - riskRank[a])[0] ?? "none";
+  const thinSource = reports.some((report) => report.thinSource) || sourceQuality === "thin" || parseQuality?.level === "noisy";
+  return {
+    version: 1,
+    tableRisk: maxRisk("tableRisk"),
+    ocrRisk: maxRisk("ocrRisk"),
+    thinSource,
+    strictRouteEligible: !thinSource && reports.every((report) => report.strictRouteEligible !== false),
+    warnings: unique([
+      ...reports.flatMap((report) => report.warnings),
+      ...(parseQuality?.warnings ?? []),
+      thinSource ? "thin_source" : "",
+    ], 24),
   };
 }
 
@@ -583,6 +666,7 @@ export function mergeKnowledgeAutoMetadata(
     sourceQuality: collectionSourceQualityForItems(items),
     parseQuality: aggregateParseQuality(items),
   };
+  mergedBase.ingestionQuality = aggregateIngestionQuality(items, mergedBase.parseQuality);
   return {
     ...mergedBase,
     profile: buildKnowledgeCollectionProfile(items, { now: opts.now, previousProfile }) ?? undefined,

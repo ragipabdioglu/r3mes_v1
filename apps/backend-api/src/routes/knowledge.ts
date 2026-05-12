@@ -13,6 +13,7 @@ import { normalizeSuiAddress } from "@mysten/sui/utils";
 
 import { sendApiError } from "../lib/apiErrors.js";
 import {
+  buildIngestionQualityReport,
   enrichKnowledgeChunkWithAutoMetadata,
   inferKnowledgeAutoMetadata,
   mergeKnowledgeAutoMetadata,
@@ -406,6 +407,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           parseQualityScore: docMetadata?.parseQuality?.score ?? null,
           parseQualityLevel: docMetadata?.parseQuality?.level ?? null,
           parseQualityWarnings: docMetadata?.parseQuality?.warnings ?? [],
+          ingestionQuality: docMetadata?.ingestionQuality ?? null,
           inferredTopic: docMetadata?.subtopics[0] ?? chunkMetadata?.subtopics[0] ?? card?.topic ?? null,
           inferredTags: [
             ...(docMetadata ? [docMetadata.domain, ...docMetadata.subtopics, ...docMetadata.keywords] : []),
@@ -503,6 +505,10 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       return sendApiError(reply, 400, "EMPTY_DOCUMENT_METADATA", "Yüklenen knowledge dosyası için metadata üretilemedi");
     }
     documentAutoMetadata.parseQuality = parseQuality;
+    documentAutoMetadata.ingestionQuality = buildIngestionQualityReport({
+      parseQuality,
+      sourceQuality: documentAutoMetadata.sourceQuality,
+    });
     documentAutoMetadata.parseAdapter = {
       id: parsed.parser.id,
       version: parsed.parser.version,
@@ -638,6 +644,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       parseQualityScore: parseQuality.score,
       parseQualityLevel: parseQuality.level,
       parseQualityWarnings: parseQuality.warnings,
+      ingestionQuality: documentAutoMetadata.ingestionQuality ?? null,
     };
 
     const validated = safeParseKnowledgeUploadAcceptedResponse(payload);

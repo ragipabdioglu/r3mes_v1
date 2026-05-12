@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildIngestionQualityReport,
   buildKnowledgeCollectionProfile,
   enrichKnowledgeChunkWithAutoMetadata,
   inferKnowledgeAutoMetadata,
@@ -147,6 +148,78 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(merged?.parseQuality?.level).toBe("noisy");
     expect(merged?.parseQuality?.score).toBe(61);
     expect(merged?.parseQuality?.warnings).toContain("mojibake_detected");
+  });
+
+  it("builds ingestion quality gates from noisy parse signals", () => {
+    const parseQuality = {
+      score: 32,
+      level: "noisy" as const,
+      warnings: ["fragmented_lines", "ocr_risk_high"],
+      signals: {
+        textLength: 480,
+        chunkCount: 1,
+        averageChunkChars: 480,
+        replacementCharRatio: 0.002,
+        mojibakeMarkerCount: 0,
+        controlCharRatio: 0,
+        symbolRatio: 0.04,
+        shortLineRatio: 0.72,
+        structureSignalCount: 0,
+        tableSignalCount: 0,
+        numericDensity: 0.03,
+        ocrRiskScore: 42,
+      },
+    };
+
+    const report = buildIngestionQualityReport({ parseQuality, sourceQuality: "inferred" });
+
+    expect(report).toMatchObject({
+      version: 1,
+      ocrRisk: "high",
+      thinSource: true,
+      strictRouteEligible: false,
+    });
+    expect(report.warnings).toEqual(expect.arrayContaining(["fragmented_lines", "thin_source"]));
+  });
+
+  it("aggregates ingestion quality into collection metadata", () => {
+    const clean = inferKnowledgeAutoMetadata({
+      title: "temiz tablo",
+      content: "| Satır | Değer |\n| --- | --- |\n| Net kar | 1.250.000 TL |",
+    });
+    clean.parseQuality = {
+      score: 86,
+      level: "clean",
+      warnings: ["table_like_content"],
+      signals: {
+        textLength: 520,
+        chunkCount: 1,
+        averageChunkChars: 520,
+        replacementCharRatio: 0,
+        mojibakeMarkerCount: 0,
+        controlCharRatio: 0,
+        symbolRatio: 0.02,
+        shortLineRatio: 0.1,
+        structureSignalCount: 2,
+        tableSignalCount: 2,
+        numericDensity: 0.12,
+        ocrRiskScore: 0,
+      },
+    };
+    clean.ingestionQuality = buildIngestionQualityReport({
+      parseQuality: clean.parseQuality,
+      sourceQuality: clean.sourceQuality,
+    });
+
+    const merged = mergeKnowledgeAutoMetadata([clean]);
+
+    expect(merged?.ingestionQuality).toMatchObject({
+      tableRisk: "high",
+      ocrRisk: "none",
+      thinSource: false,
+      strictRouteEligible: true,
+    });
+    expect(merged?.ingestionQuality?.warnings).toContain("table_risk_high");
   });
 
   it("builds a weighted collection profile for adaptive routing", () => {

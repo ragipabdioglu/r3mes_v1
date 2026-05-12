@@ -2,6 +2,15 @@ export type KnowledgeVisibility = "PRIVATE" | "PUBLIC";
 
 export type KnowledgeParseStatus = "PENDING" | "READY" | "FAILED";
 export type KnowledgeParseQualityLevel = "clean" | "usable" | "noisy";
+export type KnowledgeIngestionRiskLevel = "none" | "low" | "medium" | "high";
+export type KnowledgeIngestionQualityReport = {
+  version: 1;
+  tableRisk: KnowledgeIngestionRiskLevel;
+  ocrRisk: KnowledgeIngestionRiskLevel;
+  thinSource: boolean;
+  strictRouteEligible: boolean;
+  warnings: string[];
+};
 
 export type KnowledgeCollectionListItem = {
   id: string;
@@ -39,6 +48,7 @@ export type KnowledgeDocumentDetail = {
   parseQualityScore?: number | null;
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
+  ingestionQuality?: KnowledgeIngestionQualityReport | null;
   inferredTopic?: string | null;
   inferredTags?: string[];
   createdAt: string;
@@ -66,6 +76,7 @@ export type KnowledgeUploadAcceptedResponse = {
   parseQualityScore?: number | null;
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
+  ingestionQuality?: KnowledgeIngestionQualityReport | null;
 };
 
 export type KnowledgeParserCapabilityItem = {

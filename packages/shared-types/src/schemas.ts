@@ -89,6 +89,15 @@ export const AdapterListResponseSchema: z.ZodType<AdapterListResponse> = z.objec
 
 export const KnowledgeVisibilitySchema = z.enum(["PRIVATE", "PUBLIC"]);
 export const KnowledgeParseQualityLevelSchema = z.enum(["clean", "usable", "noisy"]);
+export const KnowledgeIngestionRiskLevelSchema = z.enum(["none", "low", "medium", "high"]);
+export const KnowledgeIngestionQualityReportSchema = z.object({
+  version: z.literal(1),
+  tableRisk: KnowledgeIngestionRiskLevelSchema,
+  ocrRisk: KnowledgeIngestionRiskLevelSchema,
+  thinSource: z.boolean(),
+  strictRouteEligible: z.boolean(),
+  warnings: z.array(z.string()),
+});
 
 export const KnowledgeCollectionListItemSchema: z.ZodType<KnowledgeCollectionListItem> = z.object({
   id: z.string().min(1),
@@ -126,6 +135,7 @@ export const KnowledgeDocumentListItemSchema: z.ZodType<KnowledgeDocumentListIte
   parseQualityScore: z.number().min(0).max(100).nullable().optional(),
   parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
   parseQualityWarnings: z.array(z.string()).optional(),
+  ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
   inferredTopic: z.string().nullable().optional(),
   inferredTags: z.array(z.string()).optional(),
   createdAt: z.string().min(1),
@@ -153,6 +163,7 @@ export const KnowledgeUploadAcceptedResponseSchema: z.ZodType<KnowledgeUploadAcc
   parseQualityScore: z.number().min(0).max(100).nullable().optional(),
   parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
   parseQualityWarnings: z.array(z.string()).optional(),
+  ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
 });
 
 export const KnowledgeParserCapabilityItemSchema: z.ZodType<KnowledgeParserCapabilityItem> = z.object({

@@ -43,7 +43,7 @@ function countBy(rows, getKey) {
   }, {});
 }
 
-function failedExpectation(caseItem, quality) {
+function failedExpectation(caseItem, quality, ingestionQuality) {
   const failures = [];
   if (caseItem.expectedLevel && quality.level !== caseItem.expectedLevel) {
     failures.push(`level:${quality.level}!=${caseItem.expectedLevel}`);
@@ -60,15 +60,28 @@ function failedExpectation(caseItem, quality) {
   for (const warning of caseItem.forbiddenWarnings ?? []) {
     if (quality.warnings.includes(warning)) failures.push(`forbidden_warning:${warning}`);
   }
+  if (caseItem.expectedOcrRisk && ingestionQuality.ocrRisk !== caseItem.expectedOcrRisk) {
+    failures.push(`ocr_risk:${ingestionQuality.ocrRisk}!=${caseItem.expectedOcrRisk}`);
+  }
+  if (caseItem.expectedTableRisk && ingestionQuality.tableRisk !== caseItem.expectedTableRisk) {
+    failures.push(`table_risk:${ingestionQuality.tableRisk}!=${caseItem.expectedTableRisk}`);
+  }
+  if (typeof caseItem.expectedThinSource === "boolean" && ingestionQuality.thinSource !== caseItem.expectedThinSource) {
+    failures.push(`thin_source:${ingestionQuality.thinSource}!=${caseItem.expectedThinSource}`);
+  }
+  if (typeof caseItem.expectedStrictRouteEligible === "boolean" && ingestionQuality.strictRouteEligible !== caseItem.expectedStrictRouteEligible) {
+    failures.push(`strict_route:${ingestionQuality.strictRouteEligible}!=${caseItem.expectedStrictRouteEligible}`);
+  }
   return failures;
 }
 
 async function main() {
   const opts = parseArgs();
   const started = Date.now();
-  const [{ scoreKnowledgeParseQuality }, { chunkKnowledgeText }] = await Promise.all([
+  const [{ scoreKnowledgeParseQuality }, { chunkKnowledgeText }, { buildIngestionQualityReport }] = await Promise.all([
     import(pathToFileURL(resolve(backendRoot, "dist/lib/knowledgeParseQuality.js")).href),
     import(pathToFileURL(resolve(backendRoot, "dist/lib/knowledgeText.js")).href),
+    import(pathToFileURL(resolve(backendRoot, "dist/lib/knowledgeAutoMetadata.js")).href),
   ]);
   const cases = await readJsonl(opts.file);
   const results = cases.map((caseItem) => {
@@ -79,7 +92,11 @@ async function main() {
       text: caseItem.text,
       chunks,
     });
-    const failures = failedExpectation(caseItem, quality);
+    const ingestionQuality = buildIngestionQualityReport({
+      parseQuality: quality,
+      sourceQuality: caseItem.sourceQuality ?? "inferred",
+    });
+    const failures = failedExpectation(caseItem, quality, ingestionQuality);
     return {
       id: caseItem.id,
       bucket: caseItem.bucket ?? "default",
@@ -88,6 +105,7 @@ async function main() {
       actualLevel: quality.level,
       score: quality.score,
       warnings: quality.warnings,
+      ingestionQuality,
       signals: quality.signals,
       passed: failures.length === 0,
       failures,
@@ -108,6 +126,12 @@ async function main() {
       for (const warning of result.warnings) acc[warning] = (acc[warning] ?? 0) + 1;
       return acc;
     }, {}),
+    ingestionRiskCounts: {
+      ocr: countBy(results, (result) => result.ingestionQuality.ocrRisk),
+      table: countBy(results, (result) => result.ingestionQuality.tableRisk),
+      thinSource: countBy(results, (result) => String(result.ingestionQuality.thinSource)),
+      strictRouteEligible: countBy(results, (result) => String(result.ingestionQuality.strictRouteEligible)),
+    },
     scoreDistribution: {
       min: scores[0] ?? null,
       p50: scores[Math.floor((scores.length - 1) * 0.5)] ?? null,
@@ -120,6 +144,7 @@ async function main() {
       actualLevel: result.actualLevel,
       score: result.score,
       warnings: result.warnings,
+      ingestionQuality: result.ingestionQuality,
     })),
   };
   const report = {

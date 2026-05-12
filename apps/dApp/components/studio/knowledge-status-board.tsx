@@ -219,6 +219,22 @@ function parseQualityLabel(doc: KnowledgeDocumentDetail): string {
   return `${doc.parseQualityLevel}${score}`;
 }
 
+function ingestionRiskTone(level: "none" | "low" | "medium" | "high" | undefined): string {
+  if (level === "high") return "text-red-100 bg-red-500/10 ring-red-500/30";
+  if (level === "medium") return "text-amber-100 bg-amber-500/10 ring-amber-500/30";
+  if (level === "low") return "text-cyan-100 bg-cyan-500/10 ring-cyan-500/30";
+  return "text-zinc-300 bg-zinc-800/60 ring-zinc-700";
+}
+
+function ingestionGateLabel(doc: KnowledgeDocumentDetail): string {
+  const quality = doc.ingestionQuality;
+  if (!quality) return "Ingestion gate yok";
+  if (quality.thinSource) return "Thin source";
+  if (!quality.strictRouteEligible) return "Strict kapalı";
+  if (quality.ocrRisk === "high" || quality.tableRisk === "high") return "Temkinli gate";
+  return "Strict uygun";
+}
+
 function sortKnowledgeItems(a: KnowledgeCollectionListItem, b: KnowledgeCollectionListItem): number {
   const privateA = a.visibility === "PRIVATE" ? 0 : 1;
   const privateB = b.visibility === "PRIVATE" ? 0 : 1;
@@ -618,6 +634,19 @@ export function KnowledgeStatusBoard() {
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${parseQualityTone(doc.parseQualityLevel)}`}>
                               {parseQualityLabel(doc)}
                             </span>
+                            {doc.ingestionQuality ? (
+                              <>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${ingestionRiskTone(doc.ingestionQuality.ocrRisk)}`}>
+                                  OCR {doc.ingestionQuality.ocrRisk}
+                                </span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${ingestionRiskTone(doc.ingestionQuality.tableRisk)}`}>
+                                  Table {doc.ingestionQuality.tableRisk}
+                                </span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${doc.ingestionQuality.strictRouteEligible ? "text-emerald-100 bg-emerald-500/10 ring-emerald-500/30" : "text-amber-100 bg-amber-500/10 ring-amber-500/30"}`}>
+                                  {ingestionGateLabel(doc)}
+                                </span>
+                              </>
+                            ) : null}
                           </div>
                           <dl className="mt-2 grid gap-2 text-[11px] text-zinc-500 sm:grid-cols-3">
                             <div>
@@ -661,6 +690,11 @@ export function KnowledgeStatusBoard() {
                           {doc.parseQualityWarnings?.length ? (
                             <p className="mt-2 text-[11px] leading-relaxed text-amber-100/70">
                               Parse warning: {doc.parseQualityWarnings.slice(0, 4).join(", ")}
+                            </p>
+                          ) : null}
+                          {doc.ingestionQuality?.warnings.length ? (
+                            <p className="mt-1 text-[11px] leading-relaxed text-amber-100/70">
+                              Ingestion warning: {doc.ingestionQuality.warnings.slice(0, 5).join(", ")}
                             </p>
                           ) : null}
                         </li>
