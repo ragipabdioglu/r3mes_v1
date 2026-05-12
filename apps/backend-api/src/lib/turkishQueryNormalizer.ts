@@ -72,25 +72,6 @@ function routePlanTerms(routePlan?: DomainRoutePlan | null): string[] {
   ];
 }
 
-function typoTolerantTerms(tokens: string[]): string[] {
-  const terms: string[] = [];
-  for (const token of tokens) {
-    if (/^agri\w*$/.test(token) || /^agr[yi]\w*$/.test(token)) {
-      terms.push("agri", "agriyor", "agri agrisi");
-    }
-    if (/^kasik\w*$/.test(token) || /^kasig\w*$/.test(token)) {
-      terms.push("kasik", "kasik agrisi", "pelvik agri", "alt karin");
-    }
-    if (/^bas\w*$/.test(token) || token === "migren") {
-      terms.push("bas", "bas agrisi", "migren");
-    }
-    if (/^karin\w*$/.test(token) || /^karn\w*$/.test(token) || token === "mide" || token === "gobek") {
-      terms.push("karin", "karin agrisi", "mide", "gobek");
-    }
-  }
-  return terms;
-}
-
 export function normalizeTurkishQuery(
   query: string,
   routePlan?: DomainRoutePlan | null,
@@ -104,7 +85,6 @@ export function normalizeTurkishQuery(
     [
       ...tokens,
       ...surfaceTerms,
-      ...typoTolerantTerms(tokens),
     ],
     96,
   );

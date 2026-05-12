@@ -94,6 +94,12 @@ function softenFinalConsonant(value: string): string[] {
 function lightTokenVariants(value: string): string[] {
   const normalized = normalizeConceptText(value);
   const variants = new Set<string>(softenFinalConsonant(normalized));
+  if (normalized.length >= 5 && normalized.endsWith("yo")) {
+    variants.add(`${normalized.slice(0, -2)}yor`);
+  }
+  if (normalized.length >= 6 && normalized.endsWith("iyo")) {
+    variants.add(`${normalized.slice(0, -3)}iyor`);
+  }
   for (const suffix of LIGHT_TURKISH_SUFFIXES) {
     if (!normalized.endsWith(suffix)) continue;
     const stem = normalized.slice(0, -suffix.length);

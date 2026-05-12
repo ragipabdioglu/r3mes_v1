@@ -18,4 +18,10 @@ describe("conceptNormalizer", () => {
     expect(surface).toContain("bugun");
     expect(surface).not.toContain("bug");
   });
+
+  it("expands colloquial Turkish verb endings without domain-specific query rules", () => {
+    const surface = expandSurfaceTokenVariants("agriyo ilerliyo");
+
+    expect(surface).toEqual(expect.arrayContaining(["agriyor", "ilerliyor"]));
+  });
 });

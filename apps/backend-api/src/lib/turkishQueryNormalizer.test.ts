@@ -12,7 +12,7 @@ describe("turkishQueryNormalizer", () => {
     expect(expanded).toContain("pelvik agri");
   });
 
-  it("normalizes plural/possessive and ascii typo variants for pelvic pain", () => {
+  it("normalizes plural/possessive and colloquial verb variants through concept expansion", () => {
     const tokens = buildExpandedQueryTokens("kasiklarim agriyo", null, 32);
 
     expect(tokens).toContain("kasik agrisi");
