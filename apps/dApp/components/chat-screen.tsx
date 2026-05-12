@@ -282,9 +282,11 @@ function sanitizeAssistantText(text: string): string {
 function SourceList({
   sources,
   collections,
+  debugMode = false,
 }: {
   sources?: ChatSourceCitation[];
   collections: KnowledgeCollectionListItem[];
+  debugMode?: boolean;
 }) {
   if (!sources || sources.length === 0) {
     return null;
@@ -302,7 +304,7 @@ function SourceList({
               {sources.length} kaynak
             </span>
             <span className="text-[11px] text-zinc-500">
-              Yanıt kaynaklı üretildi
+              Yanıt seçilen knowledge ile desteklendi
             </span>
           </div>
           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -321,10 +323,15 @@ function SourceList({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-zinc-100">{source.title}</span>
                 {collection ? <VisibilityPill visibility={collection.visibility} /> : null}
-                <span className="font-mono text-[10px] text-zinc-600">
-                  {shortId(source.collectionId)}
-                  {source.chunkIndex != null ? ` · chunk ${source.chunkIndex}` : ""}
-                </span>
+                {collection ? (
+                  <span className="text-[10px] text-zinc-500">{collection.name}</span>
+                ) : null}
+                {debugMode ? (
+                  <span className="font-mono text-[10px] text-zinc-600">
+                    {shortId(source.collectionId)}
+                    {source.chunkIndex != null ? ` · chunk ${source.chunkIndex}` : ""}
+                  </span>
+                ) : null}
               </div>
               {source.excerpt ? (
                 <p className="mt-1 line-clamp-3 leading-relaxed text-zinc-500">
@@ -1434,7 +1441,13 @@ export function ChatScreen() {
                     onSelectCollection={selectSuggestedCollection}
                   />
                 ) : null}
-                {m.role === "assistant" ? <SourceList sources={m.sources} collections={collections} /> : null}
+                {m.role === "assistant" ? (
+                  <SourceList
+                    sources={m.sources}
+                    collections={collections}
+                    debugMode={showDebugDetails}
+                  />
+                ) : null}
                 {m.role === "assistant" && showDebugDetails ? <DomainBadge debug={m.retrievalDebug} /> : null}
                 {m.role === "assistant" ? (
                   <RetrievalDebugPanel
