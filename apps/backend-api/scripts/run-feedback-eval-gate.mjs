@@ -21,6 +21,10 @@ const repoRoot = resolve(appRoot, "..", "..");
 const outFile = resolve(repoRoot, argValue("--out", "artifacts/evals/feedback-gate/latest.json"));
 const feedbackGolden = "artifacts/evals/feedback-regression/golden.jsonl";
 const feedbackOut = "artifacts/evals/feedback-regression/latest.json";
+const eval100Latest = "artifacts/evals/eval-100/latest.json";
+const betaFeedbackFixture = "artifacts/evals/beta-reality/feedback-fixture.jsonl";
+const betaFeedbackGolden = "artifacts/evals/beta-reality/feedback-regression.golden.jsonl";
+const betaFeedbackOut = "artifacts/evals/beta-reality/feedback-regression.latest.json";
 const productionRagOut = "artifacts/evals/production-rag/feedback-gate.json";
 const baseUrl = argValue("--base-url", process.env.R3MES_BACKEND_URL || "http://127.0.0.1:3000");
 const requireApproved = hasArg("--require-approved");
@@ -181,6 +185,15 @@ async function countJsonlRows(file) {
   }
 }
 
+async function fileExists(file) {
+  try {
+    await stat(resolve(repoRoot, file));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function approvedProposalCount() {
   const wallet = process.env.R3MES_DEV_WALLET || "0x0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d";
   const user = await prisma.user.findUnique({ where: { walletAddress: wallet }, select: { id: true } });
@@ -239,6 +252,71 @@ async function main() {
     });
   }
 
+  if (await fileExists(eval100Latest)) {
+    checks.push(await runCommand("beta_reality_report", "node", [
+      "scripts/analyze-beta-reality.mjs",
+      "--input",
+      eval100Latest,
+    ]));
+    checks.push(await runCommand("generate_beta_feedback_fixture", "node", [
+      "scripts/generate-beta-feedback-fixture.mjs",
+      "--report",
+      "artifacts/evals/beta-reality/latest.json",
+      "--golden",
+      "artifacts/evals/eval-100/golden.jsonl",
+      "--out",
+      betaFeedbackFixture,
+    ]));
+    const betaFixtureCount = await countJsonlRows(betaFeedbackFixture);
+    if (betaFixtureCount > 0) {
+      checks.push(await runCommand("generate_beta_feedback_regression", "node", [
+        "scripts/generate-feedback-regression-eval.mjs",
+        "--fixture",
+        betaFeedbackFixture,
+        "--out",
+        betaFeedbackGolden,
+      ]));
+      const betaFeedbackCaseCount = await countJsonlRows(betaFeedbackGolden);
+      if (betaFeedbackCaseCount > 0) {
+        checks.push(await runCommand("beta_feedback_regression", "node", evalArgs(
+          betaFeedbackGolden,
+          betaFeedbackOut,
+          quick ? 5 : 0,
+        )));
+      } else {
+        checks.push({
+          name: "beta_feedback_regression",
+          command: "skipped",
+          ok: true,
+          skipped: true,
+          reason: "beta reality fixture did not generate feedback regression cases",
+          durationMs: 0,
+          betaFixtureCount,
+          betaFeedbackCaseCount,
+        });
+      }
+    } else {
+      checks.push({
+        name: "beta_feedback_regression",
+        command: "skipped",
+        ok: true,
+        skipped: true,
+        reason: "beta reality report had no actionable feedback fixture rows",
+        durationMs: 0,
+        betaFixtureCount,
+      });
+    }
+  } else {
+    checks.push({
+      name: "beta_feedback_regression",
+      command: "skipped",
+      ok: true,
+      skipped: true,
+      reason: "eval-100 latest artifact not found; run pnpm run eval:100 before beta-derived feedback gate",
+      durationMs: 0,
+    });
+  }
+
   checks.push(await runCommand("rag_quality_gates", "node", evalArgs(
     "infrastructure/evals/rag-quality-gates/golden.jsonl",
     "artifacts/evals/rag-quality-gates/latest.json",
@@ -271,6 +349,7 @@ async function main() {
 
   const evalSummaries = {
     feedbackRegression: await readJsonIfExists(feedbackOut),
+    betaFeedbackRegression: await readJsonIfExists(betaFeedbackOut),
     ragQualityGates: await readJsonIfExists("artifacts/evals/rag-quality-gates/latest.json"),
     collectionSuggestion: await readJsonIfExists("artifacts/evals/collection-suggestion/latest.json"),
     productionRag: await readJsonIfExists(productionRagOut),
@@ -310,6 +389,7 @@ async function main() {
     checks,
     summaries: {
       feedbackRegression: evalSummaries.feedbackRegression?.summary ?? null,
+      betaFeedbackRegression: evalSummaries.betaFeedbackRegression?.summary ?? null,
       ragQualityGates: evalSummaries.ragQualityGates?.summary ?? null,
       collectionSuggestion: evalSummaries.collectionSuggestion?.summary ?? null,
       productionRag: evalSummaries.productionRag?.totals ?? null,
