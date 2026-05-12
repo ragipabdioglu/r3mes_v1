@@ -144,6 +144,24 @@ function rerankerCandidateLimitForBudget(budgetMode: RetrievalBudgetMode): numbe
   return parsePositiveInt(process.env.R3MES_RERANKER_NORMAL_CANDIDATE_LIMIT, 4);
 }
 
+function rerankerCandidateLimitForRoute(opts: {
+  budgetMode: RetrievalBudgetMode;
+  routePlan?: DomainRoutePlan | null;
+  query: string;
+}): number {
+  const { budgetMode, routePlan, query } = opts;
+  const baseLimit = rerankerCandidateLimitForBudget(budgetMode);
+  const needsBroadEvidencePool =
+    disclosureIndexes(query).length > 0 ||
+    primaryQuerySymbol(query) ||
+    asksForMultilingualDisclosure(query) ||
+    criticalEvidenceTermGroups(query).length > 0;
+  if (routePlan?.confidence === "low" && !needsBroadEvidencePool) {
+    return Math.min(baseLimit, parsePositiveInt(process.env.R3MES_RERANKER_LOW_CONFIDENCE_CANDIDATE_LIMIT, 4));
+  }
+  return baseLimit;
+}
+
 function minRerankScore(): number {
   return parseNonNegativeFloat(process.env.R3MES_RAG_MIN_RERANK_SCORE, 0.9);
 }
@@ -1427,7 +1445,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     embeddingScore: candidate.vectorScore ?? 0,
     fusedScore: candidate.preRankScore,
   }));
-  const rerankerCandidateLimit = rerankerCandidateLimitForBudget(budgetMode);
+  const rerankerCandidateLimit = rerankerCandidateLimitForRoute({ budgetMode, routePlan, query: evidenceQuery });
   const scopedRerankerCandidateLimit =
     disclosureIndexes(evidenceQuery).length > 0 || primaryQuerySymbol(evidenceQuery)
       ? Math.min(rerankerCandidateLimit, parsePositiveInt(process.env.R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT, 5))
