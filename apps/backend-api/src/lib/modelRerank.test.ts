@@ -202,6 +202,79 @@ describe("rerankKnowledgeCardsWithFallback", () => {
     vi.unstubAllEnvs();
   });
 
+  it("lets the model reranker inspect the full configured candidate pool", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "model");
+    vi.stubEnv("R3MES_RERANKER_CANDIDATE_LIMIT", "2");
+    const fetchMock = vi.fn().mockImplementation((_url, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string | undefined) ?? "{}") as { documents?: string[] };
+      const scores = (body.documents ?? []).map((document) =>
+        document.includes("education-discipline-parent") ? 5 : -5,
+      );
+      return Promise.resolve(new Response(JSON.stringify({ scores, provider: "cross_encoder" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
+      "okul disiplin sürecinde veli tutanak savunma",
+      [
+        {
+          fusedScore: 1,
+          lexicalScore: 1,
+          embeddingScore: 0,
+          chunk: {
+            id: "exam",
+            content: "sınav sonucuna itiraz için kılavuz ve başvuru süresi kontrol edilir",
+            document: { title: "education-exam-objection" },
+          },
+          card: {
+            topic: "sınav itirazı",
+            tags: ["education", "exam"],
+            patientSummary: "Sınav sonucuna itiraz.",
+            clinicalTakeaway: "",
+            safeGuidance: "",
+            redFlags: "",
+            doNotInfer: "",
+          },
+        },
+        {
+          fusedScore: 0.9,
+          lexicalScore: 0.9,
+          embeddingScore: 0,
+          chunk: {
+            id: "discipline",
+            content: "disiplin sürecinde veli tutanak savunma ve kurul kararını saklamalıdır",
+            document: { title: "education-discipline-parent" },
+          },
+          card: {
+            topic: "disiplin süreci",
+            tags: ["education", "discipline"],
+            patientSummary: "Okul disiplin sürecinde veli belgeleri.",
+            clinicalTakeaway: "",
+            safeGuidance: "",
+            redFlags: "",
+            doNotInfer: "",
+          },
+        },
+      ],
+      1,
+    );
+
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string | undefined) ?? "{}") as {
+      documents?: string[];
+    };
+    expect(body.documents).toHaveLength(2);
+    expect(body.documents?.some((document) => document.includes("education-discipline-parent"))).toBe(true);
+    expect(result.diagnostics.deterministicCandidateCount).toBeGreaterThan(0);
+    expect(result.diagnostics.modelCandidateCount).toBe(2);
+    expect(result.candidates[0]?.chunk).toMatchObject({ id: "discipline" });
+
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   it("allows callers to override the model candidate pool for adaptive budgets", async () => {
     vi.stubEnv("R3MES_RERANKER_MODE", "model");
     vi.stubEnv("R3MES_RERANKER_CANDIDATE_LIMIT", "5");

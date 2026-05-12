@@ -377,6 +377,12 @@ function shouldRunRetrievalBackedSuggestionProbe(opts: {
   if (!opts.retrievalQuery || opts.skipSourceSuggestions) return false;
   if (opts.requestedCollectionIds.length === 0) return false;
   if (
+    opts.retrievalSources.length > 0 &&
+    (process.env.R3MES_ENABLE_GROUNDED_SUGGESTION_PROBE ?? "0").trim().toLowerCase() !== "1"
+  ) {
+    return false;
+  }
+  if (
     opts.requestedCollectionIds.length > 0 &&
     opts.retrievalSources.length === 0 &&
     opts.groundingConfidence === "low"

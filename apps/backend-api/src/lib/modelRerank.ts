@@ -238,6 +238,37 @@ function readChunkCollectionId(chunk: unknown): string | undefined {
   return typeof collectionId === "string" && collectionId.trim() ? collectionId : undefined;
 }
 
+function candidateIdentity(chunk: unknown, index: number): string {
+  const id = readChunkField(chunk, "id");
+  if (id) return `chunk:${id}`;
+  const documentId = readChunkField(chunk, "documentId");
+  const chunkIndex =
+    chunk && typeof chunk === "object" && typeof (chunk as { chunkIndex?: unknown }).chunkIndex === "number"
+      ? String((chunk as { chunkIndex: number }).chunkIndex)
+      : null;
+  if (documentId && chunkIndex !== null) return `document:${documentId}:${chunkIndex}`;
+  return `index:${index}`;
+}
+
+function buildModelRerankPool<TChunk>(
+  candidates: Array<HybridCandidate<TChunk> & { card: KnowledgeCard }>,
+  deterministic: Array<RerankCandidate<TChunk>>,
+): Array<RerankCandidate<TChunk>> {
+  const seen = new Set(deterministic.map((candidate, index) => candidateIdentity(candidate.chunk, index)));
+  const supplemental = candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate, index }) => !seen.has(candidateIdentity(candidate.chunk, index)))
+    .sort((a, b) => b.candidate.fusedScore - a.candidate.fusedScore)
+    .map(({ candidate }) => ({
+      ...candidate,
+      rerankScore: candidate.fusedScore,
+      matchedIntentCount: 0,
+      strictEligible: false,
+    }));
+
+  return [...deterministic, ...supplemental];
+}
+
 function traceCandidates<TChunk>(
   candidates: Array<RerankCandidate<TChunk>>,
   modelScores?: { raw: number[]; normalized: number[] },
@@ -362,7 +393,7 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
   opts: ModelRerankOptions = {},
 ): Promise<RerankWithDiagnosticsResult<TChunk>> {
   const deterministic = rerankKnowledgeCards(query, candidates, candidates.length);
-  if (!isModelRerankerEnabled() || deterministic.length === 0) {
+  if (!isModelRerankerEnabled()) {
     if (realRerankerRequired() && deterministic.length > 0) {
       throw new Error(`real reranker required but R3MES_RERANKER_MODE=${rerankerMode() || "deterministic"}`);
     }
@@ -381,9 +412,25 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
     };
   }
 
-  const requestedLimit = Math.max(1, Math.min(limit, deterministic.length));
-  const candidateLimit = Math.min(resolveCandidateLimit(opts.candidateLimit), deterministic.length);
-  const modelPool = deterministic.slice(0, candidateLimit);
+  const rerankPool = buildModelRerankPool(candidates, deterministic);
+  if (rerankPool.length === 0) {
+    return {
+      candidates: [],
+      diagnostics: buildDiagnostics({
+        mode: "deterministic",
+        modelEnabled: true,
+        fallbackUsed: false,
+        inputCandidateCount: candidates.length,
+        deterministicCandidateCount: deterministic.length,
+        modelCandidateCount: 0,
+        returned: [],
+      }),
+    };
+  }
+
+  const requestedLimit = Math.max(1, Math.min(limit, rerankPool.length));
+  const candidateLimit = Math.min(resolveCandidateLimit(opts.candidateLimit), rerankPool.length);
+  const modelPool = rerankPool.slice(0, candidateLimit);
   const documents = modelPool.map((candidate) => buildRerankerDocumentText(candidate));
 
   try {
@@ -400,17 +447,18 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
     }
 
     const normalizedModelScores = normalizeScores(rawScores);
+    const normalizedDeterministicScores = normalizeScores(modelPool.map((candidate) => candidate.rerankScore));
     const modelWeight = getModelWeight();
     const rescored = modelPool
       .map((candidate, index) => ({
         ...candidate,
         modelRawScore: rawScores[index],
         modelNormalizedScore: normalizedModelScores[index],
-        rerankScore: candidate.rerankScore + normalizedModelScores[index] * modelWeight,
+        rerankScore: normalizedDeterministicScores[index] + normalizedModelScores[index] * modelWeight,
       }))
       .sort((a, b) => b.rerankScore - a.rerankScore);
 
-    const returned = [...rescored, ...deterministic.slice(candidateLimit)].slice(0, limit);
+    const returned = [...rescored, ...rerankPool.slice(candidateLimit)].slice(0, limit);
     return {
       candidates: returned,
       diagnostics: buildDiagnostics({
@@ -431,7 +479,7 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
       throw new Error(`real reranker required but model rerank failed: ${message}`);
     }
     console.warn(`[backend-reranker] Falling back to deterministic reranker: ${message}`);
-    const returned = deterministic.slice(0, limit);
+    const returned = rerankPool.slice(0, limit);
     return {
       candidates: returned,
       diagnostics: buildDiagnostics({
