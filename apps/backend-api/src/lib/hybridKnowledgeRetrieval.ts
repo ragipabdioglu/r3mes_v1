@@ -86,7 +86,7 @@ export interface HybridRetrievedKnowledgeContext {
       requestedSourceLimit: number;
       finalSourceLimit: number;
       finalSourceCount: number;
-      evidenceContextMode: "raw" | "pruned";
+      evidenceContextMode: "none" | "raw" | "pruned";
       contextTextChars: number;
       evidenceInputChars: number;
       evidencePrunedInputChars: number;
@@ -273,7 +273,12 @@ function buildBudgetDiagnostics(opts: {
     requestedSourceLimit: opts.requestedSourceLimit,
     finalSourceLimit: opts.finalSourceLimit,
     finalSourceCount: opts.finalSourceCount,
-    evidenceContextMode: evidencePrunedInputChars > 0 && evidencePrunedInputChars < evidenceInputChars ? "pruned" : "raw",
+    evidenceContextMode:
+      evidenceInputChars <= 0
+        ? "none"
+        : evidencePrunedInputChars > 0 && evidencePrunedInputChars < evidenceInputChars
+          ? "pruned"
+          : "raw",
     contextTextChars: opts.contextText?.length ?? 0,
     evidenceInputChars,
     evidencePrunedInputChars,
