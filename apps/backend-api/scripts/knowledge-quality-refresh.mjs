@@ -8,6 +8,7 @@ const skipTypecheck = args.has("--skip-typecheck");
 const skipProviders = args.has("--skip-providers");
 const skipBackfill = args.has("--skip-backfill");
 const skipReindex = args.has("--skip-reindex");
+const skipParseQuality = args.has("--skip-parse-quality");
 const skipEval = args.has("--skip-eval");
 
 function argValue(name) {
@@ -82,6 +83,14 @@ if (!skipReindex) {
   });
 }
 
+if (!skipParseQuality) {
+  steps.push({
+    name: "parse quality eval",
+    command: pnpmBin(),
+    args: ["run", "eval:parse-quality"],
+  });
+}
+
 if (!skipEval) {
   steps.push({
     name: "generated collection smoke",
@@ -103,6 +112,7 @@ try {
       providers: skipProviders,
       backfill: skipBackfill,
       reindex: skipReindex,
+      parseQuality: skipParseQuality,
       eval: skipEval,
     },
   }, null, 2));

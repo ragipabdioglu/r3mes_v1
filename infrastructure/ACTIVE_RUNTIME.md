@@ -157,6 +157,7 @@ The command runs:
 - Real BGE-M3 / cross-encoder provider smoke.
 - Knowledge metadata backfill.
 - Qdrant reindex with real embeddings.
+- Parse quality eval for OCR/noise/table/thin-source gates.
 - Generated collection smoke eval, including positive, wrong-source suggestion, same-domain wrong-topic, and thin-profile caution cases.
 
 Useful local shortcuts:
@@ -170,6 +171,9 @@ pnpm knowledge:quality-refresh -- --skip-eval --max-batches 1
 
 # Rebuild metadata/eval only, keeping Qdrant as-is.
 pnpm knowledge:quality-refresh -- --skip-reindex
+
+# Skip parser fixtures only for non-ingestion code changes.
+pnpm knowledge:quality-refresh -- --skip-parse-quality
 ```
 
 Targeted unit tests for the active path live under:

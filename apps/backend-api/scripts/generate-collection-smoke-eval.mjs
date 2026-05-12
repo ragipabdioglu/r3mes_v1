@@ -30,6 +30,9 @@ function readProfile(autoMetadata) {
   if (!autoMetadata || typeof autoMetadata !== "object") return null;
   const profile = autoMetadata.profile && typeof autoMetadata.profile === "object" ? autoMetadata.profile : null;
   const source = profile ?? autoMetadata;
+  const ingestionQuality = autoMetadata.ingestionQuality && typeof autoMetadata.ingestionQuality === "object"
+    ? autoMetadata.ingestionQuality
+    : null;
   const domains = asStringArray(source.domains);
   const domain = domains[0] || (typeof source.domain === "string" ? source.domain : "general");
   return {
@@ -49,6 +52,13 @@ function readProfile(autoMetadata) {
       source.confidence === "high" || source.confidence === "medium" || source.confidence === "low"
         ? source.confidence
         : "low",
+    strictRouteEligible:
+      source.sourceQuality === "thin" ||
+      ingestionQuality?.thinSource === true ||
+      ingestionQuality?.ocrRisk === "high" ||
+      ingestionQuality?.strictRouteEligible === false
+        ? false
+        : true,
   };
 }
 
@@ -198,16 +208,17 @@ function forbiddenTermsFor(profile) {
 
 function positiveCase(collection, profile) {
   const isThin = profile.sourceQuality === "thin";
+  const strictEligible = profile.strictRouteEligible !== false;
   return {
     id: `generated-positive-${slug(collection.id || collection.name)}`,
-    bucket: isThin ? "generated_thin_positive" : "generated_positive",
+    bucket: !strictEligible ? "generated_quality_cautious_positive" : isThin ? "generated_thin_positive" : "generated_positive",
     query: questionForCollection(collection, profile),
     collectionIds: [collection.id],
     expectedRetrievalMode: "true_hybrid",
     expectedConfidence: ["medium", "high"],
     mustPassSafety: false,
     expectedSafetySeverity: isThin ? ["warn", "rewrite"] : ["pass", "warn", "rewrite"],
-    ...(isThin
+    ...(!strictEligible
       ? {
           expectedRouteDecisionMode: "broad",
           expectedRouteReasonTerms: ["thin profile"],
@@ -218,7 +229,7 @@ function positiveCase(collection, profile) {
     expectedUsedCollectionIds: [collection.id],
     mustHaveSources: true,
     minEvidenceFacts: 1,
-    maxSources: 3,
+    maxSources: 4,
     mustNotHaveLowLanguageQuality: true,
     maxLatencyMs: 30000,
   };
@@ -228,16 +239,17 @@ function normalizedPositiveCase(collection, profile) {
   const query = normalizedQuestionForCollection(collection, profile);
   if (!query) return null;
   const isThin = profile.sourceQuality === "thin";
+  const strictEligible = profile.strictRouteEligible !== false;
   return {
     id: `generated-normalized-positive-${slug(collection.id || collection.name)}`,
-    bucket: isThin ? "generated_thin_normalized_positive" : "generated_normalized_positive",
+    bucket: !strictEligible ? "generated_quality_cautious_normalized_positive" : isThin ? "generated_thin_normalized_positive" : "generated_normalized_positive",
     query,
     collectionIds: [collection.id],
     expectedRetrievalMode: "true_hybrid",
     expectedConfidence: ["medium", "high"],
     mustPassSafety: false,
     expectedSafetySeverity: isThin ? ["warn", "rewrite"] : ["pass", "warn", "rewrite"],
-    ...(isThin
+    ...(!strictEligible
       ? {
           expectedRouteDecisionMode: "broad",
           expectedRouteReasonTerms: ["thin profile"],
@@ -248,7 +260,7 @@ function normalizedPositiveCase(collection, profile) {
     expectedUsedCollectionIds: [collection.id],
     mustHaveSources: true,
     minEvidenceFacts: 1,
-    maxSources: 3,
+    maxSources: 4,
     mustNotHaveLowLanguageQuality: true,
     maxLatencyMs: 30000,
   };
@@ -364,7 +376,7 @@ async function main() {
   });
   const eligible = collections
     .map((collection) => ({ collection, profile: readProfile(collection.autoMetadata) }))
-    .filter(({ profile }) => profile && (includeThin || profile.sourceQuality !== "thin"))
+    .filter(({ profile }) => profile && (includeThin || (profile.sourceQuality !== "thin" && profile.strictRouteEligible !== false)))
     .slice(0, maxCollections);
 
   const cases = [];
@@ -393,6 +405,9 @@ async function main() {
     outFile,
     collections: collections.length,
     eligibleCollections: eligible.length,
+    strictIneligibleCollections: collections
+      .map((collection) => readProfile(collection.autoMetadata))
+      .filter((profile) => profile?.strictRouteEligible === false).length,
     normalizationCases,
     cases: cases.length,
   }, null, 2));
