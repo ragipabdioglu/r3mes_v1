@@ -282,10 +282,12 @@ function sanitizeAssistantText(text: string): string {
 function SourceList({
   sources,
   collections,
+  debug,
   debugMode = false,
 }: {
   sources?: ChatSourceCitation[];
   collections: KnowledgeCollectionListItem[];
+  debug?: ChatRetrievalDebug;
   debugMode?: boolean;
 }) {
   if (!sources || sources.length === 0) {
@@ -294,6 +296,7 @@ function SourceList({
 
   const visibleSources = sources.slice(0, 3);
   const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length);
+  const why = buildSourceExplanation(debug, sources.length);
 
   return (
     <details className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 px-3 py-2">
@@ -312,6 +315,11 @@ function SourceList({
           </span>
         </div>
       </summary>
+      {why ? (
+        <p className="mt-3 rounded-lg border border-emerald-500/15 bg-emerald-950/10 px-3 py-2 text-[11px] leading-relaxed text-emerald-100/80">
+          {why}
+        </p>
+      ) : null}
       <ul className="mt-3 space-y-2">
         {visibleSources.map((source, index) => {
           const collection = collections.find((item) => item.id === source.collectionId);
@@ -349,6 +357,33 @@ function SourceList({
       ) : null}
     </details>
   );
+}
+
+function buildSourceExplanation(debug: ChatRetrievalDebug | undefined, sourceCount: number): string | null {
+  if (!debug || sourceCount === 0) return null;
+  const selection = debug.sourceSelection;
+  const decision = selection?.routeDecision;
+  const quality = debug.quality;
+  const confidence = decision?.confidence ?? debug.groundingConfidence;
+  const factCount = quality?.directFactCount ?? debug.evidence?.usableFacts.length ?? 0;
+  const candidateReason =
+    selection?.metadataRouteCandidates?.find((candidate) =>
+      selection.usedCollectionIds.includes(candidate.id),
+    )?.reason ?? decision?.reasons?.[0] ?? null;
+
+  if (confidence === "high" && factCount > 0) {
+    return `${sourceCount} kaynak, soruyla doğrudan ilişkili ${factCount} kanıt parçası verdiği için kullanıldı.`;
+  }
+  if (candidateReason) {
+    return `Bu kaynak, sorunun konusu ve collection profilindeki sinyaller eşleştiği için seçildi: ${candidateReason}`;
+  }
+  if (selection?.selectionMode === "selected") {
+    return "Bu kaynak, chat için seçili collection olduğu ve yanıtı destekleyen bilgi içerdiği için kullanıldı.";
+  }
+  if (selection?.includePublic) {
+    return "Bu kaynak, erişilebilir public/private knowledge içinde soruya en yakın destekleyici bilgi bulunduğu için kullanıldı.";
+  }
+  return "Bu kaynak, retrieval hattı tarafından yanıtı destekleyen en uygun bilgi olarak seçildi.";
 }
 
 function RetrievalDebugPanel({
@@ -1445,6 +1480,7 @@ export function ChatScreen() {
                   <SourceList
                     sources={m.sources}
                     collections={collections}
+                    debug={m.retrievalDebug}
                     debugMode={showDebugDetails}
                   />
                 ) : null}
