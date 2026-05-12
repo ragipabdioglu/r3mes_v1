@@ -2,6 +2,7 @@ import type { ChatSourceCitation } from "@r3mes/shared-types";
 
 import { getAlignmentConfig } from "./alignmentConfig.js";
 import type { GroundingConfidence } from "./answerSchema.js";
+import { compileEvidence, type CompiledEvidence } from "./compiledEvidence.js";
 import { buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
@@ -69,6 +70,7 @@ export interface HybridRetrievedKnowledgeContext {
   lowGroundingConfidence: boolean;
   groundingConfidence: GroundingConfidence;
   evidence: EvidenceExtractorOutput | null;
+  compiledEvidence?: CompiledEvidence | null;
   diagnostics: {
     qdrantCandidateCount: number;
     prismaCandidateCount: number;
@@ -1570,6 +1572,12 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     userQuery: evidenceQuery,
     cards: evidenceCards,
   });
+  const sourceRefs = finalCandidates.map(({ chunk }) => ({ id: chunk.documentId, title: chunk.document.title }));
+  const compiledEvidence = compileEvidence({
+    evidence: evidenceRun.output,
+    sourceRefs,
+    groundingConfidence,
+  });
   if (evidenceHasOnlyScopeExclusion(evidenceRun.output)) {
     const scopedOutAlignmentDiagnostics = {
       ...finalAlignmentDiagnostics,
@@ -1582,6 +1590,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       lowGroundingConfidence: true,
       groundingConfidence: "low",
       evidence: evidenceRun.output,
+      compiledEvidence,
       diagnostics: {
         qdrantCandidateCount: qdrantCandidates.length,
         prismaCandidateCount: prismaCandidates.length,
@@ -1616,7 +1625,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
             groundingConfidence,
             lowGroundingConfidence,
             answerIntent: evidenceRun.output.answerIntent,
-            sourceRefs: finalCandidates.map(({ chunk }) => ({ id: chunk.documentId, title: chunk.document.title })),
+            sourceRefs,
           })
         : buildGroundedBrief(
             finalCandidates.map(({ card }) => card),
@@ -1624,7 +1633,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
               groundingConfidence,
               lowGroundingConfidence,
               answerIntent: evidenceRun.output.answerIntent,
-              sourceRefs: finalCandidates.map(({ chunk }) => ({ id: chunk.documentId, title: chunk.document.title })),
+              sourceRefs,
             },
           );
 
@@ -1635,6 +1644,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     lowGroundingConfidence,
     groundingConfidence,
     evidence: evidenceRun.output,
+    compiledEvidence,
     diagnostics: {
       qdrantCandidateCount: qdrantCandidates.length,
       prismaCandidateCount: prismaCandidates.length,

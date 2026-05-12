@@ -148,6 +148,7 @@ function scoreCase(testCase, response) {
   const retrievalDebug = response?.retrieval_debug;
   const chatTrace = response?.chat_trace;
   const evidence = retrievalDebug?.evidence;
+  const compiledEvidence = retrievalDebug?.compiledEvidence;
   const routeDecision = retrievalDebug?.sourceSelection?.routeDecision;
   const safetyRailIds = Array.isArray(safetyGate?.railChecks)
     ? safetyGate.railChecks.map((check) => check?.id).filter(Boolean)
@@ -664,6 +665,12 @@ function scoreCase(testCase, response) {
       Number(budget?.evidenceInputChars ?? 0) > 0
         ? Number((Number(budget?.evidencePrunedInputChars ?? 0) / Number(budget?.evidenceInputChars ?? 1)).toFixed(3))
         : null,
+    compiledEvidenceConfidence: compiledEvidence?.confidence ?? null,
+    compiledEvidenceFactCount: compiledEvidence?.usableFactCount ?? null,
+    compiledEvidenceRiskCount: compiledEvidence?.riskFactCount ?? null,
+    compiledEvidenceUnknownCount: compiledEvidence?.unknownCount ?? null,
+    compiledEvidenceContradictionCount: compiledEvidence?.contradictionCount ?? null,
+    compiledEvidenceSourceCount: Array.isArray(compiledEvidence?.sourceIds) ? compiledEvidence.sourceIds.length : null,
     rerankerMode: reranker?.mode ?? null,
     rerankerFallbackUsed: reranker?.fallbackUsed ?? null,
     rerankerInputCandidateCount: reranker?.inputCandidateCount ?? null,
@@ -1082,6 +1089,23 @@ function summarizeBudgetQuality(results) {
   };
 }
 
+function summarizeCompiledEvidenceQuality(results) {
+  const casesWithCompiledEvidence = results.filter((result) => result.compiledEvidenceConfidence);
+  return {
+    observedCases: casesWithCompiledEvidence.length,
+    coverageRatio:
+      results.length === 0 ? 0 : Number((casesWithCompiledEvidence.length / results.length).toFixed(3)),
+    confidences: casesWithCompiledEvidence.reduce((acc, result) => increment(acc, result.compiledEvidenceConfidence), {}),
+    averages: {
+      facts: averageField(casesWithCompiledEvidence, "compiledEvidenceFactCount"),
+      risks: averageField(casesWithCompiledEvidence, "compiledEvidenceRiskCount"),
+      unknowns: averageField(casesWithCompiledEvidence, "compiledEvidenceUnknownCount"),
+      contradictions: averageField(casesWithCompiledEvidence, "compiledEvidenceContradictionCount"),
+      sources: averageField(casesWithCompiledEvidence, "compiledEvidenceSourceCount"),
+    },
+  };
+}
+
 function buildEvalGuardrails(opts) {
   const strict = readBooleanEnv("R3MES_EVAL_GUARDRAILS_STRICT", false);
   const thresholds = {
@@ -1308,6 +1332,7 @@ async function main() {
   const passed = results.filter((result) => result.ok).length;
   const routerQuality = summarizeRouterQuality(results);
   const budgetQuality = summarizeBudgetQuality(results);
+  const compiledEvidenceQuality = summarizeCompiledEvidenceQuality(results);
   const rerankerQuality = summarizeRerankerQuality(results);
   const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality });
   const summary = {
@@ -1322,6 +1347,7 @@ async function main() {
     }, {}),
     routerQuality,
     budgetQuality,
+    compiledEvidenceQuality,
     rerankerQuality,
     evalGuardrails,
     shadowRuntime: {

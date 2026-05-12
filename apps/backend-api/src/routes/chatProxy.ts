@@ -12,6 +12,7 @@ import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
 import { shouldExposeChatDebugFromHeaders } from "../lib/chatDebugBoundary.js";
 import { stripChatDebugFields } from "../lib/chatResponseBoundary.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
+import type { CompiledEvidence } from "../lib/compiledEvidence.js";
 import type { ConversationalIntentDecision } from "../lib/conversationalIntent.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
 import { evaluateFeedbackShadowRuntime, type FeedbackShadowRuntimeReport } from "../lib/feedbackShadowRuntime.js";
@@ -67,6 +68,7 @@ interface ChatRetrievalDebug {
   queryPlan: QueryPlannerOutput | null;
   routePlan: DomainRoutePlan | null;
   evidence: EvidenceExtractorOutput | null;
+  compiledEvidence?: CompiledEvidence | null;
   domain: DomainPolicy["domain"];
   responseMode: "natural" | "json";
   retrievalMode?: "true_hybrid" | "qdrant" | "prisma" | "legacy_hybrid";
@@ -1721,6 +1723,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             queryPlan: queryPlan?.output ?? null,
             routePlan,
             evidence: retrieval.evidence,
+            compiledEvidence: "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null,
             domain: answerDomain,
             responseMode,
             retrievalMode: retrieval.retrievalMode,
