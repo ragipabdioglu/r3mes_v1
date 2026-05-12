@@ -1161,7 +1161,7 @@ function isRiskEvidenceSentence(sentence: string): boolean {
   return /\b(?:risk|dikkat|acil|şiddetli|siddetli|uyarı|uyari|kesin|çıkarım|cikarim|do not infer)\b/iu.test(sentence);
 }
 
-function pickRelevantSentences(query: string, text: string, maxChars: number): {
+function pickRelevantSentences(query: string, text: string, maxChars: number, maxSentences = evidenceMaxFactSentences()): {
   text: string;
   candidateSentenceCount: number;
   selectedSentenceCount: number;
@@ -1195,7 +1195,7 @@ function pickRelevantSentences(query: string, text: string, maxChars: number): {
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  const selected = scored.slice(0, evidenceMaxFactSentences()).sort((a, b) => a.index - b.index).map((item) => item.sentence);
+  const selected = scored.slice(0, Math.max(1, maxSentences)).sort((a, b) => a.index - b.index).map((item) => item.sentence);
   const fallback = parts.slice(0, 6);
   const lines = (selected.length > 0 ? selected : fallback);
   let out = "";
@@ -1217,8 +1217,10 @@ export function buildPrunedEvidenceInputWithDiagnostics(opts: {
   query: string;
   candidate: { chunk: HybridKnowledgeChunk; card: KnowledgeCard };
   budgetMode: RetrievalBudgetMode;
+  maxChars?: number;
+  maxSentences?: number;
 }): { text: string; diagnostics: EvidencePruningDiagnostics } {
-  const maxChars = evidenceInputMaxChars(opts.budgetMode);
+  const maxChars = opts.maxChars ?? evidenceInputMaxChars(opts.budgetMode);
   const rawContent = opts.candidate.chunk.content.trim();
   const structured = [
     opts.candidate.card.topic ? `Topic: ${opts.candidate.card.topic}` : "",
@@ -1230,7 +1232,7 @@ export function buildPrunedEvidenceInputWithDiagnostics(opts: {
     opts.candidate.card.doNotInfer ? `Do Not Infer: ${opts.candidate.card.doNotInfer}` : "",
   ].filter(Boolean).join("\n");
   const sourceText = structured.trim() || rawContent;
-  const picked = pickRelevantSentences(opts.query, sourceText, maxChars);
+  const picked = pickRelevantSentences(opts.query, sourceText, maxChars, opts.maxSentences);
   const pruned = picked.text || sourceText.slice(0, maxChars).trim();
   const text = pruned.length > 0 && pruned.length < rawContent.length ? pruned : rawContent;
   return {
@@ -1250,6 +1252,8 @@ export function buildPrunedEvidenceInput(opts: {
   query: string;
   candidate: { chunk: HybridKnowledgeChunk; card: KnowledgeCard };
   budgetMode: RetrievalBudgetMode;
+  maxChars?: number;
+  maxSentences?: number;
 }): string {
   return buildPrunedEvidenceInputWithDiagnostics(opts).text;
 }
@@ -1573,9 +1577,19 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       excerpt: chunk.content.slice(0, 220),
     });
   }
+  const totalEvidenceMaxChars = evidenceInputMaxChars(budgetMode);
+  const totalEvidenceMaxSentences = evidenceMaxFactSentences();
+  const perCandidateMaxChars = Math.max(240, Math.ceil(totalEvidenceMaxChars / Math.max(1, finalCandidates.length)));
+  const perCandidateMaxSentences = Math.max(1, Math.ceil(totalEvidenceMaxSentences / Math.max(1, finalCandidates.length)));
   const prunedEvidenceInputs = finalCandidates.map((candidate) => ({
     candidate,
-    ...buildPrunedEvidenceInputWithDiagnostics({ query: evidenceQuery, candidate, budgetMode }),
+    ...buildPrunedEvidenceInputWithDiagnostics({
+      query: evidenceQuery,
+      candidate,
+      budgetMode,
+      maxChars: perCandidateMaxChars,
+      maxSentences: perCandidateMaxSentences,
+    }),
   }));
   const evidenceCards = prunedEvidenceInputs.map(({ candidate, text }) => ({
     sourceId: candidate.chunk.documentId,
