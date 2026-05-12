@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_ROUTER_WEIGHTS, getRouterWeights, weightedRouterScore } from "./routerConfig.js";
+import {
+  DEFAULT_ADAPTIVE_ROUTER_CONFIG,
+  DEFAULT_ROUTER_WEIGHTS,
+  getAdaptiveRouterConfig,
+  getRouterWeights,
+  weightedRouterScore,
+} from "./routerConfig.js";
 
 describe("router config", () => {
   it("normalizes default router weights", () => {
@@ -21,6 +27,22 @@ describe("router config", () => {
 
     expect(weights.domainHint).toBeCloseTo(3 / 8);
     expect(weights.profileEmbedding).toBeCloseTo(2 / 8);
+  });
+
+  it("allows adaptive router thresholds to be tuned without code changes", () => {
+    expect(getAdaptiveRouterConfig({})).toEqual(DEFAULT_ADAPTIVE_ROUTER_CONFIG);
+
+    const config = getAdaptiveRouterConfig({
+      R3MES_ADAPTIVE_ROUTER_CONFIG_JSON: JSON.stringify({
+        queryMatchBonusPerTerm: 5,
+        routeOverrideMargin: 30,
+      }),
+      R3MES_ROUTER_THIN_ROUTE_PENALTY: "16",
+    });
+
+    expect(config.queryMatchBonusPerTerm).toBe(5);
+    expect(config.routeOverrideMargin).toBe(30);
+    expect(config.thinRoutePenalty).toBe(16);
   });
 
   it("renormalizes active score signals when a phase is not available yet", () => {

@@ -3,7 +3,7 @@ import type { AnswerDomain } from "./answerSchema.js";
 import { cosineSimilarity, embedKnowledgeText, getKnowledgeEmbeddingDimensions } from "./knowledgeEmbedding.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { extractQuerySignals, routeQuery, type DomainRoutePlan } from "./queryRouter.js";
-import { explainWeightedRouterScore, getRouterWeights, type RouterScoreBreakdown } from "./routerConfig.js";
+import { explainWeightedRouterScore, getAdaptiveRouterConfig, getRouterWeights, type RouterScoreBreakdown } from "./routerConfig.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 import { buildQueryUnderstanding, type QueryUnderstandingProfileInput } from "./queryUnderstanding.js";
@@ -957,14 +957,15 @@ function adaptiveMetadataCandidate(
   if (!queryCandidate) return routeCandidate;
   if (!routeCandidate) return queryCandidate;
 
-  const querySpecificMatchBonus = Math.min(queryCandidate.matchedTerms.length, 6) * 7;
+  const adaptiveConfig = getAdaptiveRouterConfig();
+  const querySpecificMatchBonus = Math.min(queryCandidate.matchedTerms.length, 6) * adaptiveConfig.queryMatchBonusPerTerm;
   const queryQualityBonus =
     queryCandidate.sourceQuality === "structured"
-      ? 12
+      ? adaptiveConfig.structuredSourceBonus
       : queryCandidate.sourceQuality === "inferred"
-        ? 6
+        ? adaptiveConfig.inferredSourceBonus
         : 0;
-  const routeThinPenalty = routeCandidate.sourceQuality === "thin" ? 10 : 0;
+  const routeThinPenalty = routeCandidate.sourceQuality === "thin" ? adaptiveConfig.thinRoutePenalty : 0;
   const boostedQueryCandidate = {
     ...queryCandidate,
     score: queryCandidate.score + querySpecificMatchBonus + queryQualityBonus,
@@ -976,7 +977,7 @@ function adaptiveMetadataCandidate(
         }
       : undefined,
   };
-  const queryBeatsRoute = boostedQueryCandidate.score >= routeCandidate.score + 18 - routeThinPenalty;
+  const queryBeatsRoute = boostedQueryCandidate.score >= routeCandidate.score + adaptiveConfig.routeOverrideMargin - routeThinPenalty;
 
   return queryBeatsRoute ? boostedQueryCandidate : routeCandidate;
 }
