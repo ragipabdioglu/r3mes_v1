@@ -740,6 +740,17 @@ function scoreCase(testCase, response) {
             acc[key] = (acc[key] ?? 0) + 1;
             return acc;
           }, {}),
+          promotionStages: shadowImpacts.reduce((acc, impact) => {
+            const key = impact.promotionStage ?? "missing";
+            acc[key] = (acc[key] ?? 0) + 1;
+            return acc;
+          }, {}),
+          rollbackRecommendedCount: shadowImpacts.filter((impact) => impact.rollbackRecommended === true).length,
+          nextSafeActions: shadowImpacts.reduce((acc, impact) => {
+            const key = impact.nextSafeAction ?? "missing";
+            acc[key] = (acc[key] ?? 0) + 1;
+            return acc;
+          }, {}),
         }
       : null,
     latencyMs: response?._latencyMs ?? null,
@@ -1360,6 +1371,21 @@ async function main() {
       recommendations: results.reduce((acc, result) => {
         const recommendations = result.shadowRuntime?.recommendations ?? {};
         for (const [key, value] of Object.entries(recommendations)) {
+          acc[key] = (acc[key] ?? 0) + Number(value);
+        }
+        return acc;
+      }, {}),
+      promotionStages: results.reduce((acc, result) => {
+        const stages = result.shadowRuntime?.promotionStages ?? {};
+        for (const [key, value] of Object.entries(stages)) {
+          acc[key] = (acc[key] ?? 0) + Number(value);
+        }
+        return acc;
+      }, {}),
+      rollbackRecommendedCases: results.filter((result) => (result.shadowRuntime?.rollbackRecommendedCount ?? 0) > 0).length,
+      nextSafeActions: results.reduce((acc, result) => {
+        const actions = result.shadowRuntime?.nextSafeActions ?? {};
+        for (const [key, value] of Object.entries(actions)) {
           acc[key] = (acc[key] ?? 0) + Number(value);
         }
         return acc;
