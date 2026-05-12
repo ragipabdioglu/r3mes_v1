@@ -227,11 +227,17 @@ function createEmptyCoverage() {
   }, {});
 }
 
-function scoreReadiness({ totalCases, coverage, artifacts }) {
+function scoreReadiness({ totalCases, coverage, artifacts, productionRag }) {
   const coveredBuckets = REQUIRED_BUCKETS.filter((bucket) => coverage[bucket]?.caseCount > 0);
   const missingBuckets = REQUIRED_BUCKETS.filter((bucket) => coverage[bucket]?.caseCount === 0);
   const suitesWithArtifacts = artifacts.filter((artifact) => artifact.summary).length;
   const failedArtifactSuites = artifacts.filter((artifact) => Number(artifact.summary?.failed ?? 0) > 0);
+  const productionRagOk =
+    productionRag?.observed === true &&
+    productionRag.status === "pass" &&
+    productionRag.qualityProviderGate?.status === "pass" &&
+    Number(productionRag.totals?.expectedCases ?? 0) >= 100 &&
+    Number(productionRag.totals?.failed ?? 0) === 0;
   const passRates = artifacts
     .map((artifact) => Number(artifact.summary?.passRate ?? Number.NaN))
     .filter((value) => Number.isFinite(value));
@@ -243,13 +249,24 @@ function scoreReadiness({ totalCases, coverage, artifacts }) {
   const artifactScore =
     artifacts.length === 0 ? 0 : Number((suitesWithArtifacts / artifacts.length).toFixed(3));
   const status =
-    missingBuckets.length === 0 && failedArtifactSuites.length === 0 && totalCases >= 100
+    missingBuckets.length === 0 && failedArtifactSuites.length === 0 && totalCases >= 100 && productionRagOk
       ? "ready_for_controlled_adaptive_work"
       : "baseline_has_gaps";
   const blockers = [
     ...(totalCases < 100 ? [`eval_case_target:${totalCases}<100`] : []),
     ...missingBuckets.map((bucket) => `missing_bucket:${bucket}`),
     ...failedArtifactSuites.map((artifact) => `failing_latest_artifact:${artifact.suite}`),
+    ...(productionRag?.observed ? [] : ["missing_production_rag_aggregate"]),
+    ...(productionRag?.observed && productionRag.status !== "pass" ? [`production_rag_status:${productionRag.status}`] : []),
+    ...(productionRag?.observed && productionRag.qualityProviderGate?.status !== "pass"
+      ? [`quality_provider_gate:${productionRag.qualityProviderGate?.status ?? "missing"}`]
+      : []),
+    ...(productionRag?.observed && Number(productionRag.totals?.expectedCases ?? 0) < 100
+      ? [`production_rag_case_target:${Number(productionRag.totals?.expectedCases ?? 0)}<100`]
+      : []),
+    ...(productionRag?.observed && Number(productionRag.totals?.failed ?? 0) > 0
+      ? [`production_rag_failed:${Number(productionRag.totals?.failed ?? 0)}`]
+      : []),
   ];
 
   return {
@@ -267,6 +284,7 @@ function scoreReadiness({ totalCases, coverage, artifacts }) {
       failed: artifact.summary.failed,
       passRate: artifact.summary.passRate,
     })),
+    productionRagOk,
   };
 }
 
@@ -494,6 +512,37 @@ function summarizeProfileHealthArtifact(artifact) {
   };
 }
 
+async function readProductionRagArtifact(artifactsRoot) {
+  const file = join(artifactsRoot, "production-rag", "latest.json");
+  try {
+    const [raw, stats] = await Promise.all([readFile(file, "utf8"), stat(file)]);
+    const parsed = JSON.parse(raw);
+    return {
+      observed: true,
+      path: file,
+      updatedAt: stats.mtime.toISOString(),
+      status: parsed.status ?? "unknown",
+      totals: parsed.totals ?? null,
+      failedSuites: parsed.failedSuites ?? [],
+      warnSuites: parsed.warnSuites ?? [],
+      guardrailFailedSuites: parsed.guardrailFailedSuites ?? [],
+      qualityProviderGate: parsed.qualityProviderGate ?? null,
+    };
+  } catch {
+    return {
+      observed: false,
+      path: file,
+      updatedAt: null,
+      status: "missing_artifact",
+      totals: null,
+      failedSuites: [],
+      warnSuites: [],
+      guardrailFailedSuites: [],
+      qualityProviderGate: null,
+    };
+  }
+}
+
 async function main() {
   const opts = parseArgs();
   const suites = await listSuites(opts.evalRoot);
@@ -545,7 +594,10 @@ async function main() {
   const profileHealthArtifact = opts.includeArtifacts
     ? await readOptionalEvalArtifact(opts.artifactsRoot, "profile-health")
     : null;
-  const readiness = scoreReadiness({ totalCases, coverage, artifacts });
+  const productionRag = opts.includeArtifacts
+    ? await readProductionRagArtifact(opts.artifactsRoot)
+    : { observed: false, status: "not_checked", totals: null, qualityProviderGate: null };
+  const readiness = scoreReadiness({ totalCases, coverage, artifacts, productionRag });
   const routerQuality = summarizeRouterQualityArtifacts(artifacts);
   const budgetQuality = summarizeBudgetQualityArtifacts(artifacts);
   const profileHealth = summarizeProfileHealthArtifact(profileHealthArtifact);
@@ -555,6 +607,7 @@ async function main() {
     routerQuality,
     budgetQuality,
     profileHealth,
+    productionRag,
     requiredBuckets: REQUIRED_BUCKETS,
     coverage,
     suites: suiteReports,
@@ -579,6 +632,9 @@ async function main() {
           ? "Profile health eval is passing."
           : `Profile health eval is failing: ${profileHealth.failures.join(", ")}.`
         : "Run pnpm run eval:profile-health to populate profile health readiness.",
+      productionRag.observed && productionRag.status === "pass" && Number(productionRag.totals?.expectedCases ?? 0) >= 100
+        ? "Production RAG aggregate is passing with the quality-provider gate."
+        : "Run pnpm run eval:production-rag to refresh the full 100+ production aggregate with provider gates.",
     ],
   };
 
