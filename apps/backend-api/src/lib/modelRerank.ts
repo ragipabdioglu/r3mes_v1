@@ -119,6 +119,10 @@ function getAiEngineBase(): string {
   return (process.env.R3MES_AI_ENGINE_URL ?? process.env.AI_ENGINE_URL ?? AI_ENGINE_DEFAULT).replace(/\/$/, "");
 }
 
+function realRerankerRequired(): boolean {
+  return process.env.R3MES_REQUIRE_REAL_RERANKER === "1";
+}
+
 function readChunkContent(chunk: unknown): string {
   if (!chunk || typeof chunk !== "object") return "";
   const content = (chunk as { content?: unknown }).content;
@@ -377,6 +381,9 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
 
   try {
     const modelResult = await scoreDocumentsWithModel(query, documents);
+    if (realRerankerRequired() && modelResult.fallbackUsed) {
+      throw new Error(`real reranker required but provider returned fallback: ${modelResult.fallbackReason ?? "unknown"}`);
+    }
     const rawScores = modelResult.scores;
     if (rawScores.length !== modelPool.length) {
       throw new Error(`Expected ${modelPool.length} rerank scores, received ${rawScores.length}`);
@@ -410,6 +417,9 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (realRerankerRequired()) {
+      throw new Error(`real reranker required but model rerank failed: ${message}`);
+    }
     console.warn(`[backend-reranker] Falling back to deterministic reranker: ${message}`);
     const returned = deterministic.slice(0, limit);
     return {

@@ -206,4 +206,78 @@ describe("rerankKnowledgeCardsWithFallback", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
+
+  it("fails fast when a real reranker is required and ai-engine fallback is reported", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "model");
+    vi.stubEnv("R3MES_REQUIRE_REAL_RERANKER", "1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ scores: [0.2], provider: "lightweight_fallback", fallback_used: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
+        "migration rollback",
+        [
+          {
+            fusedScore: 1,
+            lexicalScore: 1,
+            embeddingScore: 0,
+            chunk: { id: "chunk-1", content: "migration rollback", document: { title: "Runbook" } },
+            card: {
+              topic: "migration",
+              tags: ["technical"],
+              patientSummary: "",
+              clinicalTakeaway: "",
+              safeGuidance: "",
+              redFlags: "",
+              doNotInfer: "",
+            },
+          },
+        ],
+        1,
+      ),
+    ).rejects.toThrow("real reranker required");
+
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("fails fast when a real reranker is required and ai-engine is unreachable", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "model");
+    vi.stubEnv("R3MES_REQUIRE_REAL_RERANKER", "1");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
+
+    await expect(
+      modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
+        "migration rollback",
+        [
+          {
+            fusedScore: 1,
+            lexicalScore: 1,
+            embeddingScore: 0,
+            chunk: { id: "chunk-1", content: "migration rollback", document: { title: "Runbook" } },
+            card: {
+              topic: "migration",
+              tags: ["technical"],
+              patientSummary: "",
+              clinicalTakeaway: "",
+              safeGuidance: "",
+              redFlags: "",
+              doNotInfer: "",
+            },
+          },
+        ],
+        1,
+      ),
+    ).rejects.toThrow("real reranker required but model rerank failed");
+
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 });
