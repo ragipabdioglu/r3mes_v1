@@ -1544,6 +1544,18 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         query: retrievalQuery,
         queryUnderstanding: retrievalQueryUnderstanding,
       });
+      const selectedSourcesAreStrictIneligible =
+        requestedCollectionIds.length > 0 &&
+        accessibleCollections.length > 0 &&
+        accessibleCollections.every((collection) => !readKnowledgeCollectionStrictRouteEligible(collection));
+      const retrievalRoutePlan = selectedSourcesAreStrictIneligible ? null : routePlan;
+      if (selectedSourcesAreStrictIneligible) {
+        chatTrace.recordNow("query_planning", "ok", {
+          name: "strict_route_scope_relaxed",
+          reason: "selected sources are thin/noisy and cannot support strict routing",
+          selectedCollectionCount: accessibleCollections.length,
+        });
+      }
       const retrieval =
         retrievalQuery && accessibleCollectionIds.length > 0
           ? await (async () => {
@@ -1553,7 +1565,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                   query: plannedRetrievalQuery,
                   evidenceQuery: retrievalQuery,
                   accessibleCollectionIds,
-                  routePlan,
+                  routePlan: retrievalRoutePlan,
                   limit: retrievalBudget.sourceLimit,
                   budgetMode: retrievalBudget.mode,
                 });
@@ -1569,7 +1581,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                     query: plannedRetrievalQuery,
                     evidenceQuery: retrievalQuery,
                     accessibleCollectionIds,
-                    routePlan,
+                    routePlan: retrievalRoutePlan,
                   });
                   if (engine === "qdrant" || qdrantRetrieval.sources.length > 0) {
                     return {
@@ -1598,7 +1610,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 query: plannedRetrievalQuery,
                 evidenceQuery: retrievalQuery,
                 accessibleCollectionIds,
-                routePlan,
+                routePlan: retrievalRoutePlan,
               });
               return {
                 ...prismaRetrieval,

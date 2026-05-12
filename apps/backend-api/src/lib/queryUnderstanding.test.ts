@@ -93,4 +93,23 @@ describe("queryUnderstanding", () => {
       expect.arrayContaining(["karbon ayak izi bilgilendirme raporu"]),
     );
   });
+
+  it("uses profile concepts for non-medical typo-tolerant matching", () => {
+    const understanding = buildQueryUnderstanding("sozlesmede ceazi sart ve odme gecikmesi ne olur", {
+      profiles: [
+        {
+          answerableConcepts: ["sözleşmede cezai şart", "ödeme gecikmesi"],
+          topicPhrases: ["sözleşme feshi kontrol listesi"],
+          sampleQueries: ["Sözleşmede cezai şart ve ödeme gecikmesi nasıl değerlendirilir?"],
+        },
+      ],
+    });
+
+    expect(understanding.mode).toBe("knowledge");
+    expect(understanding.profileConcepts).toEqual(
+      expect.arrayContaining(["sozlesmede cezai sart", "odeme gecikmesi"]),
+    );
+    expect(understanding.warnings).toContain("profile_concept_expansion_used");
+    expect(understanding.quality.clarityScore).toBeGreaterThanOrEqual(55);
+  });
 });
