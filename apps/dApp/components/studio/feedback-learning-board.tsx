@@ -63,6 +63,19 @@ function applyRecordStatusClass(status: KnowledgeFeedbackApplyRecordItem["status
   return "border-amber-500/25 bg-amber-950/15 text-amber-100";
 }
 
+function promotionStageClass(stage: "eligible_shadow" | "blocked" | "review_only"): string {
+  if (stage === "eligible_shadow") return "border-emerald-500/25 bg-emerald-950/15 text-emerald-100";
+  if (stage === "review_only") return "border-sky-500/25 bg-sky-950/15 text-sky-100";
+  return "border-rose-500/25 bg-rose-950/15 text-rose-100";
+}
+
+function nextSafeActionLabel(action: "keep_passive" | "inspect_blockers" | "rollback_or_review" | "eligible_for_shadow_observation"): string {
+  if (action === "eligible_for_shadow_observation") return "Shadow gözlemine uygun";
+  if (action === "rollback_or_review") return "Rollback veya manuel inceleme";
+  if (action === "inspect_blockers") return "Blokerleri incele";
+  return "Passive kalsın";
+}
+
 function signalCount(item: KnowledgeFeedbackProposalItem): number {
   const keys = ["wrongSourceCount", "goodSourceCount", "missingSourceCount", "badAnswerCount"];
   return keys.reduce((sum, key) => {
@@ -285,6 +298,8 @@ export function FeedbackLearningBoard() {
   const activeAdjustmentCount = routerAdjustments?.data.filter((item) => item.status === "ACTIVE").length ?? 0;
   const simulatedImpactCount = scoringSimulation?.results.length ?? 0;
   const promotionCandidateCount = promotionGate?.data.filter((item) => item.promotionCandidate).length ?? 0;
+  const rollbackRecommendedCount = promotionGate?.data.filter((item) => item.rollbackRecommended).length ?? 0;
+  const reviewOnlyCount = promotionGate?.data.filter((item) => item.promotionStage === "review_only").length ?? 0;
   const topSummary = summary?.data.slice(0, 3) ?? [];
 
   return (
@@ -542,14 +557,38 @@ export function FeedbackLearningBoard() {
           <p className="mt-1 text-xs leading-relaxed text-emerald-100/55">
             Passive adjustment’ların shadow runtime adaylığı. Bu panel yalnız karar raporu üretir; canlı router hâlâ değişmez.
           </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-emerald-500/15 bg-black/15 p-2">
+              <p className="text-[10px] uppercase tracking-wider text-emerald-100/45">Shadow aday</p>
+              <p className="mt-1 text-lg font-semibold text-emerald-100">{promotionCandidateCount}</p>
+            </div>
+            <div className="rounded-lg border border-sky-500/15 bg-black/15 p-2">
+              <p className="text-[10px] uppercase tracking-wider text-sky-100/45">Review only</p>
+              <p className="mt-1 text-lg font-semibold text-sky-100">{reviewOnlyCount}</p>
+            </div>
+            <div className="rounded-lg border border-rose-500/15 bg-black/15 p-2">
+              <p className="text-[10px] uppercase tracking-wider text-rose-100/45">Rollback önerisi</p>
+              <p className="mt-1 text-lg font-semibold text-rose-100">{rollbackRecommendedCount}</p>
+            </div>
+          </div>
           <ul className="mt-3 space-y-2 text-xs text-emerald-100/70">
             {promotionGate.data.slice(0, 5).map((item) => (
               <li key={`${item.collectionId ?? "-"}:${item.queryHash ?? "-"}`} className="rounded-lg border border-emerald-500/15 bg-black/20 p-2">
-                <p className="font-mono text-[11px] text-emerald-100">
-                  {item.recommendation} · collection={shortId(item.collectionId)} · query={shortId(item.queryHash)}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${promotionStageClass(item.promotionStage)}`}>
+                    {item.promotionStage}
+                  </span>
+                  {item.rollbackRecommended ? (
+                    <span className="rounded-full border border-rose-500/25 bg-rose-950/20 px-2 py-0.5 text-[10px] font-semibold text-rose-100">
+                      rollback önerilir
+                    </span>
+                  ) : null}
+                  <span className="font-mono text-[11px] text-emerald-100">
+                    {item.recommendation} · collection={shortId(item.collectionId)} · query={shortId(item.queryHash)}
+                  </span>
+                </div>
                 <p className="mt-1 text-emerald-100/60">
-                  candidate={String(item.promotionCandidate)} · gate={item.gatePassedCount}/{item.activeAdjustmentCount} · delta={item.totalScoreDelta}
+                  candidate={String(item.promotionCandidate)} · gate={item.gatePassedCount}/{item.activeAdjustmentCount} · delta={item.totalScoreDelta} · next={nextSafeActionLabel(item.nextSafeAction)}
                 </p>
                 {item.blockedReasons.length > 0 ? (
                   <p className="mt-1 text-amber-100/70">blocked={item.blockedReasons.join(" · ")}</p>
