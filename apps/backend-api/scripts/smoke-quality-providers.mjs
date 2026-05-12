@@ -16,6 +16,13 @@ const checks = [
       R3MES_REQUIRE_REAL_RERANKER: "1",
     },
   },
+  {
+    name: "bge-m3-backbone",
+    script: "smoke-bge-m3-backbone.mjs",
+    env: {
+      R3MES_QDRANT_REINDEX_REQUIRE_REAL_EMBEDDINGS: "1",
+    },
+  },
 ];
 
 function runCheck(check) {

@@ -119,6 +119,7 @@ const suites = selected.size > 0 ? SUITES.filter(([id]) => selected.has(id)) : S
 const outFile = resolve(repoRoot, argValue("--out", "artifacts/evals/production-rag/latest.json"));
 const failOnWarn = hasFlag("--fail-on-warn");
 const dryRun = hasFlag("--dry-run");
+const skipQualityProviderGate = hasFlag("--skip-quality-provider-gate");
 
 if (suites.length === 0) {
   console.error(`No matching suites. Available: ${SUITES.map(([id]) => id).join(", ")}`);
@@ -137,6 +138,49 @@ if (dryRun) {
     suites: planned,
   }, null, 2));
   process.exit(0);
+}
+
+function runQualityProviderGate() {
+  if (skipQualityProviderGate) {
+    console.log("[production-rag] quality provider gate skipped");
+    return {
+      skipped: true,
+      status: "skipped",
+    };
+  }
+  const startedAt = Date.now();
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/smoke-quality-providers.mjs"],
+    {
+      cwd: backendRoot,
+      env: {
+        ...process.env,
+        R3MES_REQUIRE_REAL_EMBEDDINGS: "1",
+        R3MES_REQUIRE_REAL_RERANKER: "1",
+        R3MES_QDRANT_REINDEX_REQUIRE_REAL_EMBEDDINGS: "1",
+      },
+      encoding: "utf8",
+      stdio: "inherit",
+    },
+  );
+  const durationMs = Date.now() - startedAt;
+  if (result.status !== 0) {
+    throw new Error(`quality provider gate failed with exit ${result.status ?? "unknown"}`);
+  }
+  return {
+    skipped: false,
+    status: "pass",
+    durationMs,
+  };
+}
+
+let qualityProviderGate;
+try {
+  qualityProviderGate = runQualityProviderGate();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
 }
 
 const startedAt = new Date().toISOString();
@@ -165,6 +209,7 @@ const aggregate = {
   finishedAt: new Date().toISOString(),
   status,
   failOnWarn,
+  qualityProviderGate,
   totals: {
     suites: results.length,
     expectedCases,

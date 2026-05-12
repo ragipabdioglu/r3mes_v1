@@ -159,6 +159,67 @@ async function deterministicFallbackPointCount() {
   }));
 }
 
+function isBgeM3ModelName(value) {
+  return typeof value === "string" && value.toLowerCase().includes("bge-m3");
+}
+
+async function qdrantPayloadAudit() {
+  const collection = encodeURIComponent(getQdrantCollectionName());
+  const scope = collectionScopeFilter();
+  let offset = null;
+  const audit = {
+    auditedPoints: 0,
+    bgeM3ModelPointCount: 0,
+    realProviderPointCount: 0,
+    deterministicProviderPointCount: 0,
+    fallbackUsedPointCount: 0,
+    missingModelPointCount: 0,
+    wrongVectorSizePointCount: 0,
+    sampleEmbeddingModels: [],
+  };
+  const sampleModels = new Set();
+
+  for (;;) {
+    const response = await fetch(`${getQdrantBaseUrl()}/collections/${collection}/points/scroll`, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        limit: 256,
+        with_payload: true,
+        with_vector: false,
+        ...(scope ? { filter: scope } : {}),
+        ...(offset ? { offset } : {}),
+      }),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`Qdrant payload audit failed: ${response.status} ${await response.text()}`);
+    }
+    const parsed = await response.json();
+    const points = Array.isArray(parsed?.result?.points) ? parsed.result.points : [];
+    for (const point of points) {
+      const payload = point?.payload && typeof point.payload === "object" ? point.payload : {};
+      const provider = typeof payload.embeddingProvider === "string" ? payload.embeddingProvider : "";
+      const model = typeof payload.embeddingModel === "string" ? payload.embeddingModel : "";
+      const vectorSize = typeof payload.embeddingVectorSize === "number" ? payload.embeddingVectorSize : null;
+
+      audit.auditedPoints += 1;
+      if (provider === "ai-engine" || provider === "bge-m3") audit.realProviderPointCount += 1;
+      if (provider === "deterministic") audit.deterministicProviderPointCount += 1;
+      if (payload.embeddingFallbackUsed === true) audit.fallbackUsedPointCount += 1;
+      if (!model) audit.missingModelPointCount += 1;
+      if (isBgeM3ModelName(model)) audit.bgeM3ModelPointCount += 1;
+      if (vectorSize !== getQdrantVectorSize()) audit.wrongVectorSizePointCount += 1;
+      if (model && sampleModels.size < 5) sampleModels.add(model);
+    }
+    offset = parsed?.result?.next_page_offset ?? null;
+    if (!offset) break;
+  }
+
+  audit.sampleEmbeddingModels = [...sampleModels];
+  return audit;
+}
+
 async function chunkStats(afterId = null) {
   const baseWhere = collectionScopeWhere();
   const [totalChunks, remainingChunks] = await Promise.all([
@@ -206,12 +267,22 @@ async function printStatus(startAfter) {
   const pointCount = verifyCount ? await qdrantScopedPointCount() : null;
   const providerPointCount = verifyCount ? await embeddingProviderPointCount() : null;
   const fallbackPointCount = verifyCount ? await deterministicFallbackPointCount() : null;
+  const payloadAudit = verifyCount ? await qdrantPayloadAudit() : null;
   const indexComplete = pointCount == null ? null : pointCount >= stats.totalChunks;
   const providerMatches =
     providerPointCount == null ? null : providerPointCount >= stats.totalChunks && (fallbackPointCount ?? 0) === 0;
+  const bgeM3BackboneReady = payloadAudit == null
+    ? null
+    : payloadAudit.auditedPoints >= stats.totalChunks &&
+      payloadAudit.bgeM3ModelPointCount >= stats.totalChunks &&
+      payloadAudit.realProviderPointCount >= stats.totalChunks &&
+      payloadAudit.deterministicProviderPointCount === 0 &&
+      payloadAudit.fallbackUsedPointCount === 0 &&
+      payloadAudit.missingModelPointCount === 0 &&
+      payloadAudit.wrongVectorSizePointCount === 0;
   const status = {
     phase: "qdrant_reindex_status",
-    ok: providerMatches ?? indexComplete ?? true,
+    ok: bgeM3BackboneReady ?? providerMatches ?? indexComplete ?? true,
     checkpointPath: noCheckpoint ? null : checkpointPath,
     resumeAfter: startAfter ?? null,
     collection: getQdrantCollectionName(),
@@ -228,6 +299,8 @@ async function printStatus(startAfter) {
     embeddingProviderPointCount: providerPointCount,
     deterministicFallbackPointCount: fallbackPointCount,
     providerMatches,
+    payloadAudit,
+    bgeM3BackboneReady,
   };
   console.log(JSON.stringify(status, null, 2));
 }

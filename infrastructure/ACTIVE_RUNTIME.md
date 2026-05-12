@@ -89,6 +89,8 @@ For the full quality-provider gate, run:
 pnpm --filter @r3mes/backend-api run smoke:quality-providers
 ```
 
+This gate now checks three things together: real BGE-M3 embeddings through ai-engine, real cross-encoder reranking, and the Qdrant backbone audit. The Qdrant audit fails if any indexed point is deterministic, missing model metadata, using the wrong vector size, or not carrying a `bge-m3` model/path.
+
 Runtime controls:
 
 | Env | Default | Purpose |
@@ -131,6 +133,9 @@ pnpm --filter @r3mes/backend-api run qdrant:reindex
 
 # Reindex only one batch to verify provider, payload and checkpoint behavior.
 pnpm --filter @r3mes/backend-api run qdrant:reindex -- --max-batches 1
+
+# Verify the current Qdrant collection is fully backed by BGE-M3 payload metadata.
+pnpm --filter @r3mes/backend-api run qdrant:bge-m3:status
 
 # Manually resume after a known chunk id.
 pnpm --filter @r3mes/backend-api run qdrant:reindex -- --after <knowledgeChunkId>
