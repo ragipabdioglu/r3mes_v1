@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildAnswerSpec } from "./answerSpec.js";
+import type { CompiledEvidence } from "./compiledEvidence.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 function evidence(overrides: Partial<EvidenceExtractorOutput> = {}): EvidenceExtractorOutput {
@@ -27,6 +28,22 @@ function evidence(overrides: Partial<EvidenceExtractorOutput> = {}): EvidenceExt
   };
 }
 
+function compiledEvidence(overrides: Partial<CompiledEvidence> = {}): CompiledEvidence {
+  return {
+    facts: ["compiler: Kaynakta rollback planı gerektiği belirtiliyor."],
+    risks: ["compiler: Yedeksiz işlem risklidir."],
+    unknowns: [],
+    contradictions: [],
+    sourceIds: ["compiler-doc"],
+    confidence: "high",
+    usableFactCount: 1,
+    riskFactCount: 1,
+    unknownCount: 0,
+    contradictionCount: 0,
+    ...overrides,
+  };
+}
+
 describe("buildAnswerSpec", () => {
   it("builds an evidence-driven answer plan for step/checklist questions", () => {
     const spec = buildAnswerSpec({
@@ -44,6 +61,45 @@ describe("buildAnswerSpec", () => {
     expect(spec.caution[0]).toContain("Yedeksiz işlem");
     expect(spec.unknowns[0]).toContain("bağlantı ayarı");
     expect(spec.sourceIds).toEqual(["runbook"]);
+  });
+
+  it("uses compiled evidence risks and source ids when available", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "technical",
+      groundingConfidence: "high",
+      userQuery: "Rollback gerekli mi?",
+      evidence: evidence({
+        riskFacts: [],
+        redFlags: [],
+        sourceIds: ["legacy-doc"],
+      }),
+      compiledEvidence: compiledEvidence(),
+    });
+
+    expect(spec.caution[0]).toContain("Yedeksiz işlem risklidir");
+    expect(spec.sourceIds).toEqual(["compiler-doc"]);
+    expect(spec.groundingConfidence).toBe("high");
+  });
+
+  it("downgrades answer plan when compiled evidence detects contradiction", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "technical",
+      groundingConfidence: "high",
+      userQuery: "Rollback gerekli mi?",
+      evidence: evidence({
+        uncertainOrUnusable: [],
+        missingInfo: [],
+      }),
+      compiledEvidence: compiledEvidence({
+        confidence: "low",
+        contradictions: ["Kaynaklar rollback gerekliliği konusunda çelişiyor."],
+        contradictionCount: 1,
+      }),
+    });
+
+    expect(spec.groundingConfidence).toBe("low");
+    expect(spec.tone).toBe("cautious");
+    expect(spec.caution[0]).toContain("çelişiyor");
   });
 
   it("keeps low-grounding/no-source answers cautious and explicit", () => {
@@ -124,8 +180,9 @@ describe("buildAnswerSpec", () => {
 
     expect(spec.action).toContain("hpv");
     expect(spec.action).toContain("takip");
-    expect(spec.action).toContain("muayene/kontrol");
-    expect(spec.action).toContain("kesin tanı yerine");
+    expect(spec.action).toContain("muayene");
+    expect(spec.action).toContain("kontrol");
+    expect(spec.action).toContain("tanı koymadan");
     expect(spec.facts[0]).toContain("hpv");
   });
 

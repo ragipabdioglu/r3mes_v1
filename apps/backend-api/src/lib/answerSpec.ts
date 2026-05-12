@@ -1,4 +1,5 @@
 import type { AnswerDomain, AnswerIntent, GroundedMedicalAnswer, GroundingConfidence } from "./answerSchema.js";
+import type { CompiledEvidence } from "./compiledEvidence.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 export interface AnswerSpec {
@@ -342,17 +343,34 @@ export function buildAnswerSpec(opts: {
   groundingConfidence: GroundingConfidence;
   userQuery: string;
   evidence: EvidenceExtractorOutput | null;
+  compiledEvidence?: CompiledEvidence | null;
 }): AnswerSpec {
-  const directFacts = prioritizeFacts(cleanValues(opts.evidence?.directAnswerFacts), opts.userQuery);
+  const compiledFacts = cleanValues(opts.compiledEvidence?.facts);
+  const compiledRisks = cleanValues(opts.compiledEvidence?.risks);
+  const compiledUnknowns = cleanValues(opts.compiledEvidence?.unknowns);
+  const compiledContradictions = cleanValues(opts.compiledEvidence?.contradictions);
+  const evidenceDirectFacts = cleanValues(opts.evidence?.directAnswerFacts);
+  const evidenceUsableFacts = cleanValues(opts.evidence?.usableFacts);
+  const directFacts = prioritizeFacts(evidenceDirectFacts.length > 0 ? evidenceDirectFacts : compiledFacts, opts.userQuery);
   const supportingFacts = prioritizeFacts(cleanValues(opts.evidence?.supportingContext), opts.userQuery);
-  const usableFacts = prioritizeFacts(cleanValues(opts.evidence?.usableFacts), opts.userQuery);
-  const riskFacts = prioritizeFacts(cleanValues(opts.evidence?.redFlags), opts.userQuery);
+  const usableFacts = prioritizeFacts(evidenceUsableFacts.length > 0 ? evidenceUsableFacts : compiledFacts, opts.userQuery);
+  const riskFacts = prioritizeFacts(
+    compiledRisks.length > 0
+      ? compiledRisks
+      : cleanValues([...(opts.evidence?.riskFacts ?? []), ...(opts.evidence?.redFlags ?? [])]),
+    opts.userQuery,
+  );
   const unknowns = cleanValues([
-    ...(opts.evidence?.uncertainOrUnusable ?? []),
-    ...(opts.evidence?.missingInfo ?? []),
+    ...compiledUnknowns,
+    ...(compiledUnknowns.length === 0 ? opts.evidence?.uncertainOrUnusable ?? [] : []),
+    ...(compiledUnknowns.length === 0 ? opts.evidence?.missingInfo ?? [] : []),
   ]);
-  const facts = cleanValues([...directFacts, ...supportingFacts, ...usableFacts]);
-  const contradictionUnknowns = unknowns.filter((item) => /çeliş|celis/u.test(item.toLocaleLowerCase("tr-TR")));
+  const facts = cleanValues([...directFacts, ...supportingFacts, ...usableFacts, ...compiledFacts]);
+  const contradictionUnknowns = cleanValues([
+    ...compiledContradictions,
+    ...unknowns.filter((item) => /çeliş|celis|contradict|conflict/u.test(item.toLocaleLowerCase("tr-TR"))),
+  ]);
+  const groundingConfidence = opts.compiledEvidence?.confidence ?? opts.groundingConfidence;
   const queryContextFact =
     opts.answerDomain === "medical"
       ? medicalQueryContextFact(opts.userQuery, [...facts, ...riskFacts, ...unknowns].join(" "))
@@ -386,12 +404,12 @@ export function buildAnswerSpec(opts: {
   ]).slice(0, 3);
   const summary = directFacts[0] ?? usableFacts[0] ?? assessment;
   const answerIntent = opts.evidence?.answerIntent ?? "unknown";
-  const tone = opts.groundingConfidence === "low" ? "cautious" : answerIntent === "reassure" ? "calm" : "direct";
+  const tone = groundingConfidence === "low" ? "cautious" : answerIntent === "reassure" ? "calm" : "direct";
 
   return {
     answerDomain: opts.answerDomain,
     answerIntent,
-    groundingConfidence: opts.groundingConfidence,
+    groundingConfidence,
     userQuery: opts.userQuery,
     tone,
     sections: sectionsForIntent(answerIntent),
@@ -400,7 +418,7 @@ export function buildAnswerSpec(opts: {
     caution,
     summary,
     unknowns: unknowns.slice(0, 4),
-    sourceIds: opts.evidence?.sourceIds ?? [],
+    sourceIds: opts.compiledEvidence?.sourceIds ?? opts.evidence?.sourceIds ?? [],
     facts: cleanValues([queryContextFact ?? "", ...facts]).slice(0, 6),
   };
 }

@@ -130,6 +130,7 @@ const CONCEPT_SYNONYMS = new Map([
   ["kayıp", ["kayıp", "kayip", "zarar", "risk"]],
   ["veri silen", ["veri silen", "veri silme", "yıkıcı", "yikici", "silme"]],
   ["süresi dolmuş", ["süresi dolmuş", "suresi dolmus", "eksik belge", "yanlış isim", "yanlis isim"]],
+  ["çelişir", ["çelişir", "çelişki", "çelişiyor", "celisir", "celiski", "celisiyor"]],
 ]);
 
 function missingRequiredConcepts(text, terms) {

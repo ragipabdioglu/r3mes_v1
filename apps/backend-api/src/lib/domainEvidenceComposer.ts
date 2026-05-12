@@ -127,6 +127,10 @@ function queryRelevantFact(spec: AnswerSpec, usedText: string): string | null {
 
 function lowGroundingLead(spec: AnswerSpec): string | null {
   if (spec.groundingConfidence !== "low") return null;
+  const contradictionText = [...spec.caution, ...spec.unknowns].join(" ").toLocaleLowerCase("tr-TR");
+  if (/çeliş|celis|contradict|conflict/u.test(contradictionText)) {
+    return "Bu kaynaklarda çelişki sinyali var; bu yüzden net ve kesin bir cevap vermek doğru olmaz, aşağıdaki yanıt yalnızca eldeki sınırlı dayanağa göre okunmalı.";
+  }
   return "Bu kaynaklarla net ve kesin bir cevap vermek doğru olmaz; aşağıdaki yanıt yalnızca eldeki sınırlı dayanağa göre okunmalı.";
 }
 

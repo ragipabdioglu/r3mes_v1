@@ -786,6 +786,7 @@ function applyRenderedAnswer(
     groundingConfidence: enrichedAnswer.grounding_confidence,
     userQuery: userQuery || enrichedAnswer.user_query,
     evidence: retrievalDebug?.evidence ?? null,
+    compiledEvidence: retrievalDebug?.compiledEvidence ?? null,
   });
   const useSafeTemplate =
     opts.useFallbackTemplate === true ||
@@ -918,12 +919,14 @@ function buildDeterministicGroundedAnswer(opts: {
   groundingConfidence: GroundedMedicalAnswer["grounding_confidence"];
   userQuery: string;
   evidence: EvidenceExtractorOutput | null;
+  compiledEvidence?: CompiledEvidence | null;
 }): GroundedMedicalAnswer {
   const spec = buildAnswerSpec({
     answerDomain: opts.answerDomain,
     groundingConfidence: opts.groundingConfidence,
     userQuery: opts.userQuery,
     evidence: opts.evidence,
+    compiledEvidence: opts.compiledEvidence,
   });
 
   return {
@@ -1758,6 +1761,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           groundingConfidence: retrieval.groundingConfidence,
           userQuery: retrievalQuery,
           evidence: retrieval.evidence,
+          compiledEvidence: "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null,
         });
         return reply.type("application/json").send(
           applyRenderedAnswer(
@@ -1791,6 +1795,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           groundingConfidence: retrieval.groundingConfidence,
           userQuery: retrievalQuery,
           evidence: retrieval.evidence,
+          compiledEvidence: "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null,
         });
         return reply.type("application/json").send(
           applyRenderedAnswer(
@@ -1821,6 +1826,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           groundingConfidence: retrieval.groundingConfidence,
           userQuery: retrievalQuery,
           evidence: retrieval.evidence,
+          compiledEvidence: "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null,
         });
         return reply.type("application/json").send(
           applyRenderedAnswer(
