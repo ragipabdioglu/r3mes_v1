@@ -120,7 +120,7 @@ function getAiEngineBase(): string {
 }
 
 function realRerankerRequired(): boolean {
-  return process.env.R3MES_REQUIRE_REAL_RERANKER === "1";
+  return process.env.R3MES_REQUIRE_REAL_RERANKER === "1" || process.env.NODE_ENV === "production";
 }
 
 function isRealRerankerProvider(provider: string | undefined): boolean {
@@ -363,6 +363,9 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
 ): Promise<RerankWithDiagnosticsResult<TChunk>> {
   const deterministic = rerankKnowledgeCards(query, candidates, candidates.length);
   if (!isModelRerankerEnabled() || deterministic.length === 0) {
+    if (realRerankerRequired() && deterministic.length > 0) {
+      throw new Error(`real reranker required but R3MES_RERANKER_MODE=${rerankerMode() || "deterministic"}`);
+    }
     const returned = deterministic.slice(0, limit);
     return {
       candidates: returned,

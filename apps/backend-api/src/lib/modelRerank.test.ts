@@ -363,4 +363,35 @@ describe("rerankKnowledgeCardsWithFallback", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
+
+  it("fails fast in production when deterministic reranker mode is selected", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("R3MES_RERANKER_MODE", "deterministic");
+
+    await expect(
+      modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
+        "migration rollback",
+        [
+          {
+            fusedScore: 1,
+            lexicalScore: 1,
+            embeddingScore: 0,
+            chunk: { id: "chunk-1", content: "migration rollback", document: { title: "Runbook" } },
+            card: {
+              topic: "migration",
+              tags: ["technical"],
+              patientSummary: "",
+              clinicalTakeaway: "",
+              safeGuidance: "",
+              redFlags: "",
+              doNotInfer: "",
+            },
+          },
+        ],
+        1,
+      ),
+    ).rejects.toThrow("real reranker required");
+
+    vi.unstubAllEnvs();
+  });
 });

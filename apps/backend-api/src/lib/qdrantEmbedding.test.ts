@@ -113,6 +113,15 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
     );
   });
 
+  it("fails fast in production when deterministic provider is selected", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "deterministic");
+
+    await expect(embedTextsForQdrantWithDiagnostics(["migration rollback"])).rejects.toThrow(
+      "real embeddings required",
+    );
+  });
+
   it("fails fast instead of falling back when real ai-engine embeddings are required", async () => {
     vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "bge-m3");
     vi.stubEnv("R3MES_REQUIRE_REAL_EMBEDDINGS", "1");

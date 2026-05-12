@@ -38,7 +38,7 @@ function getAiEngineBase(): string {
 }
 
 function realEmbeddingsRequired(): boolean {
-  return process.env.R3MES_REQUIRE_REAL_EMBEDDINGS === "1";
+  return process.env.R3MES_REQUIRE_REAL_EMBEDDINGS === "1" || process.env.NODE_ENV === "production";
 }
 
 export function getQdrantVectorSize(): number {
