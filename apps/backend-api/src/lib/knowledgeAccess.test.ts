@@ -515,6 +515,75 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(metadataCandidates[0]?.scoreBreakdown?.adaptiveBonus).toBeGreaterThan(0);
   });
 
+  it("keeps route hints weak when query-profile support is strong but domain differs", async () => {
+    const { rankSuggestedKnowledgeCollections } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "Trafik eğitim atölyesinde öğrenci güvenliği için hangi hazırlıklar yapılmalı?";
+    const routePlan = routeQuery(query);
+    const collections = [
+      {
+        id: "legal-traffic",
+        name: "Trafik cezası hukuk arşivi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            domains: ["legal"],
+            subtopics: ["trafik"],
+            keywords: ["trafik cezası", "itiraz", "tebligat"],
+            entities: [],
+            topicPhrases: ["trafik cezası itirazı"],
+            answerableConcepts: ["trafik cezası itiraz süreci"],
+            sampleQuestions: ["Trafik cezasına nasıl itiraz edilir?"],
+            summary: "Trafik cezası itirazı için süre, tebligat ve belge kontrolü.",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileEmbedding: embedKnowledgeText("trafik cezası itiraz tebligat belge hukuk"),
+            sampleQuestionsEmbedding: embedKnowledgeText("Trafik cezasına nasıl itiraz edilir?"),
+          },
+        },
+        documents: [],
+      },
+      {
+        id: "education-traffic-workshop",
+        name: "Trafik eğitim atölyesi",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            domains: ["education"],
+            subtopics: ["atolye_guvenligi", "trafik_egitimi"],
+            keywords: ["öğrenci", "güvenlik", "atölye", "trafik eğitimi", "hazırlık"],
+            entities: ["trafik eğitim atölyesi"],
+            topicPhrases: ["öğrenci güvenliği", "trafik eğitim atölyesi", "atölye hazırlığı"],
+            answerableConcepts: ["trafik eğitim atölyesi hazırlığı", "öğrenci güvenliği kontrol listesi"],
+            sampleQuestions: ["Trafik eğitim atölyesinde öğrenci güvenliği için hangi hazırlıklar yapılmalı?"],
+            summary: "Trafik eğitim atölyesi öncesinde öğrenci güvenliği, ekipman kontrolü ve öğretmen hazırlık adımları.",
+            sourceQuality: "structured",
+            confidence: "high",
+            profileEmbedding: embedKnowledgeText("trafik eğitim atölyesi öğrenci güvenliği ekipman hazırlık öğretmen"),
+            sampleQuestionsEmbedding: embedKnowledgeText(query),
+          },
+        },
+        documents: [],
+      },
+    ];
+
+    expect(routePlan.domain).toBe("legal");
+
+    const ranked = rankSuggestedKnowledgeCollections({
+      routePlan,
+      query,
+      collections,
+      limit: 2,
+    });
+
+    expect(ranked.map((collection) => collection.id)).toEqual([
+      "education-traffic-workshop",
+      "legal-traffic",
+    ]);
+  });
+
   it("marks thin profile suggestions as cautious instead of strict evidence", async () => {
     const { explainCollectionRouteSuggestion, rankMetadataRouteCandidates } = await import("./knowledgeAccess.js");
     const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");

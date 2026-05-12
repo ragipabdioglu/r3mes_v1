@@ -1010,12 +1010,13 @@ function adaptiveProfileRoutingScore(
   const routeScore = bestRouteProfileScore(collection, routePlan, query);
   const queryCandidate = metadataCandidateForQuery(collection, query);
   if (!queryCandidate) return routeScore;
-  const specificMatchBonus = Math.min(queryCandidate.matchedTerms.length, 6) * 7;
+  const adaptiveConfig = getAdaptiveRouterConfig();
+  const specificMatchBonus = Math.min(queryCandidate.matchedTerms.length, 6) * adaptiveConfig.queryMatchBonusPerTerm;
   const qualityBonus =
     queryCandidate.sourceQuality === "structured"
-      ? 10
+      ? adaptiveConfig.structuredSourceBonus
       : queryCandidate.sourceQuality === "inferred"
-        ? 5
+        ? adaptiveConfig.inferredSourceBonus
         : 0;
   return Math.max(routeScore, queryCandidate.score + specificMatchBonus + qualityBonus);
 }
@@ -1036,9 +1037,18 @@ function profileHasDirectDomainSupport(profile: KnowledgeMetadataProfile | undef
 function collectionHasMetadataSubtopicSupport(
   collection: KnowledgeCollectionAccessItem,
   routePlan: DomainRoutePlan,
+  query?: string,
 ): boolean {
   if (routePlan.subtopics.length === 0) return collectionHasMetadataDomainSupport(collection, routePlan.domain);
   const routeSubtopics = routePlan.subtopics.map(normalize);
+  const queryCandidate = metadataCandidateForQuery(collection, query);
+  if (
+    queryCandidate &&
+    queryCandidate.sourceQuality !== "thin" &&
+    queryCandidate.score >= Math.max(64, getAdaptiveRouterConfig().routeOverrideMargin * 3)
+  ) {
+    return true;
+  }
   return collectionMetadataProfiles(collection).some((profile) => {
     if (!metadataProfileMatchesDomain(profile, routePlan.domain)) return false;
     const profileSubtopics = profile.subtopics.map(normalize);
@@ -1219,7 +1229,7 @@ export function rankSuggestedKnowledgeCollections(opts: {
         return score >= (hasProfiles ? 24 : 14);
       }
       if (routePlan.subtopics.length > 0 && collectionMetadataProfiles(collection).length > 0) {
-        return collectionHasMetadataSubtopicSupport(collection, routePlan) || score >= 64;
+        return collectionHasMetadataSubtopicSupport(collection, routePlan, opts.query) || score >= 64;
       }
       return score >= 24 || collectionMatchesRoute(collection, routePlan.domain);
     })
