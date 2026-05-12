@@ -31,6 +31,14 @@ describe("queryUnderstanding", () => {
     expect(understanding.confidence).toBe("high");
   });
 
+  it("routes platform help turns away from RAG", () => {
+    const understanding = buildQueryUnderstanding("PDF nasıl yüklerim?");
+
+    expect(understanding.mode).toBe("conversation");
+    expect(understanding.retrievalIntent).toBe("conversation");
+    expect(understanding.conversationalIntent?.kind).toBe("usage_help");
+  });
+
   it("keeps weak domain router output as query signals, not a hard decision", () => {
     const understanding = buildQueryUnderstanding("Bu belgeyi kontrol eder misin?");
 

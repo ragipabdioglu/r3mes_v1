@@ -59,7 +59,11 @@ export function detectConversationalIntent(query: string): ConversationalIntentD
   const normalized = normalize(query);
   if (!normalized) return null;
 
-  if (/\b(bu sistemi nasil kullanirim|nasil kullanilir|nasil kullanacagim|yardim|ne yapabiliyorsun)\b/u.test(normalized)) {
+  if (
+    /\b(bu sistemi nasil kullanirim|nasil kullanilir|nasil kullanacagim|yardim|ne yapabiliyorsun|neler yapabiliyorsun|ne ise yarar|r3mes nedir|bu platform nedir)\b/u.test(normalized) ||
+    /\b(kaynak|collection)\b.*\b(nasil\s+secerim|nasil\s+secilir|secerim|secilir|kullanirim)\b/u.test(normalized) ||
+    /\b(belge|dokuman|doküman|pdf|docx)\b.*\b(nasil\s+yukle|nasil\s+yuklerim|nereye\s+yukle|nereden\s+yukle|yuklerim|yuklenir|yukleyecegim)\b/u.test(normalized)
+  ) {
     return {
       kind: "usage_help",
       confidence: "high",
@@ -71,7 +75,7 @@ export function detectConversationalIntent(query: string): ConversationalIntentD
 
   if (!isOnlyShortSocialText(normalized)) return null;
 
-  if (/^(merhaba|selam|sa|slm|hey|hello|hi)(lar)?[!. ]*$/u.test(normalized)) {
+  if (/^(merhaba|selam|sa|slm|hey|hello|hi|gunaydin|iyi aksamlar)(lar)?[!. ]*$/u.test(normalized)) {
     return {
       kind: "greeting",
       confidence: "high",
@@ -81,7 +85,7 @@ export function detectConversationalIntent(query: string): ConversationalIntentD
     };
   }
 
-  if (/^(tesekkurler|tesekkur ederim|sag ol|sagol|eyvallah|tamam tesekkurler)[!. ]*$/u.test(normalized)) {
+  if (/^(tesekkurler|tesekkur ederim|sag ol|sagol|eyvallah|tamam tesekkurler|tamamdir|tamam|ok|okey)[!. ]*$/u.test(normalized)) {
     return {
       kind: "thanks",
       confidence: "high",

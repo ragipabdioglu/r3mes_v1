@@ -26,4 +26,15 @@ describe("detectConversationalIntent", () => {
     });
     expect(decision?.response).toContain("knowledge");
   });
+
+  it("recognizes source and upload help without treating it as knowledge lookup", () => {
+    expect(detectConversationalIntent("PDF nasıl yüklerim?")).toMatchObject({ kind: "usage_help" });
+    expect(detectConversationalIntent("Kaynak nasıl seçerim?")).toMatchObject({ kind: "usage_help" });
+    expect(detectConversationalIntent("R3MES nedir ve ne işe yarar?")).toMatchObject({ kind: "usage_help" });
+  });
+
+  it("keeps document knowledge requests in RAG when they ask for document content", () => {
+    expect(detectConversationalIntent("Bu belgeyi kontrol eder misin?")).toBeNull();
+    expect(detectConversationalIntent("PDF raporundaki LDL değeri nasıl?")).toBeNull();
+  });
 });
