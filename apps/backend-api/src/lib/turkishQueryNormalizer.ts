@@ -91,11 +91,15 @@ function typoTolerantTerms(tokens: string[]): string[] {
   return terms;
 }
 
-export function normalizeTurkishQuery(query: string, routePlan?: DomainRoutePlan | null): TurkishQueryNormalization {
+export function normalizeTurkishQuery(
+  query: string,
+  routePlan?: DomainRoutePlan | null,
+  extraTerms: string[] = [],
+): TurkishQueryNormalization {
   const normalized = normalizeConceptText(query);
   const tokens = tokenizeTurkishQuery(query);
   const routeTerms = routePlanTerms(routePlan);
-  const surfaceTerms = expandSurfaceConceptTerms([query, ...routeTerms], 96);
+  const surfaceTerms = expandSurfaceConceptTerms([query, ...routeTerms, ...extraTerms], 128);
   const expandedTokens = unique(
     [
       ...tokens,
@@ -118,15 +122,25 @@ export function normalizeTurkishQuery(query: string, routePlan?: DomainRoutePlan
   };
 }
 
-export function buildExpandedQueryTokens(query: string, routePlan?: DomainRoutePlan | null, limit = 24): string[] {
-  return normalizeTurkishQuery(query, routePlan).expandedTokens
+export function buildExpandedQueryTokens(
+  query: string,
+  routePlan?: DomainRoutePlan | null,
+  limit = 24,
+  extraTerms: string[] = [],
+): string[] {
+  return normalizeTurkishQuery(query, routePlan, extraTerms).expandedTokens
     .filter((token) => token.length >= 3)
     .sort((a, b) => b.length - a.length)
     .slice(0, limit);
 }
 
-export function buildExpandedQueryText(query: string, routePlan?: DomainRoutePlan | null, maxWords = 64): string {
-  const normalized = normalizeTurkishQuery(query, routePlan);
+export function buildExpandedQueryText(
+  query: string,
+  routePlan?: DomainRoutePlan | null,
+  maxWords = 64,
+  extraTerms: string[] = [],
+): string {
+  const normalized = normalizeTurkishQuery(query, routePlan, extraTerms);
   const seen = new Set<string>();
   const values: string[] = [];
   for (const value of [normalized.original, normalized.normalized, ...normalized.expandedTokens]) {

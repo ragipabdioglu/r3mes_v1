@@ -516,11 +516,27 @@ function queryConceptTerms(query: string): string[] {
   ]).filter((token) => !GENERIC_QUERY_TERMS.has(token)).slice(0, 32);
 }
 
-function queryProfileSignals(query: string): string[] {
-  const understanding = buildQueryUnderstanding(query);
+function queryUnderstandingProfileInput(profile?: KnowledgeMetadataProfile): Parameters<typeof buildQueryUnderstanding>[1] {
+  if (!profile) return undefined;
+  return {
+    profiles: [
+      {
+        answerableConcepts: profile.answerableConcepts,
+        topicPhrases: profile.topicPhrases,
+        entities: profile.entities,
+        sampleQueries: profile.questionsAnswered,
+        tableConcepts: profile.tableConcepts,
+      },
+    ],
+  };
+}
+
+function queryProfileSignals(query: string, profile?: KnowledgeMetadataProfile): string[] {
+  const understanding = buildQueryUnderstanding(query, queryUnderstandingProfileInput(profile));
   const signals = extractQuerySignals(query);
   return unique([
     ...understanding.concepts,
+    ...understanding.profileConcepts,
     ...signals.phraseHints,
     ...signals.namedEntities,
     ...signals.significantTerms,
@@ -539,9 +555,9 @@ function queryProfileSignalText(query: string): string {
   ]).join(" ");
 }
 
-function queryAdaptiveTerms(query: string): string[] {
+function queryAdaptiveTerms(query: string, profile?: KnowledgeMetadataProfile): string[] {
   return unique([
-    ...queryProfileSignals(query),
+    ...queryProfileSignals(query, profile),
     ...queryConceptTerms(query),
   ]).filter((token) => !GENERIC_QUERY_TERMS.has(normalize(token))).slice(0, 48);
 }
@@ -685,7 +701,7 @@ function scoreMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: 
 }
 
 function explainMetadataProfileForQuery(profile: KnowledgeMetadataProfile, query: string): RouterScoreBreakdown {
-  const concepts = queryAdaptiveTerms(query);
+  const concepts = queryAdaptiveTerms(query, profile);
   const allTerms = queryTokens(query);
   const text = normalize(metadataText(profile));
   const answerableText = normalize(profileAnswerableTerms(profile).join(" "));
