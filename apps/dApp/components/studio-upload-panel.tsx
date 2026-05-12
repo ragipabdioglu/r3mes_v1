@@ -54,8 +54,8 @@ function summarizeUploadSuccess(body: string): string {
     const id = j.adapterId;
     if (st === "PENDING_REVIEW") {
       return id
-        ? `Yükleme alındı. Sırada inceleme ve benchmark var. Kayıt: ${id}.`
-        : "Yükleme alındı. Sırada inceleme ve benchmark var.";
+        ? `Yükleme alındı. Sırada uyumluluk ve davranış smoke kontrolü var. Kayıt: ${id}.`
+        : "Yükleme alındı. Sırada uyumluluk ve davranış smoke kontrolü var.";
     }
     if (st) {
       return id
@@ -266,7 +266,7 @@ export function StudioUploadPanel() {
                   <dd className="mt-0.5">{state.payload.status}</dd>
                 </div>
                 <div>
-                  <dt className="text-zinc-500">Benchmark işi</dt>
+                  <dt className="text-zinc-500">Uyumluluk kontrolü</dt>
                   <dd className="mt-0.5 font-mono text-zinc-200 break-all">
                     {state.payload.benchmarkJobId}
                   </dd>

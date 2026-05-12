@@ -162,7 +162,8 @@ export function AdapterStatusBoard() {
 
       <p className="text-[11px] text-zinc-600">
         Rozetler: incelemede (sarı), yayında (yeşil), reddedildi veya kullanım
-        dışı (kırmızı). Bu alan yalnız stil/persona LoRA kayıtlarını gösterir.
+        dışı (kırmızı). Bu alan yalnız stil/persona LoRA kayıtlarını gösterir;
+        knowledge doğruluğu RAG kaynakları ve feedback hattıyla yönetilir.
       </p>
     </motion.section>
   );
