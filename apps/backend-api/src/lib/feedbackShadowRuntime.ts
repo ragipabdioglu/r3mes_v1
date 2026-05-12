@@ -11,6 +11,13 @@ export interface FeedbackShadowRuntimeImpact {
   totalScoreDelta: number;
   activeAdjustmentCount: number;
   gatePassedCount: number;
+  promotionStage: "eligible_shadow" | "blocked" | "review_only";
+  rollbackRecommended: boolean;
+  nextSafeAction:
+    | "keep_passive"
+    | "inspect_blockers"
+    | "rollback_or_review"
+    | "eligible_for_shadow_observation";
   recommendation: "eligible_for_shadow_runtime" | "keep_passive" | "review_only";
   blockedReasons: string[];
   adjustmentIds: string[];
@@ -111,6 +118,9 @@ export async function evaluateFeedbackShadowRuntime(opts: {
       totalScoreDelta: 0,
       activeAdjustmentCount: 0,
       gatePassedCount: 0,
+      promotionStage: "blocked" as const,
+      rollbackRecommended: false,
+      nextSafeAction: "keep_passive" as const,
       recommendation: "keep_passive" as const,
       blockedReasons: [],
       adjustmentIds: [],
@@ -134,14 +144,33 @@ export async function evaluateFeedbackShadowRuntime(opts: {
       blockedReasons.add(`score delta exceeds promotion cap ${PROMOTION_MAX_ABS_DELTA}`);
     }
     const blocked = Array.from(blockedReasons);
+    const recommendation = blocked.length === 0
+      ? "eligible_for_shadow_runtime" as const
+      : impact.totalScoreDelta === 0
+        ? "review_only" as const
+        : "keep_passive" as const;
+    const rollbackRecommended =
+      blockedReasons.has("not all source apply records passed eval gate") ||
+      blockedReasons.has(`score delta exceeds promotion cap ${PROMOTION_MAX_ABS_DELTA}`);
+    const promotionStage = recommendation === "eligible_for_shadow_runtime"
+      ? "eligible_shadow" as const
+      : recommendation === "review_only"
+        ? "review_only" as const
+        : "blocked" as const;
+    const nextSafeAction = recommendation === "eligible_for_shadow_runtime"
+      ? "eligible_for_shadow_observation" as const
+      : rollbackRecommended
+        ? "rollback_or_review" as const
+        : blocked.length > 0
+          ? "inspect_blockers" as const
+          : "keep_passive" as const;
     return {
       ...impact,
       blockedReasons: blocked,
-      recommendation: blocked.length === 0
-        ? "eligible_for_shadow_runtime" as const
-        : impact.totalScoreDelta === 0
-          ? "review_only" as const
-          : "keep_passive" as const,
+      promotionStage,
+      rollbackRecommended,
+      nextSafeAction,
+      recommendation,
     };
   }).sort((a, b) => Math.abs(b.totalScoreDelta) - Math.abs(a.totalScoreDelta));
 

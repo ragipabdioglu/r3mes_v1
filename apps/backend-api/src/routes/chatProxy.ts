@@ -726,6 +726,9 @@ function summarizeSourceSelectionForTrace(
             collectionId: impact.collectionId,
             totalScoreDelta: impact.totalScoreDelta,
             recommendation: impact.recommendation,
+            promotionStage: impact.promotionStage,
+            rollbackRecommended: impact.rollbackRecommended,
+            nextSafeAction: impact.nextSafeAction,
             blockedReasonCount: impact.blockedReasons.length,
           })),
         }

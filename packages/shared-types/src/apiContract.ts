@@ -483,7 +483,7 @@ export interface ChatRetrievalDebug {
     };
     shadowRuntime?: {
       enabled: boolean;
-      runtimeAffected: false;
+      runtimeAffected: boolean;
       queryHash: string | null;
       candidateCollectionIds: string[];
       activeAdjustmentCount: number;
@@ -497,6 +497,13 @@ export interface ChatRetrievalDebug {
         activeAdjustmentCount: number;
         gatePassedCount: number;
         recommendation: "eligible_for_shadow_runtime" | "keep_passive" | "review_only";
+        promotionStage: "eligible_shadow" | "blocked" | "review_only";
+        rollbackRecommended: boolean;
+        nextSafeAction:
+          | "keep_passive"
+          | "inspect_blockers"
+          | "rollback_or_review"
+          | "eligible_for_shadow_observation";
         blockedReasons: string[];
         adjustmentIds: string[];
       }>;
