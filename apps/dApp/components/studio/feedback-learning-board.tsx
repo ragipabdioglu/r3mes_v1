@@ -77,6 +77,16 @@ function formatDurationMs(value: number | null): string {
   return `${(value / 1000).toFixed(1)}s`;
 }
 
+function boolLabel(value: boolean | null | undefined, yes: string, no: string, unknown = "unknown"): string {
+  if (value === true) return yes;
+  if (value === false) return no;
+  return unknown;
+}
+
+function countLabel(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "-";
+}
+
 export function FeedbackLearningBoard() {
   const account = useCurrentAccount();
   const { ensureAuthHeaders } = useR3mesWalletAuth();
@@ -401,6 +411,23 @@ export function FeedbackLearningBoard() {
                     <p>
                       gateOk={String(record.gateReportSummary.ok)} · checks={record.gateReportSummary.checksPassed}/{record.gateReportSummary.checksTotal} · failed={record.gateReportSummary.checksFailed} · duration={formatDurationMs(record.gateReportSummary.durationMs)}
                     </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <span className="rounded-full border border-zinc-700 bg-zinc-950/50 px-2 py-0.5">
+                        apply={boolLabel(record.gateReportSummary.applyAllowed, "allowed", "blocked")}
+                      </span>
+                      <span className="rounded-full border border-zinc-700 bg-zinc-950/50 px-2 py-0.5">
+                        feedbackCases={countLabel(record.gateReportSummary.feedbackCaseCount)}
+                      </span>
+                      <span className="rounded-full border border-zinc-700 bg-zinc-950/50 px-2 py-0.5">
+                        coverage={boolLabel(record.gateReportSummary.feedbackCaseCoverageOk, "ok", "missing")}
+                      </span>
+                      <span className="rounded-full border border-zinc-700 bg-zinc-950/50 px-2 py-0.5">
+                        approved={countLabel(record.gateReportSummary.approvedProposalCount)}
+                      </span>
+                      <span className="rounded-full border border-zinc-700 bg-zinc-950/50 px-2 py-0.5">
+                        production={boolLabel(record.gateReportSummary.productionGateRan, "ran", "skipped")}
+                      </span>
+                    </div>
                     {record.gateReportSummary.failedChecks.length > 0 ? (
                       <p className="mt-1 text-rose-200/75">
                         Failed: {record.gateReportSummary.failedChecks.join(", ")}

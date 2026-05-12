@@ -125,6 +125,11 @@ export type KnowledgeFeedbackApplyRecordItem = {
     durationMs: number | null;
     quick: boolean | null;
     generatedAt: string | null;
+    applyAllowed: boolean | null;
+    feedbackCaseCount: number | null;
+    feedbackCaseCoverageOk: boolean | null;
+    approvedProposalCount: number | null;
+    productionGateRan: boolean | null;
   } | null;
   reason: string | null;
   plannedAt: string;
