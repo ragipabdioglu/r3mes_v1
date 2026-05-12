@@ -20,27 +20,35 @@ const samples = [
   "Rahatsız eden baş ağrısı, ateş veya nörolojik belirti varsa sağlık uzmanıyla görüşülmelidir.",
 ];
 
-const result = await embedTextsForQdrantWithDiagnostics(samples);
-const [queryVector, positiveVector, negativeVector] = result.vectors;
-const positiveSimilarity = cosineSimilarity(queryVector ?? [], positiveVector ?? []);
-const negativeSimilarity = cosineSimilarity(queryVector ?? [], negativeVector ?? []);
-const requireRealProvider = process.env.R3MES_REQUIRE_REAL_EMBEDDINGS === "1";
-const passed = positiveSimilarity > negativeSimilarity && (!requireRealProvider || !result.diagnostics.fallbackUsed);
+try {
+  const result = await embedTextsForQdrantWithDiagnostics(samples);
+  const [queryVector, positiveVector, negativeVector] = result.vectors;
+  const positiveSimilarity = cosineSimilarity(queryVector ?? [], positiveVector ?? []);
+  const negativeSimilarity = cosineSimilarity(queryVector ?? [], negativeVector ?? []);
+  const requireRealProvider = process.env.R3MES_REQUIRE_REAL_EMBEDDINGS === "1";
+  const passed = positiveSimilarity > negativeSimilarity && (!requireRealProvider || !result.diagnostics.fallbackUsed);
 
-const report = {
-  diagnostics: result.diagnostics,
-  positiveSimilarity: Number(positiveSimilarity.toFixed(6)),
-  negativeSimilarity: Number(negativeSimilarity.toFixed(6)),
-  passed,
-};
+  const report = {
+    diagnostics: result.diagnostics,
+    positiveSimilarity: Number(positiveSimilarity.toFixed(6)),
+    negativeSimilarity: Number(negativeSimilarity.toFixed(6)),
+    passed,
+  };
 
-console.log(JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
 
-if (!passed) {
-  if (requireRealProvider && result.diagnostics.fallbackUsed) {
-    console.error("Embedding smoke failed: real embedding provider was required but deterministic fallback was used.");
-  } else {
-    console.error("Embedding smoke failed: positive sample did not score above negative sample.");
+  if (!passed) {
+    if (requireRealProvider && result.diagnostics.fallbackUsed) {
+      console.error("Embedding smoke failed: real embedding provider was required but deterministic fallback was used.");
+    } else {
+      console.error("Embedding smoke failed: positive sample did not score above negative sample.");
+    }
+    process.exit(1);
   }
+} catch (error) {
+  console.error(JSON.stringify({
+    passed: false,
+    error: error instanceof Error ? error.message : String(error),
+  }, null, 2));
   process.exit(1);
 }

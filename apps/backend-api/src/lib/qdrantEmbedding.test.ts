@@ -104,6 +104,26 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
     });
   });
 
+  it("fails fast when real embeddings are required but deterministic provider is selected", async () => {
+    vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "deterministic");
+    vi.stubEnv("R3MES_REQUIRE_REAL_EMBEDDINGS", "1");
+
+    await expect(embedTextsForQdrantWithDiagnostics(["migration rollback"])).rejects.toThrow(
+      "real embeddings required",
+    );
+  });
+
+  it("fails fast instead of falling back when real ai-engine embeddings are required", async () => {
+    vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "bge-m3");
+    vi.stubEnv("R3MES_REQUIRE_REAL_EMBEDDINGS", "1");
+    vi.stubEnv("R3MES_QDRANT_VECTOR_SIZE", "8");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
+
+    await expect(embedTextsForQdrantWithDiagnostics(["baş ağrısı"])).rejects.toThrow(
+      "real embeddings required but provider bge-m3 failed",
+    );
+  });
+
   it("scales ai-engine timeout with embedding batch size", async () => {
     vi.useFakeTimers();
     vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "ai-engine");
