@@ -132,10 +132,19 @@ export type ChatRetrievalDebug = {
       id: string;
       name: string;
       score: number;
+      scoreBreakdown?: {
+        finalScore: number;
+        signals: Record<string, number | null>;
+        contributions: Record<string, number>;
+        missingSignals: string[];
+        scoringMode?: "route_profile" | "query_profile";
+        adaptiveBonus?: number;
+      };
       domain: string | null;
       subtopics: string[];
       matchedTerms: string[];
       reason: string;
+      sourceQuality?: "structured" | "inferred" | "thin" | null;
     }>;
     includePublic: boolean;
     routeDomain: "medical" | "legal" | "finance" | "technical" | "education" | "general" | null;
@@ -150,6 +159,33 @@ export type ChatRetrievalDebug = {
       suggestedCollectionIds: string[];
       rejectedCollectionIds: string[];
       reasons: string[];
+    };
+    shadowRuntime?: {
+      enabled: boolean;
+      runtimeAffected: boolean;
+      queryHash: string | null;
+      candidateCollectionIds: string[];
+      activeAdjustmentCount: number;
+      promotedCandidateCount: number;
+      currentTopCandidateId: string | null;
+      shadowTopCandidateId: string | null;
+      wouldChangeTopCandidate: boolean;
+      impacts: Array<{
+        collectionId: string;
+        totalScoreDelta: number;
+        activeAdjustmentCount: number;
+        gatePassedCount: number;
+        recommendation: "eligible_for_shadow_runtime" | "keep_passive" | "review_only";
+        promotionStage: "eligible_shadow" | "blocked" | "review_only";
+        rollbackRecommended: boolean;
+        nextSafeAction:
+          | "keep_passive"
+          | "inspect_blockers"
+          | "rollback_or_review"
+          | "eligible_for_shadow_observation";
+        blockedReasons: string[];
+        adjustmentIds: string[];
+      }>;
     };
   };
   queryPlan: {
