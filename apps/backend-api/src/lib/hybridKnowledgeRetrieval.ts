@@ -546,6 +546,45 @@ function diversifyContradictionReviewCandidates<T extends { chunk: HybridKnowled
   return [...byDocument.values()].slice(0, limit);
 }
 
+function diversifyQueryCoverageCandidates<T extends { chunk: HybridKnowledgeChunk }>(
+  query: string,
+  accepted: T[],
+  candidates: T[],
+  limit: number,
+  routePlan?: DomainRoutePlan | null,
+): T[] {
+  if (limit < 2 || candidates.length === 0) return accepted.slice(0, limit);
+  const selected = [...accepted];
+  const selectedKeys = () => new Set(selected.map((candidate) => candidate.chunk.documentId));
+  const selectedText = () => normalize(selected.map((candidate) => [
+    candidate.chunk.document.title,
+    candidate.chunk.content,
+  ].join(" ")).join(" "));
+  const importantTerms = uniqueTokens([
+    ...buildExpandedQueryTokens(query, routePlan, 32),
+    ...(routePlan?.mustIncludeTerms ?? []),
+  ])
+    .filter((term) => term.length >= 4)
+    .filter((term) => !["kaynak", "kaynaklar", "hangi", "kisa", "kısa", "acikla", "açıkla", "gerekiyor", "hazirlamaliyim"].includes(term))
+    .slice(0, 12);
+
+  for (const term of importantTerms) {
+    if (selected.length >= limit) break;
+    if (selectedText().includes(term)) continue;
+    const match = candidates.find((candidate) => {
+      if (selectedKeys().has(candidate.chunk.documentId)) return false;
+      const haystack = normalize([
+        candidate.chunk.document.title,
+        candidate.chunk.content,
+      ].join(" "));
+      return haystack.includes(term);
+    });
+    if (match) selected.push(match);
+  }
+
+  return selected.slice(0, limit);
+}
+
 function criticalEvidenceTermGroups(query: string): string[][] {
   const normalized = normalize(query);
   const groups: string[][] = [];
@@ -1164,6 +1203,16 @@ function deriveGroundingConfidence(scores: number[]): GroundingConfidence {
   return "low";
 }
 
+function promoteGroundingFromCompiledEvidence(opts: {
+  base: GroundingConfidence;
+  compiledEvidence: CompiledEvidence;
+}): GroundingConfidence {
+  if (opts.base !== "low") return opts.base;
+  if (opts.compiledEvidence.contradictionCount > 0) return "low";
+  if (opts.compiledEvidence.usableFactCount >= 2 && opts.compiledEvidence.sourceIds.length > 0) return "medium";
+  return "low";
+}
+
 function renderDetailedEvidenceBrief(
   evidence: EvidenceExtractorOutput,
   opts: { groundingConfidence: GroundingConfidence; lowGroundingConfidence: boolean },
@@ -1592,11 +1641,17 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   ];
   const accepted = diversifyCriticalEvidenceCandidates(
     evidenceQuery,
-    diversifyContradictionReviewCandidates(
+    diversifyQueryCoverageCandidates(
       evidenceQuery,
-      diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit),
+      diversifyContradictionReviewCandidates(
+        evidenceQuery,
+        diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit),
+        reranked,
+        limit,
+      ),
       reranked,
       limit,
+      routePlan,
     ),
     criticalRerankPool,
     limit,
@@ -1710,7 +1765,15 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     sourceRefs,
     groundingConfidence,
   });
-  if (evidenceHasOnlyScopeExclusion(evidenceRun.output) || !hasCompiledUsableGrounding(compiledEvidence)) {
+  const responseGroundingConfidence = promoteGroundingFromCompiledEvidence({
+    base: groundingConfidence,
+    compiledEvidence,
+  });
+  const responseCompiledEvidence =
+    responseGroundingConfidence === compiledEvidence.confidence
+      ? compiledEvidence
+      : { ...compiledEvidence, confidence: responseGroundingConfidence };
+  if (evidenceHasOnlyScopeExclusion(evidenceRun.output) || !hasCompiledUsableGrounding(responseCompiledEvidence)) {
     const scopedOutAlignmentDiagnostics = {
       ...finalAlignmentDiagnostics,
       droppedCandidateCount: finalAlignmentDiagnostics.droppedCandidateCount + finalCandidates.length,
@@ -1722,7 +1785,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       lowGroundingConfidence: true,
       groundingConfidence: "low",
       evidence: evidenceRun.output,
-      compiledEvidence,
+      compiledEvidence: responseCompiledEvidence,
       diagnostics: {
         qdrantCandidateCount: qdrantCandidates.length,
         prismaCandidateCount: prismaCandidates.length,
@@ -1749,13 +1812,17 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       },
     };
   }
+  const responseLowGroundingConfidence = responseGroundingConfidence === "low";
   const brief =
     getRagContextMode() === "detailed"
-      ? renderDetailedEvidenceBrief(evidenceRun.output, { groundingConfidence, lowGroundingConfidence })
-      : compiledEvidence.usableFactCount > 0 || compiledEvidence.unknownCount > 0
-        ? buildCompiledEvidenceBrief(compiledEvidence, {
-            groundingConfidence: compiledEvidence.confidence,
-            lowGroundingConfidence: compiledEvidence.confidence === "low",
+      ? renderDetailedEvidenceBrief(evidenceRun.output, {
+          groundingConfidence: responseGroundingConfidence,
+          lowGroundingConfidence: responseLowGroundingConfidence,
+        })
+      : responseCompiledEvidence.usableFactCount > 0 || responseCompiledEvidence.unknownCount > 0
+        ? buildCompiledEvidenceBrief(responseCompiledEvidence, {
+            groundingConfidence: responseCompiledEvidence.confidence,
+            lowGroundingConfidence: responseLowGroundingConfidence,
             answerIntent: evidenceRun.output.answerIntent,
             sourceRefs,
           })
@@ -1780,10 +1847,10 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   return {
     contextText,
     sources: filteredSources,
-    lowGroundingConfidence,
-    groundingConfidence,
+    lowGroundingConfidence: responseLowGroundingConfidence,
+    groundingConfidence: responseGroundingConfidence,
     evidence: evidenceRun.output,
-    compiledEvidence,
+    compiledEvidence: responseCompiledEvidence,
     diagnostics: {
       qdrantCandidateCount: qdrantCandidates.length,
       prismaCandidateCount: prismaCandidates.length,

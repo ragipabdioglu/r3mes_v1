@@ -567,6 +567,57 @@ describe("true hybrid retrieval helpers", () => {
     qdrant.mockRestore();
   });
 
+  it("keeps secondary concept sources for multi-concept queries", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "deterministic");
+    vi.stubEnv("R3MES_RAG_MIN_RERANK_SCORE", "0.1");
+    vi.stubEnv("R3MES_RAG_RELATIVE_SCORE_FLOOR", "0.85");
+    const collectionId = "multi-concept-test";
+    const docs = [
+      {
+        id: "custody",
+        documentId: "custody-doc",
+        chunkIndex: 0,
+        content: "Topic: velayet\nTags: legal, velayet\nVelayet için çocuk yararı, okul ve sağlık kayıtları önemlidir.",
+        tokenCount: 20,
+        autoMetadata: { domain: "legal", keywords: ["velayet", "belge"] },
+        document: {
+          title: "legal-divorce-custody",
+          collectionId,
+          autoMetadata: { domain: "legal", keywords: ["velayet"] },
+        },
+        embedding: { values: [] },
+      },
+      {
+        id: "alimony",
+        documentId: "alimony-doc",
+        chunkIndex: 0,
+        content: "Topic: nafaka\nTags: legal, nafaka\nNafaka için gelir belgeleri, gider kayıtları ve ödeme gücü değerlendirilir.",
+        tokenCount: 20,
+        autoMetadata: { domain: "legal", keywords: ["nafaka", "belge"] },
+        document: {
+          title: "legal-divorce-alimony",
+          collectionId,
+          autoMetadata: { domain: "legal", keywords: ["nafaka"] },
+        },
+        embedding: { values: [] },
+      },
+    ];
+    const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue(docs as never);
+    const qdrant = vi.mocked(searchQdrantKnowledge).mockResolvedValue([]);
+    const result = await retrieveKnowledgeContextTrueHybrid({
+      query: "Boşanma davasında velayet ve nafaka için ne hazırlamalıyım?",
+      evidenceQuery: "Boşanma davasında velayet ve nafaka için ne hazırlamalıyım?",
+      accessibleCollectionIds: [collectionId],
+      limit: 2,
+      budgetMode: "fast_grounded",
+    });
+
+    expect(result.sources.map((source) => source.documentId).sort()).toEqual(["alimony-doc", "custody-doc"]);
+    expect(result.contextText).toContain("nafaka");
+    findMany.mockRestore();
+    qdrant.mockRestore();
+  });
+
   it("keeps pruning diagnostics generic for noisy mixed-domain evidence", () => {
     vi.stubEnv("R3MES_EVIDENCE_FAST_MAX_CHARS", "240");
     const result = buildPrunedEvidenceInputWithDiagnostics({

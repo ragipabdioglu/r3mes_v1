@@ -1792,6 +1792,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const retrievalWasUsed = retrieval.contextText.length > 0;
       const hasContradictoryCompiledEvidence =
         "compiledEvidence" in retrieval && (retrieval.compiledEvidence?.contradictionCount ?? 0) > 0;
+      const hasUsableCompiledEvidence =
+        "compiledEvidence" in retrieval && (retrieval.compiledEvidence?.usableFactCount ?? 0) > 0;
+      const shouldUseLowConfidenceEvidenceFastPath =
+        !stream && retrievalWasUsed && retrieval.sources.length > 0 && retrieval.groundingConfidence === "low" && hasUsableCompiledEvidence;
       if (
         !stream &&
         retrievalQuery &&
@@ -1828,6 +1832,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         );
       }
       if (
+        shouldUseLowConfidenceEvidenceFastPath ||
         (hasContradictoryCompiledEvidence && !stream && retrievalWasUsed && retrieval.sources.length > 0) ||
         shouldUseRagFastPath({
           stream,
@@ -1839,7 +1844,11 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         })
       ) {
         chatTrace.recordNow("answer_path", "ok", {
-          name: hasContradictoryCompiledEvidence ? "contradiction_fast_path" : "rag_fast_path",
+          name: hasContradictoryCompiledEvidence
+            ? "contradiction_fast_path"
+            : shouldUseLowConfidenceEvidenceFastPath
+              ? "low_confidence_evidence_fast_path"
+              : "rag_fast_path",
           retrievalWasUsed,
           sourceCount: retrieval.sources.length,
         });
