@@ -148,15 +148,23 @@ function medicalQueryContextTerms(query: string, existingText: string): string[]
       const canonicalToken =
         token.startsWith("temiz") ? "temiz"
         : token.startsWith("takip") ? "takip"
+        : token.startsWith("kontrol") ? "kontrol"
+        : token.startsWith("muayene") ? "muayene"
+        : token.startsWith("degerlend") ? "degerlendirme"
         : token.startsWith("kasik") || token.startsWith("kasig") ? "kasik"
         : token.startsWith("kist") ? "kist"
         : token.startsWith("boyut") ? "boyut"
         : token.startsWith("smear") ? "smear"
+        : token.startsWith("ultrason") ? "ultrason"
+        : token.startsWith("test") ? "test"
+        : token.startsWith("akinti") ? "akinti"
+        : token.startsWith("doktor") || token.startsWith("hekim") ? "doktor"
+        : token.startsWith("asi") ? "asi"
         : token.startsWith("biyops") ? "biyopsi"
         : token.startsWith("patoloj") ? "patoloji"
         : token;
       let score = 0;
-      if (/^(hpv|asc|ascus|asc-us|smear|biyopsi|patoloji|kist|boyut|takip|kasik|kanama|lekelenme|gebelik|hamile|temiz|muayene)$/u.test(canonicalToken)) score += 20;
+      if (/^(hpv|asc|ascus|asc-us|smear|biyopsi|patoloji|kist|boyut|takip|kontrol|kasik|kanama|lekelenme|gebelik|hamile|temiz|muayene|ultrason|test|akinti|doktor|asi|degerlendirme)$/u.test(canonicalToken)) score += 20;
       if (/^(agri|agrisi|agriyor)$/u.test(canonicalToken)) score += 5;
       if (!existing.includes(canonicalToken)) score += 6;
       return { token: canonicalToken, index, score };
@@ -178,8 +186,14 @@ function medicalQueryContextTerms(query: string, existingText: string): string[]
 function medicalQueryContextFact(query: string, existingText: string): string | null {
   const terms = medicalQueryContextTerms(query, existingText);
   if (terms.length === 0) return null;
-  const joined = terms.join(", ");
-  return `Soruda belirtilen ${joined} bilgisi kaynak yanıtını yorumlarken korunmalı; bu başlıklar kesin tanı yerine uygun muayene/kontrol bağlamında değerlendirilmelidir.`;
+  const displayTerms: Record<string, string> = {
+    akinti: "akıntı",
+    asi: "aşı",
+    degerlendirme: "değerlendirme",
+    kasik: "kasık",
+  };
+  const joined = terms.map((term) => displayTerms[term] ?? term).join(", ");
+  return `Soruda belirtilen ${joined} bilgisi kaynak yanıtını yorumlarken korunmalı; bu başlıklar tanı koymadan uygun muayene, kontrol, takip ve değerlendirme bağlamında ele alınmalıdır.`;
 }
 
 function factTokens(value: string): string[] {

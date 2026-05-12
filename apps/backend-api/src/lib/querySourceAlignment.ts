@@ -314,6 +314,7 @@ export function scoreQuerySourceAlignment(opts: {
   weakScore: number;
   genericPenalty: number;
 }): AlignmentScore {
+  const queryCanonicalTerms = inferCanonicalConcepts(opts.query);
   const queryTerms = buildQueryConceptTerms(opts.query, opts.routePlan);
   const sourceTerms = unique(
     [
@@ -343,12 +344,21 @@ export function scoreQuerySourceAlignment(opts: {
   const matchedTerms = importantQueryTerms.filter((queryTerm) =>
     sourceTerms.some((sourceTerm) => fuzzyMatch(queryTerm, sourceTerm)),
   );
+  const matchedCanonicalTerms = queryCanonicalTerms.filter((queryTerm) =>
+    sourceTerms.some((sourceTerm) => fuzzyMatch(queryTerm, sourceTerm)),
+  );
   const genericMatchedTerms = genericQueryTerms.filter((queryTerm) =>
     sourceTerms.some((sourceTerm) => fuzzyMatch(queryTerm, sourceTerm)),
   );
   const phraseMatches = phraseTerms(opts.query).filter((phrase) => sourceText.includes(phrase));
   const denominator = Math.max(1, importantQueryTerms.length);
-  const overlapScore = matchedTerms.length / denominator;
+  const lexicalOverlapScore = matchedTerms.length / denominator;
+  const canonicalOverlapScore =
+    queryCanonicalTerms.length > 0 ? matchedCanonicalTerms.length / queryCanonicalTerms.length : 0;
+  const overlapScore =
+    queryCanonicalTerms.length > 0
+      ? Math.max(lexicalOverlapScore, canonicalOverlapScore * 0.72)
+      : lexicalOverlapScore;
   const phraseBonus = phraseMatches.length > 0 ? 0.28 : 0;
   const routeDomainBonus =
     opts.routePlan?.domain && opts.routePlan.domain !== "general" && sourceTerms.includes(tokenKey(opts.routePlan.domain))
@@ -375,7 +385,7 @@ export function scoreQuerySourceAlignment(opts: {
   return {
     mode,
     score: Number(score.toFixed(3)),
-    matchedTerms: unique([...matchedTerms, ...phraseMatches], 12),
+    matchedTerms: unique([...matchedCanonicalTerms, ...matchedTerms, ...phraseMatches], 12),
     queryTerms: unique(queryTerms, 20),
     sourceTerms: unique(sourceTerms, 24),
     genericMatchedTerms: unique(genericMatchedTerms, 8),

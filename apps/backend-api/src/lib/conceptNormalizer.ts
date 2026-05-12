@@ -189,6 +189,16 @@ const CONCEPT_RULES: CanonicalConceptRule[] = [
     patterns: [/\bsmear\b/, /\bservikal\b/, /\brahim\s+agzi\b/],
   },
   {
+    id: "concept:hpv",
+    terms: ["hpv", "human papilloma virus", "servikal tarama"],
+    patterns: [/\bhpv\b/, /\bhuman\s+papilloma\b/],
+  },
+  {
+    id: "concept:asc_us",
+    terms: ["asc-us", "ascus", "servikal sitoloji"],
+    patterns: [/\basc\s*us\b/, /\bascus\b/],
+  },
+  {
     id: "concept:divorce",
     terms: ["bosanma", "anlasmali bosanma", "velayet", "nafaka"],
     patterns: [/\bbosan\w*\b/, /\bvelayet\b/, /\bnafaka\b/],
