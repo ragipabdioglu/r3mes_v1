@@ -221,9 +221,12 @@ function buildSourceSelectionSummary(opts: {
         : "none";
   const excluded = new Set([...usedCollectionIds, ...opts.requestedCollectionIds]);
   const retrievalSuggestedIds = opts.retrievalSuggestedCollectionIds ?? [];
+  const enableGroundedMetadataCandidates =
+    (process.env.R3MES_ENABLE_GROUNDED_METADATA_CANDIDATES ?? "0").trim().toLowerCase() === "1";
   const useFastMetadataSuggestions =
     groundedCollectionIds.length === 0;
-  const metadataRouteCandidates = opts.skipSuggestions
+  const metadataRouteCandidates =
+    opts.skipSuggestions || (groundedCollectionIds.length > 0 && !enableGroundedMetadataCandidates)
     ? []
     : rankMetadataRouteCandidates({
         collections: opts.suggestibleCollections,
