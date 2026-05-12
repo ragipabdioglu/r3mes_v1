@@ -148,6 +148,9 @@ function scoreCase(testCase, response) {
   const safetyGate = response?.safety_gate;
   const retrievalDebug = response?.retrieval_debug;
   const chatTrace = response?.chat_trace;
+  const queryUnderstandingTrace = Array.isArray(chatTrace?.stages)
+    ? chatTrace.stages.find((stage) => stage?.name === "query_understanding")?.detail
+    : null;
   const evidence = retrievalDebug?.evidence;
   const compiledEvidence = retrievalDebug?.compiledEvidence;
   const routeDecision = retrievalDebug?.sourceSelection?.routeDecision;
@@ -331,6 +334,35 @@ function scoreCase(testCase, response) {
     const actualMode = retrievalDebug?.retrievalMode;
     if (actualMode !== testCase.expectedRetrievalMode) {
       failures.push(`retrieval_mode:${actualMode ?? "missing"}`);
+    }
+  }
+
+  if (testCase.expectedQueryShape) {
+    const actualShape = queryUnderstandingTrace?.queryShape;
+    if (actualShape !== testCase.expectedQueryShape) {
+      failures.push(`query_shape:${actualShape ?? "missing"}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.minQueryClarityScore))) {
+    const actualClarity = Number(queryUnderstandingTrace?.clarityScore);
+    if (!Number.isFinite(actualClarity) || actualClarity < Number(testCase.minQueryClarityScore)) {
+      failures.push(`query_clarity:${Number.isFinite(actualClarity) ? actualClarity : "missing"}<${Number(testCase.minQueryClarityScore)}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.maxQueryClarityScore))) {
+    const actualClarity = Number(queryUnderstandingTrace?.clarityScore);
+    if (!Number.isFinite(actualClarity) || actualClarity > Number(testCase.maxQueryClarityScore)) {
+      failures.push(`query_clarity:${Number.isFinite(actualClarity) ? actualClarity : "missing"}>${Number(testCase.maxQueryClarityScore)}`);
+    }
+  }
+
+  if (Array.isArray(testCase.expectedQueryWarnings) && testCase.expectedQueryWarnings.length > 0) {
+    const warnings = Array.isArray(queryUnderstandingTrace?.warnings) ? queryUnderstandingTrace.warnings : [];
+    const missingWarnings = testCase.expectedQueryWarnings.filter((warning) => !warnings.includes(warning));
+    if (missingWarnings.length > 0) {
+      failures.push(`query_warning_missing:${missingWarnings.join(",")}`);
     }
   }
 
