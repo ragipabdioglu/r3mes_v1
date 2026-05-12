@@ -123,6 +123,10 @@ function realRerankerRequired(): boolean {
   return process.env.R3MES_REQUIRE_REAL_RERANKER === "1";
 }
 
+function isRealRerankerProvider(provider: string | undefined): boolean {
+  return provider === "cross_encoder";
+}
+
 function readChunkContent(chunk: unknown): string {
   if (!chunk || typeof chunk !== "object") return "";
   const content = (chunk as { content?: unknown }).content;
@@ -383,6 +387,9 @@ export async function rerankKnowledgeCardsWithDiagnostics<TChunk>(
     const modelResult = await scoreDocumentsWithModel(query, documents);
     if (realRerankerRequired() && modelResult.fallbackUsed) {
       throw new Error(`real reranker required but provider returned fallback: ${modelResult.fallbackReason ?? "unknown"}`);
+    }
+    if (realRerankerRequired() && !isRealRerankerProvider(modelResult.provider)) {
+      throw new Error(`real reranker required but provider was ${modelResult.provider ?? "missing"}`);
     }
     const rawScores = modelResult.scores;
     if (rawScores.length !== modelPool.length) {

@@ -31,6 +31,11 @@ async function main() {
       `reranker smoke failed: real reranker was required but fallback was used (${parsed.fallback_reason ?? "unknown"})`,
     );
   }
+  if (requireRealProvider && parsed.provider !== "cross_encoder") {
+    throw new Error(
+      `reranker smoke failed: real reranker was required but provider=${parsed.provider ?? "missing"}`,
+    );
+  }
 
   console.log(JSON.stringify({
     ok: true,

@@ -264,7 +264,7 @@ describe("rerankKnowledgeCardsWithFallback", () => {
 
     await expect(
       modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
-        "migration rollback",
+        "migration rollback fallback provider",
         [
           {
             fusedScore: 1,
@@ -290,6 +290,47 @@ describe("rerankKnowledgeCardsWithFallback", () => {
     vi.unstubAllEnvs();
   });
 
+  it("fails fast when a real reranker is required and provider is not cross_encoder", async () => {
+    vi.stubEnv("R3MES_RERANKER_MODE", "model");
+    vi.stubEnv("R3MES_REQUIRE_REAL_RERANKER", "1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ scores: [0.2], provider: "lightweight_fallback", fallback_used: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
+        "migration rollback wrong provider",
+        [
+          {
+            fusedScore: 1,
+            lexicalScore: 1,
+            embeddingScore: 0,
+            chunk: { id: "chunk-1", content: "migration rollback", document: { title: "Runbook" } },
+            card: {
+              topic: "migration",
+              tags: ["technical"],
+              patientSummary: "",
+              clinicalTakeaway: "",
+              safeGuidance: "",
+              redFlags: "",
+              doNotInfer: "",
+            },
+          },
+        ],
+        1,
+      ),
+    ).rejects.toThrow("provider was lightweight_fallback");
+
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   it("fails fast when a real reranker is required and ai-engine is unreachable", async () => {
     vi.stubEnv("R3MES_RERANKER_MODE", "model");
     vi.stubEnv("R3MES_REQUIRE_REAL_RERANKER", "1");
@@ -297,7 +338,7 @@ describe("rerankKnowledgeCardsWithFallback", () => {
 
     await expect(
       modelRerankModule.rerankKnowledgeCardsWithDiagnostics(
-        "migration rollback",
+        "migration rollback network failure",
         [
           {
             fusedScore: 1,
