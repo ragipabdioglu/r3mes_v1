@@ -5,16 +5,21 @@ import type { AnswerSpec } from "./answerSpec.js";
 import { hasLowLanguageQuality } from "./answerQuality.js";
 import { composeAnswerSpec } from "./domainEvidenceComposer.js";
 import { getDomainSafetyPolicy, getRiskyCertaintyPatterns } from "./domainSafetyPolicy.js";
+import {
+  getSafetyRailDefinition,
+  type SafetyFallbackMode,
+  type SafetyRailCategory,
+  type SafetyRailId,
+  type SafetyRailStatus,
+  type SafetySeverity,
+} from "./safetyRailRegistry.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
-type SafetySeverity = "pass" | "warn" | "rewrite" | "block";
-type SafetyRailCategory = "retrieval" | "evidence" | "privacy" | "output";
-type SafetyRailStatus = "pass" | "warn" | "rewrite" | "block";
-
 interface SafetyRailCheck {
-  id: string;
+  id: SafetyRailId;
   category: SafetyRailCategory;
   status: SafetyRailStatus;
+  publicReason: string;
 }
 
 interface SafetyRouteDecision {
@@ -50,7 +55,7 @@ export interface SafetyGateResult {
   warnings: string[];
   railChecks: SafetyRailCheck[];
   requiredRewrite: boolean;
-  fallbackMode?: "low_grounding" | "domain_safe" | "source_suggestion" | "privacy_safe";
+  fallbackMode?: SafetyFallbackMode;
   safeFallback?: string;
   metrics: {
     sourceCount: number;
@@ -172,40 +177,47 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   const sourceCollectionIds = new Set(opts.sources.map((source) => source.collectionId).filter(Boolean));
   const accessibleCollectionIds = new Set(opts.sourceSelection?.accessibleCollectionIds ?? []);
   const sourceSuggestionWithoutGrounding = routeDecision?.mode === "suggest" && opts.sources.length === 0;
-  const addRail = (id: string, category: SafetyRailCategory, status: SafetyRailStatus) => {
-    railChecks.push({ id, category, status });
-    if (status === "warn") addUnique(warnings, id);
-    if (status === "rewrite" || status === "block") addUnique(blockedReasons, id);
+  const addRail = (id: SafetyRailId, status?: SafetyRailStatus) => {
+    const definition = getSafetyRailDefinition(id);
+    const resolvedStatus = status ?? definition.defaultStatus;
+    railChecks.push({
+      id,
+      category: definition.category,
+      status: resolvedStatus,
+      publicReason: definition.publicReason,
+    });
+    if (resolvedStatus === "warn") addUnique(warnings, id);
+    if (resolvedStatus === "rewrite" || resolvedStatus === "block") addUnique(blockedReasons, id);
   };
 
   if (!answerText) {
-    addRail("EMPTY_ANSWER", "output", "rewrite");
+    addRail("EMPTY_ANSWER");
   }
 
   if (opts.retrievalWasUsed && opts.sources.length === 0) {
-    addRail("MISSING_SOURCES", "retrieval", "rewrite");
+    addRail("MISSING_SOURCES");
   }
 
   if (sourceSuggestionWithoutGrounding) {
-    addRail("SUGGEST_MODE_NO_GROUNDED_SOURCES", "retrieval", "warn");
+    addRail("SUGGEST_MODE_NO_GROUNDED_SOURCES");
   }
 
   if (routeDecision?.mode === "no_source" && opts.sources.length > 0) {
-    addRail("NO_SOURCE_MODE_WITH_SOURCES", "retrieval", "rewrite");
+    addRail("NO_SOURCE_MODE_WITH_SOURCES");
   }
 
   if (typeof finalCandidateCount === "number" && finalCandidateCount > 4) {
-    addRail("TOO_MANY_CONTEXT_CHUNKS_FOR_3B", "retrieval", "warn");
+    addRail("TOO_MANY_CONTEXT_CHUNKS_FOR_3B");
   }
 
   if (alignmentFastFailed) {
-    addRail("QUERY_SOURCE_MISMATCH", "retrieval", "rewrite");
+    addRail("QUERY_SOURCE_MISMATCH");
   } else if (alignmentDroppedCandidateCount > 0) {
-    addRail("QUERY_SOURCE_MISMATCH", "retrieval", "warn");
+    addRail("QUERY_SOURCE_MISMATCH", "warn");
   }
 
   if (opts.retrievalWasUsed && hasEvidenceSignals && usableFactCount === 0) {
-    addRail("NO_USABLE_FACTS", "evidence", "rewrite");
+    addRail("NO_USABLE_FACTS");
   }
 
   const policy = getDomainSafetyPolicy(opts.answer.answer_domain);
@@ -215,11 +227,11 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   // rendered answer into a fallback path.
   const visibleRiskText = answerText || combined;
   if (getRiskyCertaintyPatterns(opts.answer.answer_domain).some((pattern) => pattern.test(visibleRiskText))) {
-    addRail("RISKY_CERTAINTY_OR_TREATMENT", "output", "rewrite");
+    addRail("RISKY_CERTAINTY_OR_TREATMENT");
   }
 
   if (hasLowLanguageQuality(answerText)) {
-    addRail("LOW_LANGUAGE_QUALITY", "output", "rewrite");
+    addRail("LOW_LANGUAGE_QUALITY");
   }
 
   if (
@@ -227,18 +239,18 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
     opts.answer.grounding_confidence === "low" &&
     LOW_GROUNDING_OVERCONFIDENCE_PATTERNS.some((pattern) => pattern.test(answerText))
   ) {
-    addRail("LOW_GROUNDING_OVERCONFIDENCE", "output", "rewrite");
+    addRail("LOW_GROUNDING_OVERCONFIDENCE");
   }
 
   if (opts.retrievalWasUsed && hasSourceMetadataMismatch(opts.answer, opts.sources)) {
-    addRail("SOURCE_METADATA_MISMATCH", "privacy", "rewrite");
+    addRail("SOURCE_METADATA_MISMATCH");
   }
 
   if (
     accessibleCollectionIds.size > 0 &&
     [...sourceCollectionIds].some((collectionId) => !accessibleCollectionIds.has(collectionId))
   ) {
-    addRail("PRIVATE_SOURCE_SCOPE_MISMATCH", "privacy", "block");
+    addRail("PRIVATE_SOURCE_SCOPE_MISMATCH");
   }
 
   if (
@@ -246,11 +258,11 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
     (includesAny(query, policy.redFlagTerms) || (evidenceRedFlagCount > 0 && evidence?.answerIntent === "triage")) &&
     !includesAny(answerText, policy.requiredGuidanceTerms)
   ) {
-    addRail("RED_FLAG_WITHOUT_URGENT_GUIDANCE", "evidence", "rewrite");
+    addRail("RED_FLAG_WITHOUT_URGENT_GUIDANCE");
   }
 
   if (answerText.length < 40 && opts.retrievalWasUsed) {
-    addRail("ANSWER_TOO_THIN", "output", "rewrite");
+    addRail("ANSWER_TOO_THIN");
   }
 
   const pass = blockedReasons.length === 0;
