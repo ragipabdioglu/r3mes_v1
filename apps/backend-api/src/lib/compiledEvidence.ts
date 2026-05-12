@@ -91,3 +91,7 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
     contradictionCount: contradictions.length,
   };
 }
+
+export function hasCompiledUsableGrounding(evidence: CompiledEvidence | null | undefined): boolean {
+  return Boolean(evidence && evidence.usableFactCount > 0);
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compileEvidence } from "./compiledEvidence.js";
+import { compileEvidence, hasCompiledUsableGrounding } from "./compiledEvidence.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 function evidence(partial: Partial<EvidenceExtractorOutput>): EvidenceExtractorOutput {
@@ -74,5 +74,21 @@ describe("compileEvidence", () => {
 
     expect(compiled.usableFactCount).toBe(0);
     expect(compiled.confidence).toBe("low");
+    expect(hasCompiledUsableGrounding(compiled)).toBe(false);
+  });
+
+  it("treats remaining facts as usable even when contradiction lowers confidence", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        usableFacts: ["Kaynak, rollback planı hazırlanmalıdır diyor."],
+        uncertainOrUnusable: ["Başka bir kaynak bununla çelişiyor."],
+      }),
+    });
+
+    expect(compiled.usableFactCount).toBe(1);
+    expect(compiled.contradictionCount).toBe(1);
+    expect(compiled.confidence).toBe("low");
+    expect(hasCompiledUsableGrounding(compiled)).toBe(true);
   });
 });

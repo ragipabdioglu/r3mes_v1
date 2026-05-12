@@ -2,7 +2,7 @@ import type { ChatSourceCitation } from "@r3mes/shared-types";
 
 import { getAlignmentConfig } from "./alignmentConfig.js";
 import type { GroundingConfidence } from "./answerSchema.js";
-import { compileEvidence, type CompiledEvidence } from "./compiledEvidence.js";
+import { compileEvidence, hasCompiledUsableGrounding, type CompiledEvidence } from "./compiledEvidence.js";
 import { buildCompiledEvidenceBrief, buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
@@ -1627,7 +1627,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     sourceRefs,
     groundingConfidence,
   });
-  if (evidenceHasOnlyScopeExclusion(evidenceRun.output) || !evidenceHasUsableGrounding(evidenceRun.output)) {
+  if (evidenceHasOnlyScopeExclusion(evidenceRun.output) || !hasCompiledUsableGrounding(compiledEvidence)) {
     const scopedOutAlignmentDiagnostics = {
       ...finalAlignmentDiagnostics,
       droppedCandidateCount: finalAlignmentDiagnostics.droppedCandidateCount + finalCandidates.length,

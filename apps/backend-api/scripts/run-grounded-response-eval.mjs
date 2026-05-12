@@ -414,6 +414,19 @@ function scoreCase(testCase, response) {
     }
   }
 
+  if (Number.isFinite(Number(testCase.minCompiledEvidenceContradictionCount))) {
+    const actual = Number(compiledEvidence?.contradictionCount ?? 0);
+    if (actual < Number(testCase.minCompiledEvidenceContradictionCount)) {
+      failures.push(
+        `compiled_evidence_contradictions:${actual}<${Number(testCase.minCompiledEvidenceContradictionCount)}`,
+      );
+    }
+  }
+
+  if (testCase.expectedCompiledEvidenceConfidence && compiledEvidence?.confidence !== testCase.expectedCompiledEvidenceConfidence) {
+    failures.push(`compiled_evidence_confidence:${compiledEvidence?.confidence ?? "missing"}`);
+  }
+
   if (typeof testCase.expectedFallbackTemplateUsed === "boolean") {
     const actualFallback = response?.answer_quality?.fallbackTemplateUsed;
     if (actualFallback !== testCase.expectedFallbackTemplateUsed) {
