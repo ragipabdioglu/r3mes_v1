@@ -159,6 +159,8 @@ function medicalQueryContextTerms(query: string, existingText: string): string[]
         : token.startsWith("ultrason") ? "ultrason"
         : token.startsWith("test") ? "test"
         : token.startsWith("akinti") ? "akinti"
+        : token.startsWith("lekelen") ? "lekelenme"
+        : token.startsWith("kanama") ? "kanama"
         : token.startsWith("doktor") || token.startsWith("hekim") ? "doktor"
         : token.startsWith("asi") ? "asi"
         : token.startsWith("biyops") ? "biyopsi"
@@ -247,6 +249,18 @@ function factQualityScore(value: string, userQuery: string): number {
     hasNumericTableValue(value)
       ? 36
       : 0;
+  const denseShareGroupTableBonus =
+    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
+    (normalizedQuery.includes("nakit") ||
+      normalizedQuery.includes("cash") ||
+      normalizedQuery.includes("oran") ||
+      normalizedQuery.includes("rate") ||
+      normalizedQuery.includes("bonus") ||
+      normalizedQuery.includes("bedelsiz")) &&
+    /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedValue) &&
+    /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedValue)
+      ? 42
+      : 0;
   const withholdingGroupRateBonus =
     (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
     (normalizedValue.includes("stopaj") || normalizedValue.includes("withholding")) &&
@@ -270,6 +284,7 @@ function factQualityScore(value: string, userQuery: string): number {
     normalizedValue.includes("dagitilabilir") &&
     !normalizedQuery.includes("dagitilabilir") &&
     shareGroupTableBonus === 0 &&
+    denseShareGroupTableBonus === 0 &&
     withholdingGroupRateBonus === 0
       ? 50
       : 0;
@@ -285,6 +300,7 @@ function factQualityScore(value: string, userQuery: string): number {
     directActionBonus +
     numericTableBonus +
     shareGroupTableBonus +
+    denseShareGroupTableBonus +
     withholdingGroupRateBonus +
     exactFinanceBonus +
     plainPeriodProfitBonus +

@@ -436,6 +436,25 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.diagnostics.mode).toBe("pruned");
   });
 
+  it("keeps dense share group table rows while pruning", () => {
+    vi.stubEnv("R3MES_EVIDENCE_DEEP_MAX_CHARS", "900");
+    const result = buildPrunedEvidenceInputWithDiagnostics({
+      query: "A ve B grubu için bonus shares ve rate bilgisi ne görünüyor?",
+      budgetMode: "deep_rag",
+      candidate: candidate({
+        id: "eregl-share-table",
+        title: "EREGL 1576833 Profit Distribution Table",
+        content:
+          "Source Summary: General Legal Reserves (Based on the Legal Records) CASH (TL) BONUS SHARES (TL) RATE (%) AMOUNT (TL) RATE (%) A 0,07 - 0,000000 0,467500 46,75 B 3.272.500.000 - 77,916667 0,467500 46,75 TOTAL 3.272.500.000 - 77,916667 0,467500 46,75 5. Net Profit for the Period 511.801.109 (3.777.110.075) " +
+          "This unrelated disclosure footer repeats procedural information. ".repeat(10),
+      }),
+    });
+
+    expect(result.text).toContain("BONUS SHARES");
+    expect(result.text).toContain("A 0,07");
+    expect(result.text).toContain("B 3.272.500.000");
+  });
+
   it("diversifies multilingual disclosure sources by document language and dedupes citations", async () => {
     vi.stubEnv("R3MES_RERANKER_MODE", "deterministic");
     vi.stubEnv("R3MES_RAG_MIN_RERANK_SCORE", "0.1");

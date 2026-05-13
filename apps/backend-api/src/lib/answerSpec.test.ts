@@ -298,4 +298,49 @@ describe("buildAnswerSpec", () => {
     expect(spec.action).toContain("Türkçe kaynak başlığı");
     expect(spec.facts.join(" ")).toContain("1576833");
   });
+
+  it("prioritizes dense share group table evidence over generic profit rows", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "finance",
+      groundingConfidence: "medium",
+      userQuery: "EREGL 1576833 İngilizce profit distribution table içinde A ve B grubu için bonus shares ve rate bilgisi ne görünüyor?",
+      evidence: evidence({
+        answerIntent: "explain",
+        directAnswerFacts: [
+          "en-doc: 5. Net Profit for the Period 511.801.109",
+          "en-doc: CASH (TL) BONUS SHARES (TL) RATE (%) AMOUNT (TL) RATE (%) A 0,07 - 0,000000 0,467500 46,75 B 3.272.500.000 - 77,916667 0,467500 46,75 TOTAL 3.272.500.000 - 77,916667 0,467500 46,75",
+        ],
+        supportingContext: [],
+        usableFacts: [],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.assessment).toContain("BONUS SHARES");
+    expect(spec.assessment).toContain("A 0,07");
+    expect(spec.assessment).toContain("B 3.272.500.000");
+  });
+
+  it("preserves inflected spotting terms in medical query context", () => {
+    const spec = buildAnswerSpec({
+      answerDomain: "medical",
+      groundingConfidence: "medium",
+      userQuery: "Rahimden parça alındı ve temiz çıktı ama lekelenmem sürüyor. Ne yapmalıyım?",
+      evidence: evidence({
+        answerIntent: "steps",
+        directAnswerFacts: [
+          "clinical-card: Beklenmeyen kanama jinekolojik değerlendirme gerektirebilir.",
+          "clinical-card: Kontrol planlanmalıdır.",
+        ],
+        supportingContext: [],
+        usableFacts: [],
+        redFlags: [],
+        riskFacts: [],
+      }),
+    });
+
+    expect(spec.facts.join(" ")).toContain("lekelenme");
+    expect(spec.action).toContain("lekelenme");
+  });
 });

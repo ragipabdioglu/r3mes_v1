@@ -1843,12 +1843,13 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           composerMode: groundedComposerMode,
         })
       ) {
+        const answerPathName = hasContradictoryCompiledEvidence
+          ? "contradiction_fast_path"
+          : shouldUseLowConfidenceEvidenceFastPath
+            ? "low_confidence_evidence_fast_path"
+            : "rag_fast_path";
         chatTrace.recordNow("answer_path", "ok", {
-          name: hasContradictoryCompiledEvidence
-            ? "contradiction_fast_path"
-            : shouldUseLowConfidenceEvidenceFastPath
-              ? "low_confidence_evidence_fast_path"
-              : "rag_fast_path",
+          name: answerPathName,
           retrievalWasUsed,
           sourceCount: retrieval.sources.length,
         });
@@ -1867,7 +1868,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             retrievalQuery,
             retrievalWasUsed,
             retrievalDebug,
-            { useFallbackTemplate: true, exposeDebug, chatTrace, answerPath: "rag_fast_path" },
+            { useFallbackTemplate: true, exposeDebug, chatTrace, answerPath: answerPathName },
           ),
         );
       }

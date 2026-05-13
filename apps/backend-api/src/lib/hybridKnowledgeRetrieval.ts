@@ -605,7 +605,7 @@ function criticalEvidenceTermGroups(query: string): string[][] {
     groups.push(["dagitilmasi ongorulen diger kaynak", "other sources", "olaganustu yedek", "extraordinary reserves"]);
   }
   if (
-    (normalized.includes("grup") || normalized.includes("group")) &&
+    (normalized.includes("grup") || normalized.includes("grub") || normalized.includes("group")) &&
     (
       normalized.includes("nakit") ||
       normalized.includes("cash") ||
@@ -626,8 +626,11 @@ function candidateMatchesTermGroup(candidate: { chunk: HybridKnowledgeChunk }, t
     candidate.chunk.content,
   ].join(" "));
   if (terms.includes("__share_group_table__")) {
+    const hasShareGroupRows =
+      /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(haystack) &&
+      /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(haystack);
     return (
-      (haystack.includes("grubu") || haystack.includes("group")) &&
+      (haystack.includes("grubu") || haystack.includes("group") || hasShareGroupRows) &&
       (haystack.includes("nakit") || haystack.includes("nak it") || haystack.includes("cash")) &&
       (haystack.includes("toplam") || haystack.includes("total")) &&
       (haystack.includes("oran") || haystack.includes("rate") || haystack.includes("bonus") || haystack.includes("bedelsiz"))
@@ -650,6 +653,8 @@ function criticalEvidenceCoverageScore(candidate: { chunk: HybridKnowledgeChunk 
     if (/\ba\s+grubu\b|\ba\s+[\d.,]{3,}/u.test(haystack)) score += 3;
     if (/\bb\s+grubu\b|\bb\s+[\d.,]{3,}/u.test(haystack)) score += 3;
     if (/\bc\s+grubu\b|\bc\s+[\d.,]{3,}/u.test(haystack)) score += 3;
+    if (/(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(haystack)) score += 4;
+    if (/(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(haystack)) score += 4;
     if ((haystack.match(/\d[\d.]{2,}(?:,\d+)?/gu) ?? []).length >= 5) score += 3;
     return score;
   }
@@ -1207,8 +1212,8 @@ function promoteGroundingFromCompiledEvidence(opts: {
   base: GroundingConfidence;
   compiledEvidence: CompiledEvidence;
 }): GroundingConfidence {
-  if (opts.base !== "low") return opts.base;
   if (opts.compiledEvidence.contradictionCount > 0) return "low";
+  if (opts.base !== "low") return opts.base;
   if (opts.compiledEvidence.usableFactCount >= 2 && opts.compiledEvidence.sourceIds.length > 0) return "medium";
   return "low";
 }
@@ -1257,6 +1262,29 @@ function financeLineItemScore(query: string, sentence: string): number {
   const normalizedQuery = normalize(query);
   const normalizedSentence = normalize(sentence);
   let score = 0;
+  const asksForShareGroupTable =
+    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
+    (normalizedQuery.includes("nakit") ||
+      normalizedQuery.includes("cash") ||
+      normalizedQuery.includes("bedelsiz") ||
+      normalizedQuery.includes("bonus") ||
+      normalizedQuery.includes("oran") ||
+      normalizedQuery.includes("rate"));
+  const hasShareGroupTableRows =
+    /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedSentence) &&
+    /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedSentence);
+  if (
+    asksForShareGroupTable &&
+    hasShareGroupTableRows &&
+    (normalizedSentence.includes("cash") ||
+      normalizedSentence.includes("nakit") ||
+      normalizedSentence.includes("bonus") ||
+      normalizedSentence.includes("bedelsiz") ||
+      normalizedSentence.includes("rate") ||
+      normalizedSentence.includes("oran"))
+  ) {
+    score += 36;
+  }
   if (normalizedQuery.includes("net donem") && normalizedSentence.includes("net donem")) score += 8;
   if (normalizedQuery.includes("donem kari") && normalizedSentence.includes("donem kari")) score += 7;
   if (
@@ -1660,6 +1688,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     query: evidenceQuery,
     candidates: accepted,
     routePlan,
+    allowSemanticReview: criticalEvidenceTermGroups(evidenceQuery).length > 0,
   });
   const finalCandidates = alignedAccepted.candidates;
   const finalAlignmentDiagnostics: AlignmentDiagnostics = {

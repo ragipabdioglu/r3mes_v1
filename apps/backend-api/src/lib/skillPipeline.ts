@@ -379,6 +379,16 @@ function hasFinancialTableValue(value: string): boolean {
 function isLikelyFinancialTableRow(value: string): boolean {
   const normalized = normalizeConceptText(value);
   if (!hasFinancialTableValue(value)) return false;
+  const hasShareGroupTableRows =
+    /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalized) &&
+    /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalized) &&
+    (normalized.includes("cash") ||
+      normalized.includes("nakit") ||
+      normalized.includes("bonus") ||
+      normalized.includes("bedelsiz") ||
+      normalized.includes("rate") ||
+      normalized.includes("oran"));
+  if (hasShareGroupTableRows) return true;
   const hasLineItemLabel = /^\s*\d{1,2}\.\s*\p{L}/u.test(value) || /(net\s+donem|donem\s+kari|donem\s+kâri|dagitilabilir|profit|dividend|stopaj|withholding)/u.test(normalized);
   if (!hasLineItemLabel) return false;
   return [
@@ -480,7 +490,7 @@ function financeTargetedFragments(text: string, query: string): string[] {
   const fragments: string[] = [];
 
   if (
-    (normalizedQuery.includes("grup") || normalizedQuery.includes("group")) &&
+    (normalizedQuery.includes("grup") || normalizedQuery.includes("grub") || normalizedQuery.includes("group")) &&
     (
       normalizedQuery.includes("nakit") ||
       normalizedQuery.includes("cash") ||
@@ -619,6 +629,18 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     (normalizedFact.includes("nakit") || normalizedFact.includes("cash") || normalizedFact.includes("bedelsiz") || normalizedFact.includes("bonus") || normalizedFact.includes("rate") || normalizedFact.includes("oran"))
       ? 26
       : 0;
+  const shareGroupDenseTableBonus =
+    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
+    (normalizedQuery.includes("nakit") ||
+      normalizedQuery.includes("cash") ||
+      normalizedQuery.includes("bedelsiz") ||
+      normalizedQuery.includes("bonus") ||
+      normalizedQuery.includes("oran") ||
+      normalizedQuery.includes("rate")) &&
+    /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
+    /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact)
+      ? 38
+      : 0;
   const rejectedExtraordinaryReservePenalty =
     (queryRejectsConcept(normalizedQuery, "olaganustu yedek") || queryRejectsConcept(normalizedQuery, "extraordinary reserves")) &&
     (normalizedFact.includes("olaganustu yedek") || normalizedFact.includes("extraordinary reserves"))
@@ -629,7 +651,8 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     !normalizedQuery.includes("dagitilabilir") &&
     shareGroupScopeBonus === 0 &&
     stopajGroupRateBonus === 0 &&
-    otherSourcesScopeBonus === 0
+    otherSourcesScopeBonus === 0 &&
+    shareGroupDenseTableBonus === 0
       ? 50
       : 0;
   const headerPenalty =
@@ -648,6 +671,7 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     stopajGroupRateBonus +
     otherSourcesScopeBonus +
     shareGroupScopeBonus +
+    shareGroupDenseTableBonus +
     shortRelevantBonus -
     headerPenalty -
     rejectedExtraordinaryReservePenalty -
@@ -695,6 +719,31 @@ function promoteCriticalDirectFacts(query: string, directFacts: string[], usable
             normalizedFact.includes("group b") ||
             normalizedFact.includes("b grubu")
           )
+        );
+      }),
+    );
+  }
+  if (
+    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
+    (normalizedQuery.includes("nakit") ||
+      normalizedQuery.includes("cash") ||
+      normalizedQuery.includes("bedelsiz") ||
+      normalizedQuery.includes("bonus") ||
+      normalizedQuery.includes("oran") ||
+      normalizedQuery.includes("rate"))
+  ) {
+    promoted.push(
+      ...usableFacts.filter((fact) => {
+        const normalizedFact = normalizeConceptText(fact);
+        return (
+          /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
+          /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
+          (normalizedFact.includes("cash") ||
+            normalizedFact.includes("nakit") ||
+            normalizedFact.includes("bonus") ||
+            normalizedFact.includes("bedelsiz") ||
+            normalizedFact.includes("rate") ||
+            normalizedFact.includes("oran"))
         );
       }),
     );
@@ -767,6 +816,8 @@ function tokenizeForOverlap(text: string): string[] {
       if (direct.startsWith("nafaka")) return "nafaka";
       if (direct.startsWith("kayit")) return "kayit";
       if (direct.startsWith("basvuru")) return "basvuru";
+      if (direct.startsWith("migration")) return "migration";
+      if (direct.startsWith("rollback")) return "rollback";
       return direct;
     })
     .filter((part) => part.length >= 3),
@@ -859,6 +910,8 @@ const NEGATION_PATTERNS = [
   /\bgerek(?:li|ir)\s+değildir\b/u,
   /\bgerek(?:li|ir)\s+degil\b/u,
   /\bgerek(?:li|ir)\s+değil\b/u,
+  /\bgerek\s+olmadigini\b/u,
+  /\bgerek\s+olmadığını\b/u,
   /\bgerek\s+yok\b/u,
   /\byapilma(?:z|mali)\b/u,
   /\byapılma(?:z|malı)\b/u,
@@ -909,11 +962,16 @@ function evidenceSubjectKey(value: string): string {
     "kisa",
     "sakin",
   ]);
-  return tokenizeForOverlap(withoutSourceLabel)
+  const tokens = tokenizeForOverlap(withoutSourceLabel)
     .filter((token) => !GENERIC_OVERLAP_TOKENS.has(token))
     .filter((token) => !generic.has(token))
-    .slice(0, 5)
-    .join(" ");
+  const hasMigration = tokens.some((token) => token.startsWith("migration"));
+  const technicalSafetyTerms = ["migration", "yedek", "backup", "rollback", "staging", "log"]
+    .filter((term) => tokens.some((token) => token.startsWith(term)));
+  if (hasMigration && technicalSafetyTerms.length > 0) {
+    return unique(technicalSafetyTerms).slice(0, 5).join(" ");
+  }
+  return tokens.slice(0, 5).join(" ");
 }
 
 function hasContradictionMarker(value: string): boolean {
@@ -948,6 +1006,7 @@ function hasSourceScopeExclusion(value: string): boolean {
 
 function findContradictoryEvidence(facts: string[]): { conflicts: string[]; conflictedFacts: Set<string> } {
   const bySubject = new Map<string, { positive: string[]; negative: string[] }>();
+  const migrationSafety = { positive: [] as string[], negative: [] as string[] };
   for (const fact of facts) {
     const polarity = evidencePolarity(fact);
     if (polarity === "neutral") continue;
@@ -956,6 +1015,9 @@ function findContradictoryEvidence(facts: string[]): { conflicts: string[]; conf
     const bucket = bySubject.get(subject) ?? { positive: [], negative: [] };
     bucket[polarity].push(fact);
     bySubject.set(subject, bucket);
+    if (subject.includes("migration") && (subject.includes("yedek") || subject.includes("backup") || subject.includes("rollback"))) {
+      migrationSafety[polarity].push(fact);
+    }
   }
   const conflicts: string[] = [];
   const conflictedFacts = new Set<string>();
@@ -963,6 +1025,10 @@ function findContradictoryEvidence(facts: string[]): { conflicts: string[]; conf
     if (bucket.positive.length === 0 || bucket.negative.length === 0) continue;
     for (const fact of [...bucket.positive, ...bucket.negative]) conflictedFacts.add(fact);
     conflicts.push(`Çelişen kaynak bilgisi: ${subject} için kaynaklar farklı yönlendirme veriyor.`);
+  }
+  if (migrationSafety.positive.length > 0 && migrationSafety.negative.length > 0) {
+    for (const fact of [...migrationSafety.positive, ...migrationSafety.negative]) conflictedFacts.add(fact);
+    conflicts.push("Çelişen kaynak bilgisi: migration yedek/rollback güvenliği için kaynaklar farklı yönlendirme veriyor.");
   }
   return { conflicts: unique(conflicts).slice(0, 3), conflictedFacts };
 }

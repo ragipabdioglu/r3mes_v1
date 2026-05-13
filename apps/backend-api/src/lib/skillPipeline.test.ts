@@ -308,6 +308,27 @@ Rollback planı production migration öncesi gerekli değil, doğrudan migration
     expect(extraction.usableFacts.join(" ")).not.toContain("gerekli değildir");
   });
 
+  it("detects migration safety contradictions across different wording", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Migration güvenli mi değil mi tek doğru varmış gibi konuşmadan söyle.",
+      cards: [
+        {
+          sourceId: "safe-runbook",
+          title: "safe-runbook",
+          rawContent: "Key Takeaway: Production migration öncesinde yedek almak, staging denemesi yapmak, rollback planını yazmak ve logları izlemek gerekir.",
+        },
+        {
+          sourceId: "legacy-note",
+          title: "legacy-note",
+          rawContent: "Key Takeaway: Eski not, küçük migrationlarda yedek ve rollback planına gerek olmadığını iddia eder.",
+        },
+      ],
+    });
+
+    expect(extraction.notSupported.join(" ")).toContain("Çelişen kaynak bilgisi");
+    expect(extraction.notSupported.join(" ")).toContain("migration");
+  });
+
   it("extracts markdown table rows as readable evidence fragments", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Migration öncesi yedek ve rollback için ne kontrol edilmeli?",
@@ -389,6 +410,28 @@ Rollback planı production migration öncesi gerekli değil, doğrudan migration
     expect(facts).toContain("1576833");
     expect(facts).toContain("Türkçe kaynak başlığı");
     expect(facts).toContain("İngilizce kaynak başlığı");
+  });
+
+  it("promotes dense share group table rows for bonus share and rate questions", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "EREGL 1576833 İngilizce profit distribution table içinde A ve B grubu için bonus shares ve rate bilgisi ne görünüyor?",
+      cards: [
+        {
+          sourceId: "eregl-en-table",
+          title: "EREGL 1576833 Profit Distribution Table.pdf",
+          rawContent:
+            "Source Summary: General Legal Reserves CASH (TL) BONUS SHARES (TL) RATE (%) AMOUNT (TL) RATE (%) A 0,07 - 0,000000 0,467500 46,75 B 3.272.500.000 - 77,916667 0,467500 46,75 TOTAL 3.272.500.000 - 77,916667 0,467500 46,75 5. Net Profit for the Period 511.801.109",
+        },
+      ],
+    });
+
+    const firstDirectFact = extraction.directAnswerFacts[0] ?? "";
+    const directFacts = extraction.directAnswerFacts.join(" ");
+    expect(firstDirectFact).toContain("BONUS SHARES");
+    expect(directFacts).toContain("BONUS SHARES");
+    expect(directFacts).toContain("A 0,07");
+    expect(directFacts).toContain("46,75");
+    expect(directFacts).toContain("B 3.272.500.000");
   });
 
   it("prefers complete actionable document snippets over PDF headings and clipped fragments", () => {
