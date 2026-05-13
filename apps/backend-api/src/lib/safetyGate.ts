@@ -19,6 +19,7 @@ interface SafetyRailCheck {
   id: SafetyRailId;
   category: SafetyRailCategory;
   status: SafetyRailStatus;
+  fallbackMode?: SafetyFallbackMode;
   publicReason: string;
 }
 
@@ -157,6 +158,26 @@ function buildFallback(
   return composeAnswerSpec(spec);
 }
 
+function fallbackModeFromRailChecks(opts: {
+  pass: boolean;
+  railChecks: SafetyRailCheck[];
+  routeDecision?: SafetyRouteDecision;
+  groundingConfidence: GroundedMedicalAnswer["grounding_confidence"];
+}): SafetyFallbackMode | undefined {
+  const checks = opts.railChecks;
+  const byId = new Set(checks.map((check) => check.id));
+  if (byId.has("PRIVATE_SOURCE_SCOPE_MISMATCH")) return "privacy_safe";
+  if (byId.has("RISKY_CERTAINTY_OR_TREATMENT")) return "domain_safe";
+  if (opts.routeDecision?.mode === "suggest") return "source_suggestion";
+  if (opts.groundingConfidence === "low" || byId.has("NO_USABLE_FACTS")) return "low_grounding";
+  if (opts.pass) return undefined;
+
+  const blockingFallback = checks.find((check) =>
+    (check.status === "block" || check.status === "rewrite") && check.fallbackMode,
+  )?.fallbackMode;
+  return blockingFallback ?? "domain_safe";
+}
+
 export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   const blockedReasons: string[] = [];
   const warnings: string[] = [];
@@ -184,6 +205,7 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
       id,
       category: definition.category,
       status: resolvedStatus,
+      fallbackMode: definition.defaultFallbackMode,
       publicReason: definition.publicReason,
     });
     if (resolvedStatus === "warn") addUnique(warnings, id);
@@ -266,17 +288,12 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   }
 
   const pass = blockedReasons.length === 0;
-  const fallbackMode = blockedReasons.includes("PRIVATE_SOURCE_SCOPE_MISMATCH")
-    ? "privacy_safe"
-    : blockedReasons.includes("RISKY_CERTAINTY_OR_TREATMENT")
-      ? "domain_safe"
-      : routeDecision?.mode === "suggest"
-        ? "source_suggestion"
-        : opts.answer.grounding_confidence === "low" || blockedReasons.includes("NO_USABLE_FACTS")
-          ? "low_grounding"
-          : pass
-            ? undefined
-            : "domain_safe";
+  const fallbackMode = fallbackModeFromRailChecks({
+    pass,
+    railChecks,
+    routeDecision,
+    groundingConfidence: opts.answer.grounding_confidence,
+  });
   const severity: SafetySeverity = pass
     ? (warnings.length > 0 ? "warn" : "pass")
     : railChecks.some((check) => check.status === "block")

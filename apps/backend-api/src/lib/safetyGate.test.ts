@@ -250,7 +250,12 @@ describe("deterministic safety gate", () => {
     expect(result.blockedReasons).toContain("PRIVATE_SOURCE_SCOPE_MISMATCH");
     expect(result.railChecks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "PRIVATE_SOURCE_SCOPE_MISMATCH", category: "privacy", status: "block" }),
+        expect.objectContaining({
+          id: "PRIVATE_SOURCE_SCOPE_MISMATCH",
+          category: "privacy",
+          status: "block",
+          fallbackMode: "privacy_safe",
+        }),
       ]),
     );
   });
@@ -345,7 +350,12 @@ describe("deterministic safety gate", () => {
     expect(result.blockedReasons).toContain("QUERY_SOURCE_MISMATCH");
     expect(result.railChecks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "QUERY_SOURCE_MISMATCH", category: "retrieval", status: "rewrite" }),
+        expect.objectContaining({
+          id: "QUERY_SOURCE_MISMATCH",
+          category: "retrieval",
+          status: "rewrite",
+          fallbackMode: "source_suggestion",
+        }),
       ]),
     );
   });
