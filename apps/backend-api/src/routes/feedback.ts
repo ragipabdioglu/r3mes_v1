@@ -50,13 +50,13 @@ import {
 } from "@r3mes/shared-types";
 
 import { sendApiError } from "../lib/apiErrors.js";
+import { getDecisionConfig } from "../lib/decisionConfig.js";
 import { prisma } from "../lib/prisma.js";
 import { walletAuthPreHandler } from "../lib/walletAuth.js";
 
 const HASH_RE = /^[a-f0-9]{8,64}$/i;
 const DEFAULT_FEEDBACK_LIMIT = 200;
 const DEFAULT_PROPOSAL_MIN_SIGNALS = 2;
-const PROMOTION_MAX_ABS_DELTA = 0.35;
 
 function hashQuery(query: string): string {
   return createHash("sha256").update(query.trim(), "utf8").digest("hex").slice(0, 16);
@@ -239,6 +239,7 @@ function buildImpact(proposal: KnowledgeFeedbackProposalItem): {
   impact: KnowledgeFeedbackProposalImpactItem;
   nextSafeAction: KnowledgeFeedbackProposalImpactResponse["nextSafeAction"];
 } {
+  const promotionMaxAbsDelta = getDecisionConfig().feedbackRuntime.promotionMaxAbsDelta;
   const signalCount = evidenceSignalCount(proposal);
   const confidence = Math.max(0, Math.min(1, proposal.confidence));
   const direction =
@@ -250,7 +251,7 @@ function buildImpact(proposal: KnowledgeFeedbackProposalItem): {
   const estimatedScoreDelta =
     direction === 0
       ? 0
-      : Number((direction * Math.min(0.35, 0.08 + signalCount * 0.04) * Math.max(confidence, 0.25)).toFixed(3));
+      : Number((direction * Math.min(promotionMaxAbsDelta, 0.08 + signalCount * 0.04) * Math.max(confidence, 0.25)).toFixed(3));
   const riskLevel =
     proposal.status !== "APPROVED"
       ? "low"
@@ -631,6 +632,7 @@ function buildPromotionGateReport(
     };
   }>,
 ): KnowledgeFeedbackPromotionGateItem[] {
+  const promotionMaxAbsDelta = getDecisionConfig().feedbackRuntime.promotionMaxAbsDelta;
   const grouped = new Map<string, KnowledgeFeedbackPromotionGateItem>();
   for (const adjustment of adjustments) {
     const key = `${adjustment.collectionId ?? "-"}|${adjustment.queryHash ?? "-"}`;
@@ -662,8 +664,8 @@ function buildPromotionGateReport(
     if (!item.queryHash) blockedReasons.add("missing query hash");
     if (item.gatePassedCount !== item.activeAdjustmentCount) blockedReasons.add("not all source apply records passed eval gate");
     if (item.totalScoreDelta === 0) blockedReasons.add("review-only adjustment has no runtime score effect");
-    if (Math.abs(item.totalScoreDelta) > PROMOTION_MAX_ABS_DELTA) {
-      blockedReasons.add(`score delta exceeds promotion cap ${PROMOTION_MAX_ABS_DELTA}`);
+    if (Math.abs(item.totalScoreDelta) > promotionMaxAbsDelta) {
+      blockedReasons.add(`score delta exceeds promotion cap ${promotionMaxAbsDelta}`);
     }
     const blocked = Array.from(blockedReasons);
     const promotionCandidate = blocked.length === 0;
@@ -674,7 +676,7 @@ function buildPromotionGateReport(
         : "keep_passive";
     const rollbackRecommended =
       blockedReasons.has("not all source apply records passed eval gate") ||
-      blockedReasons.has(`score delta exceeds promotion cap ${PROMOTION_MAX_ABS_DELTA}`);
+      blockedReasons.has(`score delta exceeds promotion cap ${promotionMaxAbsDelta}`);
     const promotionStage: KnowledgeFeedbackPromotionGateItem["promotionStage"] = promotionCandidate
       ? "eligible_shadow"
       : recommendation === "review_only"
