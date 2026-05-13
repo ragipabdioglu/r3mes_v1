@@ -4,6 +4,7 @@ import { cosineSimilarity, embedKnowledgeText, getKnowledgeEmbeddingDimensions }
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { extractQuerySignals, routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import { explainWeightedRouterScore, getAdaptiveRouterConfig, getRouterWeights, type RouterScoreBreakdown } from "./routerConfig.js";
+import { getDecisionConfig } from "./decisionConfig.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 import { buildQueryUnderstanding, type QueryUnderstandingProfileInput } from "./queryUnderstanding.js";
@@ -704,8 +705,7 @@ function trimMetadataScoringPool(
 }
 
 function routeHintScoreWeight(): number {
-  const parsed = Number.parseFloat(process.env.R3MES_ROUTE_HINT_SCORE_WEIGHT ?? "0.35");
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0.35;
+  return getDecisionConfig().router.routeHintScoreWeight;
 }
 
 function sourceQualityScore(profile: KnowledgeMetadataProfile): number {
@@ -1045,7 +1045,7 @@ function collectionHasMetadataSubtopicSupport(
   if (
     queryCandidate &&
     queryCandidate.sourceQuality !== "thin" &&
-    queryCandidate.score >= Math.max(64, getAdaptiveRouterConfig().routeOverrideMargin * 3)
+    queryCandidate.score >= Math.max(getDecisionConfig().router.queryProfileStrictThreshold, getAdaptiveRouterConfig().routeOverrideMargin * 3)
   ) {
     return true;
   }
@@ -1126,7 +1126,7 @@ export function collectionHasSpecificRouteSupport(
 
   const queryProfileScore = bestQueryProfileScore(collection, query);
   const routeProfileScore = bestRouteProfileScore(collection, routePlan, query);
-  if (Math.max(queryProfileScore, routeProfileScore) >= 70 && readKnowledgeCollectionStrictRouteEligible(collection)) {
+  if (Math.max(queryProfileScore, routeProfileScore) >= getDecisionConfig().router.strictProfileScoreThreshold && readKnowledgeCollectionStrictRouteEligible(collection)) {
     return true;
   }
 
@@ -1226,12 +1226,16 @@ export function rankSuggestedKnowledgeCollections(opts: {
       if (!routePlan || routePlan.domain === "general") {
         if (!opts.query?.trim()) return true;
         const hasProfiles = collectionMetadataProfiles(collection).length > 0;
-        return score >= (hasProfiles ? 24 : 14);
+        return score >= (hasProfiles
+          ? getDecisionConfig().router.suggestionScoreThresholdWithProfile
+          : getDecisionConfig().router.suggestionScoreThresholdWithoutProfile);
       }
       if (routePlan.subtopics.length > 0 && collectionMetadataProfiles(collection).length > 0) {
-        return collectionHasMetadataSubtopicSupport(collection, routePlan, opts.query) || score >= 64;
+        return collectionHasMetadataSubtopicSupport(collection, routePlan, opts.query) ||
+          score >= getDecisionConfig().router.routeSuggestionScoreThreshold;
       }
-      return score >= 24 || collectionMatchesRoute(collection, routePlan.domain);
+      return score >= getDecisionConfig().router.suggestionScoreThresholdWithProfile ||
+        collectionMatchesRoute(collection, routePlan.domain);
     })
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
@@ -1290,7 +1294,7 @@ export function rankMetadataRouteCandidates(opts: {
         opts.routePlan,
         fastTerms,
       );
-      if (!profile || score < 20) continue;
+      if (!profile || score < getDecisionConfig().router.metadataCandidateMinScore) continue;
       const matchedTerms = unique(
         fastTerms.filter((term) => containsTermInNormalizedText(normalizedProfileText, term)),
       ).slice(0, 8);
@@ -1341,7 +1345,7 @@ export function rankMetadataRouteCandidates(opts: {
       adaptiveMetadataCandidate(collection, opts.routePlan, opts.query),
     )
     .filter((candidate): candidate is KnowledgeMetadataRouteCandidate => Boolean(candidate))
-    .filter((candidate) => candidate.score >= 20)
+    .filter((candidate) => candidate.score >= getDecisionConfig().router.metadataCandidateMinScore)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
     .slice(0, limit);
   writeMetadataRouteCandidateCache(cacheKey, candidates);

@@ -1,3 +1,5 @@
+import { getDecisionConfig } from "./decisionConfig.js";
+
 export interface RouterWeights {
   profileEmbedding: number;
   lexicalKeyword: number;
@@ -38,91 +40,12 @@ export const DEFAULT_ADAPTIVE_ROUTER_CONFIG: AdaptiveRouterConfig = {
   thinRoutePenalty: 10,
 };
 
-const ENV_KEYS: Record<keyof RouterWeights, string> = {
-  profileEmbedding: "R3MES_ROUTER_WEIGHT_PROFILE_EMBEDDING",
-  lexicalKeyword: "R3MES_ROUTER_WEIGHT_LEXICAL_KEYWORD",
-  sampleQuestion: "R3MES_ROUTER_WEIGHT_SAMPLE_QUESTION",
-  domainHint: "R3MES_ROUTER_WEIGHT_DOMAIN_HINT",
-  sourceQuality: "R3MES_ROUTER_WEIGHT_SOURCE_QUALITY",
-};
-
-const ADAPTIVE_ENV_KEYS: Record<keyof AdaptiveRouterConfig, string> = {
-  queryMatchBonusPerTerm: "R3MES_ROUTER_QUERY_MATCH_BONUS_PER_TERM",
-  structuredSourceBonus: "R3MES_ROUTER_STRUCTURED_SOURCE_BONUS",
-  inferredSourceBonus: "R3MES_ROUTER_INFERRED_SOURCE_BONUS",
-  routeOverrideMargin: "R3MES_ROUTER_ROUTE_OVERRIDE_MARGIN",
-  thinRoutePenalty: "R3MES_ROUTER_THIN_ROUTE_PENALTY",
-};
-
-function finiteNonNegative(value: unknown): number | null {
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function normalizeWeights(weights: RouterWeights): RouterWeights {
-  const sum = Object.values(weights).reduce((total, value) => total + value, 0);
-  if (sum <= 0) return DEFAULT_ROUTER_WEIGHTS;
-  return {
-    profileEmbedding: weights.profileEmbedding / sum,
-    lexicalKeyword: weights.lexicalKeyword / sum,
-    sampleQuestion: weights.sampleQuestion / sum,
-    domainHint: weights.domainHint / sum,
-    sourceQuality: weights.sourceQuality / sum,
-  };
-}
-
-function readJsonWeights(env: NodeJS.ProcessEnv): Partial<RouterWeights> {
-  const raw = env.R3MES_ROUTER_WEIGHTS_JSON;
-  if (!raw?.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw) as Partial<Record<keyof RouterWeights, unknown>>;
-    const out: Partial<RouterWeights> = {};
-    for (const key of Object.keys(DEFAULT_ROUTER_WEIGHTS) as Array<keyof RouterWeights>) {
-      const value = finiteNonNegative(parsed[key]);
-      if (value !== null) out[key] = value;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function readJsonAdaptiveConfig(env: NodeJS.ProcessEnv): Partial<AdaptiveRouterConfig> {
-  const raw = env.R3MES_ADAPTIVE_ROUTER_CONFIG_JSON;
-  if (!raw?.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw) as Partial<Record<keyof AdaptiveRouterConfig, unknown>>;
-    const out: Partial<AdaptiveRouterConfig> = {};
-    for (const key of Object.keys(DEFAULT_ADAPTIVE_ROUTER_CONFIG) as Array<keyof AdaptiveRouterConfig>) {
-      const value = finiteNonNegative(parsed[key]);
-      if (value !== null) out[key] = value;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
 export function getRouterWeights(env: NodeJS.ProcessEnv = process.env): RouterWeights {
-  const jsonWeights = readJsonWeights(env);
-  const merged: RouterWeights = { ...DEFAULT_ROUTER_WEIGHTS, ...jsonWeights };
-  for (const key of Object.keys(DEFAULT_ROUTER_WEIGHTS) as Array<keyof RouterWeights>) {
-    const value = finiteNonNegative(env[ENV_KEYS[key]]);
-    if (value !== null) merged[key] = value;
-  }
-  return normalizeWeights(merged);
+  return getDecisionConfig(env).router.weights;
 }
 
 export function getAdaptiveRouterConfig(env: NodeJS.ProcessEnv = process.env): AdaptiveRouterConfig {
-  const merged: AdaptiveRouterConfig = {
-    ...DEFAULT_ADAPTIVE_ROUTER_CONFIG,
-    ...readJsonAdaptiveConfig(env),
-  };
-  for (const key of Object.keys(DEFAULT_ADAPTIVE_ROUTER_CONFIG) as Array<keyof AdaptiveRouterConfig>) {
-    const value = finiteNonNegative(env[ADAPTIVE_ENV_KEYS[key]]);
-    if (value !== null) merged[key] = value;
-  }
-  return merged;
+  return getDecisionConfig(env).router.adaptive;
 }
 
 export function weightedRouterScore(

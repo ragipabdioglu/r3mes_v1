@@ -1,6 +1,7 @@
 import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import type { AnswerIntent } from "./answerSchema.js";
 import { expandConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
+import { getDecisionConfig } from "./decisionConfig.js";
 
 export type SkillName =
   | "intent-router"
@@ -124,21 +125,8 @@ function unique(values: string[]): string[] {
   return out;
 }
 
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 export function getEvidenceExtractorBudget(): EvidenceExtractorBudget {
-  return {
-    directFactLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_DIRECT_FACT_LIMIT, 3),
-    supportingFactLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_SUPPORTING_FACT_LIMIT, 2),
-    riskFactLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_RISK_FACT_LIMIT, 3),
-    notSupportedLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_NOT_SUPPORTED_LIMIT, 4),
-    usableFactLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT, 5),
-    sourceIdLimit: parsePositiveInt(process.env.R3MES_EVIDENCE_SOURCE_ID_LIMIT, 8),
-  };
+  return getDecisionConfig().evidenceBudget;
 }
 
 function hasAny(text: string, terms: string[]): boolean {
@@ -563,45 +551,46 @@ function financeTargetedFragments(text: string, query: string): string[] {
 }
 
 function evidenceRelevanceScore(query: string, fact: string): number {
+  const scoring = getDecisionConfig().evidenceScoring;
   const normalizedQuery = normalizeConceptText(query);
   const normalizedFact = normalizeConceptText(fact);
   const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
   const coreOverlap = queryCoreOverlapScore(queryTokens, fact);
   const titleEvidenceBonus =
     asksForSourceTitleEvidence(query) && normalizedFact.includes("kaynak basligi")
-      ? 30
+      ? scoring.sourceTitleBonus
       : 0;
   const languageEvidenceBonus =
     asksForSourceTitleEvidence(query) &&
     ((normalizedQuery.includes("turkce") && normalizedFact.includes("turkce")) ||
       (normalizedQuery.includes("ingilizce") && normalizedFact.includes("ingilizce")))
-      ? 12
+      ? scoring.languageEvidenceBonus
       : 0;
-  const tableValueBonus = hasFinancialTableValue(fact) ? 3 : 0;
-  const tableRowBonus = isLikelyFinancialTableRow(fact) ? 5 : 0;
+  const tableValueBonus = hasFinancialTableValue(fact) ? scoring.tableValueBonus : 0;
+  const tableRowBonus = isLikelyFinancialTableRow(fact) ? scoring.tableRowBonus : 0;
   const exactPhraseBonus =
     normalizedQuery.includes("net donem") && normalizedFact.includes("net donem")
-      ? 10
+      ? scoring.exactNetPeriodBonus
       : normalizedQuery.includes("donem kari") && normalizedFact.includes("donem kari")
-        ? 8
+        ? scoring.exactPeriodProfitBonus
         : 0;
   const requestedPlainPeriodProfit =
     normalizedQuery.includes("donem kari") && !normalizedQuery.includes("sadece net donem");
   const plainPeriodProfitBonus =
     requestedPlainPeriodProfit && /(?:^|:\s*)\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(fact)
-      ? 9
+      ? scoring.plainPeriodProfitBonus
       : 0;
-  const shortRelevantBonus = fact.length <= 360 ? 2 : 0;
+  const shortRelevantBonus = fact.length <= 360 ? scoring.shortRelevantBonus : 0;
   const spkScopeBonus =
     normalizedQuery.includes("spk") && normalizedFact.includes("spk")
-      ? 24
+      ? scoring.spkScopeBonus
       : normalizedQuery.includes("spk") && normalizedFact.includes("capital markets board")
-        ? 18
+        ? scoring.spkEnglishScopeBonus
         : 0;
   const stopajScopeBonus =
     (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
     (normalizedFact.includes("stopaj") || normalizedFact.includes("withholding"))
-      ? 22
+      ? scoring.stopajScopeBonus
       : 0;
   const stopajGroupRateBonus =
     (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
@@ -611,7 +600,7 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     (normalizedFact.includes("c") || normalizedFact.includes("group c") || normalizedFact.includes("c grubu")) &&
     /(?:%?\s*0|0\s*%|0,00)/u.test(normalizedFact) &&
     /(?:%?\s*5|5\s*%|5,00)/u.test(normalizedFact)
-      ? 34
+      ? scoring.stopajGroupRateBonus
       : 0;
   const otherSourcesScopeBonus =
     (normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") ||
@@ -621,13 +610,13 @@ function evidenceRelevanceScore(query: string, fact: string): number {
       normalizedFact.includes("other sources") ||
       normalizedFact.includes("olaganustu yedek") ||
       normalizedFact.includes("extraordinary reserves"))
-      ? 22
+      ? scoring.otherSourcesScopeBonus
       : 0;
   const shareGroupScopeBonus =
     (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
     (normalizedFact.includes("grubu") || normalizedFact.includes("group") || normalizedFact.includes("pay grubu")) &&
     (normalizedFact.includes("nakit") || normalizedFact.includes("cash") || normalizedFact.includes("bedelsiz") || normalizedFact.includes("bonus") || normalizedFact.includes("rate") || normalizedFact.includes("oran"))
-      ? 26
+      ? scoring.shareGroupScopeBonus
       : 0;
   const shareGroupDenseTableBonus =
     (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
@@ -639,12 +628,12 @@ function evidenceRelevanceScore(query: string, fact: string): number {
       normalizedQuery.includes("rate")) &&
     /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
     /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact)
-      ? 38
+      ? scoring.shareGroupDenseTableBonus
       : 0;
   const rejectedExtraordinaryReservePenalty =
     (queryRejectsConcept(normalizedQuery, "olaganustu yedek") || queryRejectsConcept(normalizedQuery, "extraordinary reserves")) &&
     (normalizedFact.includes("olaganustu yedek") || normalizedFact.includes("extraordinary reserves"))
-      ? 60
+      ? scoring.rejectedExtraordinaryReservePenalty
       : 0;
   const unrequestedNetDistributablePenalty =
     normalizedFact.includes("dagitilabilir") &&
@@ -653,13 +642,13 @@ function evidenceRelevanceScore(query: string, fact: string): number {
     stopajGroupRateBonus === 0 &&
     otherSourcesScopeBonus === 0 &&
     shareGroupDenseTableBonus === 0
-      ? 50
+      ? scoring.unrequestedNetDistributablePenalty
       : 0;
   const headerPenalty =
     /spk'?ya\s+gore\s+yasal\s+kayitlara\s+gore/u.test(normalizedFact) && !/^\s*[^:]+:\s*\d{1,2}\./u.test(fact)
-      ? 6
+      ? scoring.headerPenalty
       : 0;
-  return coreOverlap * 4 +
+  return coreOverlap * scoring.coreOverlapWeight +
     tableValueBonus +
     tableRowBonus +
     exactPhraseBonus +

@@ -3,12 +3,8 @@ import { rerankKnowledgeCards, type RerankCandidate } from "./rerank.js";
 import type { HybridCandidate } from "./hybridRetrieval.js";
 import { createHash } from "node:crypto";
 import { getAlignmentConfig } from "./alignmentConfig.js";
+import { getDecisionConfig } from "./decisionConfig.js";
 
-const DEFAULT_TIMEOUT_MS = 8_000;
-const DEFAULT_MODEL_WEIGHT = 1.75;
-const DEFAULT_CANDIDATE_LIMIT = 5;
-const DEFAULT_CACHE_TTL_MS = 10 * 60_000;
-const DEFAULT_CACHE_MAX_ENTRIES = 256;
 const AI_ENGINE_DEFAULT = "http://127.0.0.1:8000";
 
 interface ModelRerankResponse {
@@ -74,31 +70,19 @@ export interface ModelRerankOptions {
 const rerankScoreCache = new Map<string, RerankCacheEntry>();
 
 function rerankerMode(): string {
-  return (process.env.R3MES_RERANKER_MODE ?? "model").trim().toLowerCase();
-}
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function parsePositiveFloat(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return getDecisionConfig().reranker.mode;
 }
 
 function getTimeoutMs(): number {
-  return parsePositiveInt(process.env.R3MES_RERANKER_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+  return getDecisionConfig().reranker.timeoutMs;
 }
 
 function getModelWeight(): number {
-  return parsePositiveFloat(process.env.R3MES_RERANKER_MODEL_WEIGHT, DEFAULT_MODEL_WEIGHT);
+  return getDecisionConfig().reranker.modelWeight;
 }
 
 function getCandidateLimit(): number {
-  return parsePositiveInt(process.env.R3MES_RERANKER_CANDIDATE_LIMIT, DEFAULT_CANDIDATE_LIMIT);
+  return getDecisionConfig().reranker.candidateLimit;
 }
 
 function resolveCandidateLimit(override?: number): number {
@@ -108,11 +92,11 @@ function resolveCandidateLimit(override?: number): number {
 }
 
 function getCacheTtlMs(): number {
-  return parsePositiveInt(process.env.R3MES_RERANKER_CACHE_TTL_MS, DEFAULT_CACHE_TTL_MS);
+  return getDecisionConfig().reranker.cacheTtlMs;
 }
 
 function getCacheMaxEntries(): number {
-  return parsePositiveInt(process.env.R3MES_RERANKER_CACHE_MAX_ENTRIES, DEFAULT_CACHE_MAX_ENTRIES);
+  return getDecisionConfig().reranker.cacheMaxEntries;
 }
 
 function getAiEngineBase(): string {
@@ -120,7 +104,7 @@ function getAiEngineBase(): string {
 }
 
 function realRerankerRequired(): boolean {
-  return process.env.R3MES_REQUIRE_REAL_RERANKER === "1" || process.env.NODE_ENV === "production";
+  return getDecisionConfig().reranker.requireRealProvider;
 }
 
 function isRealRerankerProvider(provider: string | undefined): boolean {

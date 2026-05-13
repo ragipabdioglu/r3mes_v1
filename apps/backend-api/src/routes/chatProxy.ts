@@ -14,6 +14,7 @@ import { stripChatDebugFields } from "../lib/chatResponseBoundary.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
 import type { CompiledEvidence } from "../lib/compiledEvidence.js";
 import type { ConversationalIntentDecision } from "../lib/conversationalIntent.js";
+import { getDecisionConfigVersion } from "../lib/decisionConfig.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
 import { evaluateFeedbackShadowRuntime, type FeedbackShadowRuntimeReport } from "../lib/feedbackShadowRuntime.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
@@ -66,6 +67,7 @@ const DEFAULT_VALIDATOR_MIN_MAX_TOKENS = 180;
 type GroundedComposerMode = "deterministic" | "model" | "auto";
 
 interface ChatRetrievalDebug {
+  decisionConfigVersion: string;
   groundingConfidence: "high" | "medium" | "low";
   queryPlan: QueryPlannerOutput | null;
   routePlan: DomainRoutePlan | null;
@@ -1456,6 +1458,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const queryUnderstanding = buildQueryUnderstanding(retrievalQuery);
       chatTrace.recordNow("query_understanding", "ok", {
         name: "query_understanding",
+        decisionConfigVersion: getDecisionConfigVersion(),
         ...summarizeQueryUnderstandingForTrace(queryUnderstanding),
       });
       const sourceAccessTrace = chatTrace.start("source_access");
@@ -1766,12 +1769,14 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           sourceSelection,
           retrievalDiagnostics: retrieval.retrievalDiagnostics ?? undefined,
           quality: routeDecisionQuality,
+          decisionConfigVersion: getDecisionConfigVersion(),
         }),
         "Knowledge route decision",
       );
 
       const retrievalDebug: ChatRetrievalDebug | null = retrievalQuery
         ? {
+            decisionConfigVersion: getDecisionConfigVersion(),
             groundingConfidence: retrieval.groundingConfidence,
             queryPlan: queryPlan?.output ?? null,
             routePlan,

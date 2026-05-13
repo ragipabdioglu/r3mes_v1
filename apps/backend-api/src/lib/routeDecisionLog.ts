@@ -25,6 +25,7 @@ export interface RouteDecisionLogSourceSelection {
 
 export interface RouteDecisionLogEvent {
   event: "knowledge_route_decision";
+  decisionConfigVersion?: string;
   queryHash: string;
   queryLength: number;
   route: {
@@ -89,9 +90,11 @@ export function buildRouteDecisionLogEvent(opts: {
   sourceSelection: RouteDecisionLogSourceSelection;
   retrievalDiagnostics?: Record<string, unknown>;
   quality?: RouteDecisionLogEvent["quality"];
+  decisionConfigVersion?: string;
 }): RouteDecisionLogEvent {
   return {
     event: "knowledge_route_decision",
+    decisionConfigVersion: opts.decisionConfigVersion,
     queryHash: hashQuery(opts.query),
     queryLength: opts.query.trim().length,
     route: {

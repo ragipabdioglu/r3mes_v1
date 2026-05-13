@@ -1,5 +1,6 @@
 import type { AnswerDomain, AnswerIntent, GroundedMedicalAnswer, GroundingConfidence } from "./answerSchema.js";
 import type { CompiledEvidence } from "./compiledEvidence.js";
+import { getDecisionConfig } from "./decisionConfig.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 export interface AnswerSpec {
@@ -220,6 +221,7 @@ function hasNumericTableValue(value: string): boolean {
 }
 
 function factQualityScore(value: string, userQuery: string): number {
+  const scoring = getDecisionConfig().evidenceScoring;
   const tokens = factTokens(value);
   if (tokens.length === 0) return -100;
   const queryTokens = new Set(factTokens(userQuery));
@@ -228,18 +230,18 @@ function factQualityScore(value: string, userQuery: string): number {
   const normalizedQuery = normalizeForFactMatch(userQuery);
   const sourceTitleBonus =
     asksForSourceTitleEvidence(userQuery) && normalizedValue.includes("kaynak basligi")
-      ? 35
+      ? scoring.answerSourceTitleBonus
       : 0;
   const sourceLanguageBonus =
     asksForSourceTitleEvidence(userQuery) &&
     ((normalizedQuery.includes("turkce") && normalizedValue.includes("turkce")) ||
       (normalizedQuery.includes("ingilizce") && normalizedValue.includes("ingilizce")))
-      ? 12
+      ? scoring.languageEvidenceBonus
       : 0;
   const directActionBonus = /(göndermeyiniz|göndermeyin|bilgilendir|başvur|kontrol|hazırla|sakla|denenmel|planlan|yapılmal|edilmel)/iu.test(value)
     ? 4
     : 0;
-  const numericTableBonus = hasNumericTableValue(value) ? 5 : 0;
+  const numericTableBonus = hasNumericTableValue(value) ? scoring.tableRowBonus : 0;
   const shareGroupTableBonus =
     (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
     (normalizedQuery.includes("nakit") || normalizedQuery.includes("cash") || normalizedQuery.includes("oran") || normalizedQuery.includes("rate") || normalizedQuery.includes("bonus")) &&
@@ -247,7 +249,7 @@ function factQualityScore(value: string, userQuery: string): number {
     (/\ba\s+grubu\b|\ba\s+\d/u.test(normalizedValue)) &&
     (/\bb\s+grubu\b|\bb\s+\d/u.test(normalizedValue)) &&
     hasNumericTableValue(value)
-      ? 36
+      ? scoring.answerShareGroupTableBonus
       : 0;
   const denseShareGroupTableBonus =
     (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
@@ -259,26 +261,26 @@ function factQualityScore(value: string, userQuery: string): number {
       normalizedQuery.includes("bedelsiz")) &&
     /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedValue) &&
     /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedValue)
-      ? 42
+      ? scoring.answerShareGroupDenseTableBonus
       : 0;
   const withholdingGroupRateBonus =
     (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
     (normalizedValue.includes("stopaj") || normalizedValue.includes("withholding")) &&
     /(?:%?\s*0|0\s*%|0,00)/u.test(normalizedValue) &&
     /(?:%?\s*5|5\s*%|5,00)/u.test(normalizedValue)
-      ? 32
+      ? scoring.answerWithholdingGroupRateBonus
       : 0;
   const exactFinanceBonus =
     normalizedQuery.includes("net donem") && normalizedValue.includes("net donem")
-      ? 10
+      ? scoring.exactNetPeriodBonus
       : normalizedQuery.includes("donem kari") && normalizedValue.includes("donem kari")
-        ? 8
+        ? scoring.exactPeriodProfitBonus
         : 0;
   const plainPeriodProfitBonus =
     normalizedQuery.includes("donem kari") &&
     !normalizedQuery.includes("sadece net donem") &&
     /(?:^|:\s*)\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(value)
-      ? 9
+      ? scoring.plainPeriodProfitBonus
       : 0;
   const unrequestedNetDistributablePenalty =
     normalizedValue.includes("dagitilabilir") &&
@@ -286,7 +288,7 @@ function factQualityScore(value: string, userQuery: string): number {
     shareGroupTableBonus === 0 &&
     denseShareGroupTableBonus === 0 &&
     withholdingGroupRateBonus === 0
-      ? 50
+      ? scoring.unrequestedNetDistributablePenalty
       : 0;
   const sentenceBonus = /[.!?]$/u.test(value.trim()) ? 1 : 0;
   const incompleteLongPenalty = !/[.!?]$/u.test(value.trim()) && value.trim().length >= 60 && !hasNumericTableValue(value) ? 10 : 0;
