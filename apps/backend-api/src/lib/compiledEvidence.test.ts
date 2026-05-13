@@ -91,4 +91,30 @@ describe("compileEvidence", () => {
     expect(compiled.confidence).toBe("low");
     expect(hasCompiledUsableGrounding(compiled)).toBe(true);
   });
+
+  it("applies decision-config evidence limits and exposes diagnostics", () => {
+    const previousLimit = process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT;
+    process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT = "2";
+    try {
+      const compiled = compileEvidence({
+        groundingConfidence: "high",
+        evidence: evidence({
+          usableFacts: ["Fact A.", "Fact B.", "Fact C."],
+          sourceIds: ["doc-1"],
+        }),
+      });
+
+      expect(compiled.facts).toEqual(["Fact A.", "Fact B."]);
+      expect(compiled.usableFactCount).toBe(2);
+      expect(compiled.diagnostics?.limits.facts).toBe(2);
+      expect(compiled.diagnostics?.rawCounts.facts).toBe(3);
+      expect(compiled.diagnostics?.confidenceReason).toBe("grounding_high");
+    } finally {
+      if (previousLimit == null) {
+        delete process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT;
+      } else {
+        process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT = previousLimit;
+      }
+    }
+  });
 });

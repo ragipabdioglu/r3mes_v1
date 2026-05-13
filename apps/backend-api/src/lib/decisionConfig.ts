@@ -55,6 +55,14 @@ export interface EvidenceBudgetConfig {
   sourceIdLimit: number;
 }
 
+export interface EvidenceCompilerConfig {
+  minUsableFactsForMedium: number;
+  minUsableFactsForHigh: number;
+  requireSourceForMedium: boolean;
+  requireSourceForHigh: boolean;
+  contradictionDowngradesToLow: boolean;
+}
+
 export interface DecisionConfig {
   version: string;
   router: {
@@ -72,6 +80,7 @@ export interface DecisionConfig {
   retrievalBudget: RetrievalBudgetConfig;
   reranker: RerankerDecisionConfig;
   evidenceBudget: EvidenceBudgetConfig;
+  evidenceCompiler: EvidenceCompilerConfig;
   evidenceScoring: EvidenceScoringConfig;
 }
 
@@ -310,6 +319,13 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
       notSupportedLimit: readPositiveInt(env.R3MES_EVIDENCE_NOT_SUPPORTED_LIMIT, 4),
       usableFactLimit: readPositiveInt(env.R3MES_EVIDENCE_USABLE_FACT_LIMIT, 5),
       sourceIdLimit: readPositiveInt(env.R3MES_EVIDENCE_SOURCE_ID_LIMIT, 8),
+    },
+    evidenceCompiler: {
+      minUsableFactsForMedium: readPositiveInt(env.R3MES_EVIDENCE_COMPILER_MIN_FACTS_MEDIUM, 1),
+      minUsableFactsForHigh: readPositiveInt(env.R3MES_EVIDENCE_COMPILER_MIN_FACTS_HIGH, 1),
+      requireSourceForMedium: readBoolean(env.R3MES_EVIDENCE_COMPILER_REQUIRE_SOURCE_MEDIUM, false),
+      requireSourceForHigh: readBoolean(env.R3MES_EVIDENCE_COMPILER_REQUIRE_SOURCE_HIGH, false),
+      contradictionDowngradesToLow: readBoolean(env.R3MES_EVIDENCE_COMPILER_CONTRADICTION_LOW, true),
     },
     evidenceScoring: readEvidenceScoringConfig(env),
   };

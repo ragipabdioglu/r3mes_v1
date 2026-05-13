@@ -12,6 +12,7 @@ describe("decision config registry", () => {
     expect(config.retrievalBudget.fastSourceLimit).toBe(2);
     expect(config.reranker.mode).toBe("model");
     expect(config.evidenceBudget.usableFactLimit).toBe(5);
+    expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(1);
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBeGreaterThan(0);
   });
 
@@ -23,6 +24,8 @@ describe("decision config registry", () => {
       R3MES_ALIGNMENT_MIN_SCORE: "0.42",
       R3MES_RAG_DEEP_SOURCE_LIMIT: "7",
       R3MES_RERANKER_CANDIDATE_LIMIT: "9",
+      R3MES_EVIDENCE_COMPILER_MIN_FACTS_HIGH: "3",
+      R3MES_EVIDENCE_COMPILER_REQUIRE_SOURCE_HIGH: "1",
       R3MES_EVIDENCE_SCORE_SHARE_GROUP_DENSE_TABLE_BONUS: "44",
     });
 
@@ -32,6 +35,8 @@ describe("decision config registry", () => {
     expect(config.alignment.minScore).toBe(0.42);
     expect(config.retrievalBudget.deepSourceLimit).toBe(7);
     expect(config.reranker.candidateLimit).toBe(9);
+    expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(3);
+    expect(config.evidenceCompiler.requireSourceForHigh).toBe(true);
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBe(44);
   });
 });
