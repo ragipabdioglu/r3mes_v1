@@ -63,6 +63,12 @@ export interface EvidenceCompilerConfig {
   contradictionDowngradesToLow: boolean;
 }
 
+export interface FeedbackRuntimeConfig {
+  mode: "shadow" | "active";
+  promotionMaxAbsDelta: number;
+  candidateLimit: number;
+}
+
 export interface DecisionConfig {
   version: string;
   router: {
@@ -82,6 +88,7 @@ export interface DecisionConfig {
   evidenceBudget: EvidenceBudgetConfig;
   evidenceCompiler: EvidenceCompilerConfig;
   evidenceScoring: EvidenceScoringConfig;
+  feedbackRuntime: FeedbackRuntimeConfig;
 }
 
 const DEFAULT_ROUTER_WEIGHTS: RouterWeights = {
@@ -328,6 +335,11 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
       contradictionDowngradesToLow: readBoolean(env.R3MES_EVIDENCE_COMPILER_CONTRADICTION_LOW, true),
     },
     evidenceScoring: readEvidenceScoringConfig(env),
+    feedbackRuntime: {
+      mode: (env.R3MES_FEEDBACK_RUNTIME_MODE ?? "shadow").trim().toLowerCase() === "active" ? "active" : "shadow",
+      promotionMaxAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA, 0.35),
+      candidateLimit: readPositiveInt(env.R3MES_FEEDBACK_RUNTIME_CANDIDATE_LIMIT, 25),
+    },
   };
 }
 

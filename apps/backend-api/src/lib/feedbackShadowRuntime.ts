@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { getDecisionConfig, getDecisionConfigVersion } from "./decisionConfig.js";
 import { prisma } from "./prisma.js";
-
-const PROMOTION_MAX_ABS_DELTA = 0.35;
 
 export type FeedbackRuntimeMode = "shadow" | "active";
 
@@ -25,7 +24,9 @@ export interface FeedbackShadowRuntimeImpact {
 
 export interface FeedbackShadowRuntimeReport {
   enabled: boolean;
+  decisionConfigVersion: string;
   runtimeMode: FeedbackRuntimeMode;
+  promotionMaxAbsDelta: number;
   runtimeAffected: boolean;
   queryHash: string | null;
   candidateCollectionIds: string[];
@@ -39,8 +40,7 @@ export interface FeedbackShadowRuntimeReport {
 }
 
 function runtimeMode(): FeedbackRuntimeMode {
-  const raw = (process.env.R3MES_FEEDBACK_RUNTIME_MODE ?? "shadow").trim().toLowerCase();
-  return raw === "active" ? "active" : "shadow";
+  return getDecisionConfig().feedbackRuntime.mode;
 }
 
 function hashQuery(query: string): string {
@@ -64,13 +64,16 @@ export async function evaluateFeedbackShadowRuntime(opts: {
   query: string;
   candidateCollectionIds: string[];
 }): Promise<FeedbackShadowRuntimeReport> {
-  const candidateCollectionIds = uniqueStrings(opts.candidateCollectionIds).slice(0, 25);
+  const config = getDecisionConfig();
+  const candidateCollectionIds = uniqueStrings(opts.candidateCollectionIds).slice(0, config.feedbackRuntime.candidateLimit);
   const query = opts.query.trim();
   const queryHash = query ? hashQuery(query) : null;
   const mode = runtimeMode();
   const empty: FeedbackShadowRuntimeReport = {
     enabled: true,
+    decisionConfigVersion: getDecisionConfigVersion(),
     runtimeMode: mode,
+    promotionMaxAbsDelta: config.feedbackRuntime.promotionMaxAbsDelta,
     runtimeAffected: false,
     queryHash,
     candidateCollectionIds,
@@ -140,8 +143,8 @@ export async function evaluateFeedbackShadowRuntime(opts: {
     if (impact.totalScoreDelta === 0) {
       blockedReasons.add("review-only adjustment has no runtime score effect");
     }
-    if (Math.abs(impact.totalScoreDelta) > PROMOTION_MAX_ABS_DELTA) {
-      blockedReasons.add(`score delta exceeds promotion cap ${PROMOTION_MAX_ABS_DELTA}`);
+    if (Math.abs(impact.totalScoreDelta) > config.feedbackRuntime.promotionMaxAbsDelta) {
+      blockedReasons.add(`score delta exceeds promotion cap ${config.feedbackRuntime.promotionMaxAbsDelta}`);
     }
     const blocked = Array.from(blockedReasons);
     const recommendation = blocked.length === 0
@@ -151,7 +154,7 @@ export async function evaluateFeedbackShadowRuntime(opts: {
         : "keep_passive" as const;
     const rollbackRecommended =
       blockedReasons.has("not all source apply records passed eval gate") ||
-      blockedReasons.has(`score delta exceeds promotion cap ${PROMOTION_MAX_ABS_DELTA}`);
+      blockedReasons.has(`score delta exceeds promotion cap ${config.feedbackRuntime.promotionMaxAbsDelta}`);
     const promotionStage = recommendation === "eligible_for_shadow_runtime"
       ? "eligible_shadow" as const
       : recommendation === "review_only"

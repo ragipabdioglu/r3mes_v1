@@ -15,6 +15,7 @@ describe("feedback shadow runtime", () => {
   afterEach(() => {
     vi.clearAllMocks();
     delete process.env.R3MES_FEEDBACK_RUNTIME_MODE;
+    delete process.env.R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA;
   });
 
   it("reports eligible shadow adjustments without changing runtime", async () => {
@@ -39,6 +40,8 @@ describe("feedback shadow runtime", () => {
       candidateCollectionIds: ["kc_a", "kc_b"],
     });
 
+    expect(report.decisionConfigVersion).toBeTruthy();
+    expect(report.promotionMaxAbsDelta).toBe(0.35);
     expect(report.runtimeAffected).toBe(false);
     expect(report.runtimeMode).toBe("shadow");
     expect(report.adjustedCandidateCollectionIds).toEqual(["kc_a", "kc_b"]);
@@ -121,6 +124,7 @@ describe("feedback shadow runtime", () => {
   });
 
   it("blocks oversized active adjustments before shadow promotion", async () => {
+    process.env.R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA = "0.15";
     const { prisma } = await import("./prisma.js");
     vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: "user_1" } as never);
     vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.findMany).mockResolvedValue([
@@ -152,5 +156,6 @@ describe("feedback shadow runtime", () => {
       nextSafeAction: "rollback_or_review",
     });
     expect(report.impacts[0]?.blockedReasons.join(" ")).toContain("score delta exceeds promotion cap");
+    expect(report.promotionMaxAbsDelta).toBe(0.15);
   });
 });

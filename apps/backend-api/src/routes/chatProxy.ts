@@ -740,6 +740,8 @@ function summarizeSourceSelectionForTrace(
     shadowRuntime: sourceSelection.shadowRuntime
       ? {
           runtimeMode: sourceSelection.shadowRuntime.runtimeMode,
+          decisionConfigVersion: sourceSelection.shadowRuntime.decisionConfigVersion,
+          promotionMaxAbsDelta: sourceSelection.shadowRuntime.promotionMaxAbsDelta,
           runtimeAffected: sourceSelection.shadowRuntime.runtimeAffected,
           activeAdjustmentCount: sourceSelection.shadowRuntime.activeAdjustmentCount,
           promotedCandidateCount: sourceSelection.shadowRuntime.promotedCandidateCount,
@@ -1754,7 +1756,9 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const domainPolicy = getDomainPolicy(answerDomain);
       chatTrace.finish(shadowRuntimeTrace, "ok", {
         name: "feedback_shadow_runtime",
+        decisionConfigVersion: shadowRuntime.decisionConfigVersion,
         runtimeMode: shadowRuntime.runtimeMode,
+        promotionMaxAbsDelta: shadowRuntime.promotionMaxAbsDelta,
         activeAdjustmentCount: shadowRuntime.activeAdjustmentCount,
         promotedCandidateCount: shadowRuntime.promotedCandidateCount,
         wouldChangeTopCandidate: shadowRuntime.wouldChangeTopCandidate,
