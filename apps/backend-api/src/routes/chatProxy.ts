@@ -14,7 +14,7 @@ import { stripChatDebugFields } from "../lib/chatResponseBoundary.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
 import type { CompiledEvidence } from "../lib/compiledEvidence.js";
 import type { ConversationalIntentDecision } from "../lib/conversationalIntent.js";
-import { getDecisionConfigVersion } from "../lib/decisionConfig.js";
+import { getDecisionConfig, getDecisionConfigVersion } from "../lib/decisionConfig.js";
 import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
 import { evaluateFeedbackShadowRuntime, type FeedbackShadowRuntimeReport } from "../lib/feedbackShadowRuntime.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
@@ -283,7 +283,12 @@ function buildSourceSelectionSummary(opts: {
     groundedCollectionIds.some((id) => {
       const collection = opts.suggestibleCollections.find((item) => item.id === id);
       const candidate = metadataCandidateById.get(id);
-      if (candidate && candidate.sourceQuality !== "thin" && candidate.score >= 70 && (!collection || readKnowledgeCollectionStrictRouteEligible(collection))) return true;
+      if (
+        candidate &&
+        candidate.sourceQuality !== "thin" &&
+        candidate.score >= getDecisionConfig().router.strictProfileScoreThreshold &&
+        (!collection || readKnowledgeCollectionStrictRouteEligible(collection))
+      ) return true;
       return collection ? collectionHasSpecificRouteSupport(collection, opts.routePlan, opts.query) : false;
     });
   const warning =

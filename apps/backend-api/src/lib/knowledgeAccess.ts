@@ -1124,11 +1124,13 @@ export function collectionHasSpecificRouteSupport(
   if (!routePlan || routePlan.domain === "general") return true;
   if (!readKnowledgeCollectionStrictRouteEligible(collection)) return false;
 
+  const profiles = collectionMetadataProfiles(collection);
   const queryProfileScore = bestQueryProfileScore(collection, query);
   const routeProfileScore = bestRouteProfileScore(collection, routePlan, query);
-  if (Math.max(queryProfileScore, routeProfileScore) >= getDecisionConfig().router.strictProfileScoreThreshold && readKnowledgeCollectionStrictRouteEligible(collection)) {
+  if (Math.max(queryProfileScore, routeProfileScore) >= getDecisionConfig().router.strictProfileScoreThreshold) {
     return true;
   }
+  if (profiles.length > 0) return false;
 
   const text = collectionMetadataText(collection);
   const inferred = routeQuery(text);

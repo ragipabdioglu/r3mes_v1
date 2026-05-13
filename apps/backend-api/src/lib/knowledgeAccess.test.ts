@@ -800,6 +800,51 @@ describe("collectionHasSpecificRouteSupport", () => {
       ),
     ).toBe(true);
   });
+
+  it("does not let route keyword hints override an unrelated existing profile", async () => {
+    const { collectionHasSpecificRouteSupport } = await import("./knowledgeAccess.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const routePlan = routeQuery("Bebeğim çok terliyor neden olabilir?");
+
+    expect(
+      collectionHasSpecificRouteSupport(
+        {
+          id: "profiled-gyn",
+          name: "Jinekoloji klinik kartları",
+          visibility: "PRIVATE",
+          autoMetadata: {
+            profile: {
+              domains: ["medical"],
+              subtopics: ["jinekoloji", "kasik_agrisi"],
+              keywords: ["kasık ağrısı", "smear", "akıntı"],
+              entities: [],
+              topicPhrases: ["jinekolojik kasık ağrısı", "smear sonrası takip"],
+              answerableConcepts: ["kasık ağrısı", "smear sonucu", "jinekolojik muayene"],
+              negativeHints: ["bebek terlemesi", "pediatri"],
+              tableConcepts: [],
+              summary: "Jinekolojik kasık ağrısı ve smear sonucu değerlendirme notları.",
+              sourceQuality: "structured",
+              confidence: "high",
+            },
+          },
+          documents: [
+            {
+              title: "Eski başlıkta pediatri terlemesi geçiyor",
+              chunks: [
+                {
+                  content:
+                    "Topic: bebek terlemesi\nTags: medical, pediatri, bebek, terleme\nBu eski ham metin profile ile doğrulanmamış gürültülü bir nottur.",
+                },
+              ],
+            },
+          ],
+        },
+        routePlan,
+        "Bebeğim çok terliyor neden olabilir?",
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("inferKnowledgeCollectionAnswerDomain", () => {
