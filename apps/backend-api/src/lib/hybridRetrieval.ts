@@ -1,5 +1,6 @@
 import { cosineSimilarity, embedKnowledgeText } from "./knowledgeEmbedding.js";
 import { buildLexicalCorpusStats, scoreLexicalMatch } from "./knowledgeRetrieval.js";
+import { getDecisionConfig } from "./decisionConfig.js";
 
 export interface HybridCandidate<TChunk> {
   chunk: TChunk;
@@ -12,6 +13,7 @@ export function rankHybridCandidates<TChunk extends { content: string; embedding
   query: string,
   chunks: TChunk[],
 ): HybridCandidate<TChunk>[] {
+  const weights = getDecisionConfig().hybridRetrieval;
   const queryEmbedding = embedKnowledgeText(query);
   const lexicalCorpusStats = buildLexicalCorpusStats(chunks.map((chunk) => chunk.content));
 
@@ -23,7 +25,7 @@ export function rankHybridCandidates<TChunk extends { content: string; embedding
         chunk,
         lexicalScore,
         embeddingScore,
-        fusedScore: lexicalScore * 0.75 + embeddingScore * 0.25,
+        fusedScore: lexicalScore * weights.lexicalWeight + embeddingScore * weights.embeddingWeight,
       };
     })
     .sort((a, b) => b.fusedScore - a.fusedScore);

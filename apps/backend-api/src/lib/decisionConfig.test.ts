@@ -10,6 +10,8 @@ describe("decision config registry", () => {
     expect(config.router.weights.profileEmbedding).toBeCloseTo(0.45);
     expect(config.alignment.minScore).toBe(0.34);
     expect(config.retrievalBudget.fastSourceLimit).toBe(2);
+    expect(config.hybridRetrieval.lexicalWeight).toBeCloseTo(0.75);
+    expect(config.hybridRetrieval.embeddingWeight).toBeCloseTo(0.25);
     expect(config.reranker.mode).toBe("model");
     expect(config.evidenceBudget.usableFactLimit).toBe(5);
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(1);
@@ -25,6 +27,8 @@ describe("decision config registry", () => {
       R3MES_ROUTER_WEIGHT_DOMAIN_HINT: "2",
       R3MES_ALIGNMENT_MIN_SCORE: "0.42",
       R3MES_RAG_DEEP_SOURCE_LIMIT: "7",
+      R3MES_HYBRID_LEXICAL_WEIGHT: "3",
+      R3MES_HYBRID_EMBEDDING_WEIGHT: "1",
       R3MES_RERANKER_CANDIDATE_LIMIT: "9",
       R3MES_EVIDENCE_COMPILER_MIN_FACTS_HIGH: "3",
       R3MES_EVIDENCE_COMPILER_REQUIRE_SOURCE_HIGH: "1",
@@ -38,6 +42,8 @@ describe("decision config registry", () => {
     expect(config.router.weights.domainHint).toBeGreaterThan(config.router.weights.profileEmbedding);
     expect(config.alignment.minScore).toBe(0.42);
     expect(config.retrievalBudget.deepSourceLimit).toBe(7);
+    expect(config.hybridRetrieval.lexicalWeight).toBeCloseTo(0.75);
+    expect(config.hybridRetrieval.embeddingWeight).toBeCloseTo(0.25);
     expect(config.reranker.candidateLimit).toBe(9);
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(3);
     expect(config.evidenceCompiler.requireSourceForHigh).toBe(true);

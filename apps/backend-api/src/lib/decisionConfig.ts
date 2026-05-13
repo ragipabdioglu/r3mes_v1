@@ -10,6 +10,11 @@ export interface RetrievalBudgetConfig {
   deepQueryTerms: string[];
 }
 
+export interface HybridRetrievalConfig {
+  lexicalWeight: number;
+  embeddingWeight: number;
+}
+
 export interface RerankerDecisionConfig {
   mode: "model" | "deterministic";
   timeoutMs: number;
@@ -84,6 +89,7 @@ export interface DecisionConfig {
   };
   alignment: AlignmentConfig;
   retrievalBudget: RetrievalBudgetConfig;
+  hybridRetrieval: HybridRetrievalConfig;
   reranker: RerankerDecisionConfig;
   evidenceBudget: EvidenceBudgetConfig;
   evidenceCompiler: EvidenceCompilerConfig;
@@ -117,6 +123,11 @@ const DEFAULT_DEEP_QUERY_TERMS = [
   "kaynakları",
   "kaynaklari",
 ];
+
+const DEFAULT_HYBRID_RETRIEVAL: HybridRetrievalConfig = {
+  lexicalWeight: 0.75,
+  embeddingWeight: 0.25,
+};
 
 const DEFAULT_EVIDENCE_SCORING: EvidenceScoringConfig = {
   coreOverlapWeight: 4,
@@ -232,6 +243,17 @@ function normalizeWeights(weights: RouterWeights): RouterWeights {
   };
 }
 
+function normalizeHybridRetrievalWeights(weights: HybridRetrievalConfig): HybridRetrievalConfig {
+  const lexicalWeight = Math.max(0, weights.lexicalWeight);
+  const embeddingWeight = Math.max(0, weights.embeddingWeight);
+  const sum = lexicalWeight + embeddingWeight;
+  if (sum <= 0) return DEFAULT_HYBRID_RETRIEVAL;
+  return {
+    lexicalWeight: lexicalWeight / sum,
+    embeddingWeight: embeddingWeight / sum,
+  };
+}
+
 function readJsonObject<T extends Record<string, unknown>>(raw: string | undefined): Partial<T> {
   if (!raw?.trim()) return {};
   try {
@@ -310,6 +332,10 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
       deepSourceLimit: readPositiveInt(env.R3MES_RAG_DEEP_SOURCE_LIMIT, 4),
       deepQueryTerms: readCsv(env.R3MES_RAG_DEEP_QUERY_TERMS, DEFAULT_DEEP_QUERY_TERMS),
     },
+    hybridRetrieval: normalizeHybridRetrievalWeights({
+      lexicalWeight: readNumber(env.R3MES_HYBRID_LEXICAL_WEIGHT, DEFAULT_HYBRID_RETRIEVAL.lexicalWeight),
+      embeddingWeight: readNumber(env.R3MES_HYBRID_EMBEDDING_WEIGHT, DEFAULT_HYBRID_RETRIEVAL.embeddingWeight),
+    }),
     reranker: {
       mode: (env.R3MES_RERANKER_MODE ?? "model").trim().toLowerCase() === "deterministic" ? "deterministic" : "model",
       timeoutMs: readPositiveInt(env.R3MES_RERANKER_TIMEOUT_MS, 8_000),
