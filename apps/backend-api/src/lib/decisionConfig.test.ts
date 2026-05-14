@@ -13,6 +13,11 @@ describe("decision config registry", () => {
     expect(config.hybridRetrieval.lexicalWeight).toBeCloseTo(0.75);
     expect(config.hybridRetrieval.embeddingWeight).toBeCloseTo(0.25);
     expect(config.reranker.mode).toBe("model");
+    expect(config.reranker.fastCandidateLimit).toBe(3);
+    expect(config.reranker.normalCandidateLimit).toBe(4);
+    expect(config.reranker.deepCandidateLimit).toBe(8);
+    expect(config.reranker.lowConfidenceCandidateLimit).toBe(4);
+    expect(config.reranker.scopedCandidateLimit).toBe(5);
     expect(config.evidenceBudget.usableFactLimit).toBe(5);
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(1);
     expect(config.evidencePruning.fastMaxChars).toBe(1200);
@@ -42,6 +47,9 @@ describe("decision config registry", () => {
       R3MES_HYBRID_LEXICAL_WEIGHT: "3",
       R3MES_HYBRID_EMBEDDING_WEIGHT: "1",
       R3MES_RERANKER_CANDIDATE_LIMIT: "9",
+      R3MES_RERANKER_FAST_CANDIDATE_LIMIT: "2",
+      R3MES_RERANKER_DEEP_CANDIDATE_LIMIT: "10",
+      R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT: "6",
       R3MES_EVIDENCE_COMPILER_MIN_FACTS_HIGH: "3",
       R3MES_EVIDENCE_COMPILER_REQUIRE_SOURCE_HIGH: "1",
       R3MES_EVIDENCE_PRUNING_JSON: JSON.stringify({ normalMaxChars: 1900, maxFactSentences: 8 }),
@@ -77,6 +85,9 @@ describe("decision config registry", () => {
     expect(config.hybridRetrieval.lexicalWeight).toBeCloseTo(0.75);
     expect(config.hybridRetrieval.embeddingWeight).toBeCloseTo(0.25);
     expect(config.reranker.candidateLimit).toBe(9);
+    expect(config.reranker.fastCandidateLimit).toBe(2);
+    expect(config.reranker.deepCandidateLimit).toBe(10);
+    expect(config.reranker.scopedCandidateLimit).toBe(6);
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(3);
     expect(config.evidenceCompiler.requireSourceForHigh).toBe(true);
     expect(config.evidencePruning.normalMaxChars).toBe(1900);

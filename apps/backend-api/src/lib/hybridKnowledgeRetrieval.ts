@@ -138,13 +138,14 @@ function finalSourceLimit(fallback: number): number {
 }
 
 function rerankerCandidateLimitForBudget(budgetMode: RetrievalBudgetMode): number {
+  const reranker = getDecisionConfig().reranker;
   if (budgetMode === "fast_grounded") {
-    return parsePositiveInt(process.env.R3MES_RERANKER_FAST_CANDIDATE_LIMIT, 3);
+    return reranker.fastCandidateLimit;
   }
   if (budgetMode === "deep_rag") {
-    return parsePositiveInt(process.env.R3MES_RERANKER_DEEP_CANDIDATE_LIMIT, 8);
+    return reranker.deepCandidateLimit;
   }
-  return parsePositiveInt(process.env.R3MES_RERANKER_NORMAL_CANDIDATE_LIMIT, 4);
+  return reranker.normalCandidateLimit;
 }
 
 function rerankerCandidateLimitForRoute(opts: {
@@ -160,7 +161,7 @@ function rerankerCandidateLimitForRoute(opts: {
     asksForMultilingualDisclosure(query) ||
     criticalEvidenceTermGroups(query).length > 0;
   if (routePlan?.confidence === "low" && !needsBroadEvidencePool) {
-    return Math.min(baseLimit, parsePositiveInt(process.env.R3MES_RERANKER_LOW_CONFIDENCE_CANDIDATE_LIMIT, 4));
+    return Math.min(baseLimit, getDecisionConfig().reranker.lowConfidenceCandidateLimit);
   }
   return baseLimit;
 }
@@ -1642,7 +1643,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   const rerankerCandidateLimit = rerankerCandidateLimitForRoute({ budgetMode, routePlan, query: evidenceQuery });
   const scopedRerankerCandidateLimit =
     disclosureIndexes(evidenceQuery).length > 0 || primaryQuerySymbol(evidenceQuery)
-      ? Math.min(rerankerCandidateLimit, parsePositiveInt(process.env.R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT, 5))
+      ? Math.min(rerankerCandidateLimit, getDecisionConfig().reranker.scopedCandidateLimit)
       : rerankerCandidateLimit;
   const rerankReturnLimit =
     asksForMultilingualDisclosure(evidenceQuery) ||

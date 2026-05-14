@@ -20,6 +20,11 @@ export interface RerankerDecisionConfig {
   timeoutMs: number;
   modelWeight: number;
   candidateLimit: number;
+  fastCandidateLimit: number;
+  normalCandidateLimit: number;
+  deepCandidateLimit: number;
+  lowConfidenceCandidateLimit: number;
+  scopedCandidateLimit: number;
   cacheTtlMs: number;
   cacheMaxEntries: number;
   requireRealProvider: boolean;
@@ -682,6 +687,11 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
       timeoutMs: readPositiveInt(env.R3MES_RERANKER_TIMEOUT_MS, 8_000),
       modelWeight: readPositiveFloat(env.R3MES_RERANKER_MODEL_WEIGHT, 1.75),
       candidateLimit: readPositiveInt(env.R3MES_RERANKER_CANDIDATE_LIMIT, 5),
+      fastCandidateLimit: readPositiveInt(env.R3MES_RERANKER_FAST_CANDIDATE_LIMIT, 3),
+      normalCandidateLimit: readPositiveInt(env.R3MES_RERANKER_NORMAL_CANDIDATE_LIMIT, 4),
+      deepCandidateLimit: readPositiveInt(env.R3MES_RERANKER_DEEP_CANDIDATE_LIMIT, 8),
+      lowConfidenceCandidateLimit: readPositiveInt(env.R3MES_RERANKER_LOW_CONFIDENCE_CANDIDATE_LIMIT, 4),
+      scopedCandidateLimit: readPositiveInt(env.R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT, 5),
       cacheTtlMs: readPositiveInt(env.R3MES_RERANKER_CACHE_TTL_MS, 10 * 60_000),
       cacheMaxEntries: readPositiveInt(env.R3MES_RERANKER_CACHE_MAX_ENTRIES, 256),
       requireRealProvider: env.R3MES_REQUIRE_REAL_RERANKER === "1" || env.NODE_ENV === "production",
