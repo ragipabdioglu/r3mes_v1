@@ -512,6 +512,35 @@ function summarizeProfileHealthArtifact(artifact) {
   };
 }
 
+function summarizeProviderReadinessArtifact(artifact) {
+  const summary = artifact?.summary;
+  if (!summary) {
+    return {
+      observed: false,
+      status: "missing_artifact",
+      path: artifact?.path ?? null,
+      updatedAt: null,
+      ok: false,
+      failures: ["missing_provider_readiness_artifact"],
+    };
+  }
+  return {
+    observed: true,
+    status: summary.status ?? (summary.ok === true ? "pass" : "fail"),
+    path: artifact.path,
+    updatedAt: artifact.updatedAt,
+    ok: summary.ok === true,
+    failures: summary.failures ?? [],
+    embeddingProvider: summary.embeddingProvider ?? null,
+    embeddingModel: summary.embeddingModel ?? null,
+    rerankerProvider: summary.rerankerProvider ?? null,
+    embeddingColdLatencyMs: summary.embeddingColdLatencyMs ?? null,
+    embeddingWarmLatencyMs: summary.embeddingWarmLatencyMs ?? null,
+    rerankerColdLatencyMs: summary.rerankerColdLatencyMs ?? null,
+    rerankerWarmLatencyMs: summary.rerankerWarmLatencyMs ?? null,
+  };
+}
+
 async function readProductionRagArtifact(artifactsRoot) {
   const file = join(artifactsRoot, "production-rag", "latest.json");
   try {
@@ -594,6 +623,9 @@ async function main() {
   const profileHealthArtifact = opts.includeArtifacts
     ? await readOptionalEvalArtifact(opts.artifactsRoot, "profile-health")
     : null;
+  const providerReadinessArtifact = opts.includeArtifacts
+    ? await readOptionalEvalArtifact(opts.artifactsRoot, "provider-readiness")
+    : null;
   const productionRag = opts.includeArtifacts
     ? await readProductionRagArtifact(opts.artifactsRoot)
     : { observed: false, status: "not_checked", totals: null, qualityProviderGate: null };
@@ -601,12 +633,14 @@ async function main() {
   const routerQuality = summarizeRouterQualityArtifacts(artifacts);
   const budgetQuality = summarizeBudgetQualityArtifacts(artifacts);
   const profileHealth = summarizeProfileHealthArtifact(profileHealthArtifact);
+  const providerReadiness = summarizeProviderReadinessArtifact(providerReadinessArtifact);
   const report = {
     generatedAt: new Date().toISOString(),
     readiness,
     routerQuality,
     budgetQuality,
     profileHealth,
+    providerReadiness,
     productionRag,
     requiredBuckets: REQUIRED_BUCKETS,
     coverage,
@@ -632,6 +666,11 @@ async function main() {
           ? "Profile health eval is passing."
           : `Profile health eval is failing: ${profileHealth.failures.join(", ")}.`
         : "Run pnpm run eval:profile-health to populate profile health readiness.",
+      providerReadiness.observed
+        ? providerReadiness.ok
+          ? "Provider readiness is passing for BGE-M3 embeddings and cross-encoder reranker."
+          : `Provider readiness is failing: ${providerReadiness.failures.join(", ")}.`
+        : "Run pnpm run eval:provider-readiness to populate BGE-M3/reranker readiness.",
       productionRag.observed && productionRag.status === "pass" && Number(productionRag.totals?.expectedCases ?? 0) >= 100
         ? "Production RAG aggregate is passing with the quality-provider gate."
         : "Run pnpm run eval:production-rag to refresh the full 100+ production aggregate with provider gates.",
