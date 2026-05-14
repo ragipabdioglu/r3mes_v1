@@ -294,7 +294,7 @@ function SourceList({
     return null;
   }
 
-  const visibleSources = sources.slice(0, 3);
+  const visibleSources = sources.slice(0, debugMode ? 3 : 2);
   const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length);
   const why = buildSourceExplanation(debug, sources.length);
 
@@ -307,11 +307,11 @@ function SourceList({
               {sources.length} kaynak
             </span>
             <span className="text-[11px] text-zinc-500">
-              Yanıt seçilen knowledge ile desteklendi
+              Yanıt knowledge kaynaklarıyla desteklendi
             </span>
           </div>
           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-            Detay
+            {debugMode ? "Debug detay" : "Özet"}
           </span>
         </div>
       </summary>
@@ -341,7 +341,7 @@ function SourceList({
                   </span>
                 ) : null}
               </div>
-              {source.excerpt ? (
+              {source.excerpt && debugMode ? (
                 <p className="mt-1 line-clamp-3 leading-relaxed text-zinc-500">
                   {source.excerpt}
                 </p>
@@ -353,6 +353,11 @@ function SourceList({
       {hiddenSourceCount > 0 ? (
         <p className="mt-2 text-[11px] text-zinc-500">
           {hiddenSourceCount} ek kaynak daha gizlendi.
+        </p>
+      ) : null}
+      {!debugMode ? (
+        <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
+          Teknik skorlar, chunk kimlikleri ve ham alıntılar debug modunda gösterilir.
         </p>
       ) : null}
     </details>
