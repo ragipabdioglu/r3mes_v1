@@ -358,6 +358,37 @@ function sentenceFragments(text: string, limit = 2): string[] {
     .map(({ fragment }) => fragment);
 }
 
+function definitionQueryFragments(text: string, query: string, limit = 3): string[] {
+  const normalizedQuery = normalizeConceptText(query);
+  if (!/\b(nedir|ne demek|tan[ıi]m|a[cç][ıi]kla|anlat)\b/u.test(normalizedQuery)) return [];
+  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
+  if (queryTokens.size === 0) return [];
+  const normalizedText = text
+    .replace(/#{1,6}\s*page\s+\d+/giu, "\n")
+    .replace(/#{1,6}\s+/g, "\n")
+    .replace(/^\s*(?:Source Summary|Key Takeaway|Temel Bilgi|Özet|Ozet)\s*:\s*/gimu, "")
+    .replace(/\s+[•]\s+/g, " ")
+    .replace(/\n{2,}/g, "\n");
+  const fragments = normalizedText
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((part) => part.trim())
+    .map(normalizeDocumentScaffoldFragment)
+    .filter((part) => part.length >= 45 && part.length <= 520)
+    .map((fragment, index) => {
+      const coreOverlap = queryCoreOverlapScore(queryTokens, fragment);
+      const normalizedFragment = normalizeConceptText(fragment);
+      const definitionBonus = /\b(?:denir|ifade eder|tan[ıi]mlan[ıi]r|bütünüdür|butunudur|amac[ıi]|kavram[ıi]|teknoloji|sistem)\b/u
+        .test(normalizedFragment)
+        ? 5
+        : 0;
+      return { fragment, index, score: coreOverlap * 10 + definitionBonus + fragmentQualityScore(fragment) };
+    })
+    .filter((item) => item.score >= 12)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => item.fragment);
+  return unique(fragments).slice(0, limit);
+}
+
 function splitNumberedTableRows(text: string): string[] {
   return text
     .replace(/\s+(\d{1,2})\.\s*(?=[\p{L}A-ZÇĞİÖŞÜ])/gu, "\n$1. ")
@@ -1205,7 +1236,7 @@ export function buildDeterministicEvidenceExtraction(
   const queryTokens = new Set(tokenizeForOverlap(input.userQuery));
   const weakIntent = inferAnswerIntent(input.userQuery);
 
-  const addUsableIfRelevant = (sourceLabel: string, fragment: string, opts: { allowGenericGuidance?: boolean; kind?: "direct" | "supporting"; force?: boolean } = {}) => {
+  const addUsableIfRelevant = (sourceLabel: string, fragment: string, opts: { allowGenericGuidance?: boolean; kind?: "direct" | "supporting"; force?: boolean; maxChars?: number } = {}) => {
     const sanitized = removeOffQuerySymptomPhrases(input.userQuery, addQueryLanguageAlias(input.userQuery, fragment));
     if (!sanitized.trim()) return;
     if (hasContradictionMarker(sanitized) || hasSourceScopeExclusion(sanitized)) {
@@ -1222,7 +1253,7 @@ export function buildDeterministicEvidenceExtraction(
       opts.kind === "supporting" &&
       (opts.force || strongOverlap || coreOverlap > 0 || (opts.allowGenericGuidance && overlap > 0));
     if (acceptDirect || acceptSupporting) {
-      const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized), financialEvidenceLineLimit(sanitized));
+      const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized), opts.maxChars ?? financialEvidenceLineLimit(sanitized));
       usableFacts.push(line);
       if (opts.kind === "supporting") {
         supportingContext.push(line);
@@ -1252,6 +1283,14 @@ export function buildDeterministicEvidenceExtraction(
 
     for (const section of cardSections(card)) {
       if (section.kind === "direct" || section.kind === "supporting") {
+        for (const fragment of definitionQueryFragments(section.text, input.userQuery)) {
+          addUsableIfRelevant(sourceLabel, fragment, {
+            allowGenericGuidance: true,
+            kind: section.kind === "supporting" ? "supporting" : "direct",
+            force: true,
+            maxChars: 560,
+          });
+        }
         for (const fragment of financeTargetedFragments(section.text, input.userQuery)) {
           addUsableIfRelevant(sourceLabel, fragment, {
             allowGenericGuidance: true,

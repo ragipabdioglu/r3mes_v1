@@ -38,6 +38,10 @@ function stripTransportArtifacts(text: string): string {
     .replace(/^```(?:json|text)?\s*/iu, "")
     .replace(/\s*```$/u, "")
     .replace(/^Yanıt\s*:?\s*/iu, "")
+    .replace(/\s*[•]\s*/gu, ", ")
+    .replace(/:\s*,\s*/gu, ": ")
+    .replace(/\bve,\s+/giu, "ve ")
+    .replace(/,\s*([.!?])/gu, "$1")
     .trim();
 }
 

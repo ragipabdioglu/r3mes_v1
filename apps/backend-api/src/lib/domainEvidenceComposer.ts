@@ -81,6 +81,31 @@ function asksForNumericTableAnswer(query: string): boolean {
   );
 }
 
+function asksForDefinitionAnswer(query: string): boolean {
+  const normalized = compactForCompare(query);
+  return /\b(nedir|ne demek|tanim|tanım)\b/u.test(normalized);
+}
+
+function isGenericSourceLimitGuidance(value: string): boolean {
+  return /\bkaynak\s+s[ıi]n[ıi]rl[ıi]ysa\b|\bilgili\s+uzman\s+veya\s+yetkili\s+kurum\b/iu.test(value);
+}
+
+function stripSourcePrefix(value: string): string {
+  return value.replace(/^\s*[\p{L}\p{N}_./() -]{3,180}:\s*/u, "").trim();
+}
+
+function isDocumentScaffoldFact(value: string): boolean {
+  const normalized = compactForCompare(stripSourcePrefix(value));
+  return (
+    !normalized ||
+    /\bpage\s+\d+\b/u.test(normalized) ||
+    (/^hafta\s+\d+\s*-?\s*\d*\b/u.test(normalized) && normalized.length < 120) ||
+    (/^\d+\s*hafta\b/u.test(normalized) && normalized.length < 120) ||
+    (/^bilişim teknolojilerine giriş\b/u.test(normalized) && normalized.length < 120) ||
+    (/\bmart\s+20\d{2}\b/u.test(normalized) && normalized.length < 140)
+  );
+}
+
 function shouldOmitOptionalCaution(spec: AnswerSpec): boolean {
   if (lowGroundingLead(spec)) return false;
   return spec.answerDomain === "finance" && asksForNumericTableAnswer(spec.userQuery) && asksToAvoidExtraCaution(spec.userQuery);
@@ -89,6 +114,7 @@ function shouldOmitOptionalCaution(spec: AnswerSpec): boolean {
 function shouldIncludeOptionalCaution(spec: AnswerSpec, answerPlan?: AnswerPlan): boolean {
   if (shouldOmitOptionalCaution(spec)) return false;
   if (lowGroundingLead(spec)) return true;
+  if (asksForDefinitionAnswer(spec.userQuery)) return false;
   if (spec.answerDomain === "medical" || spec.answerDomain === "finance") return true;
   if (spec.answerIntent === "triage") return true;
   if (answerPlan?.outputFormat === "bullets" || asksForBriefNaturalAnswer(spec.userQuery)) return false;
@@ -355,8 +381,17 @@ function composeNaturalBrief(spec: AnswerSpec, opts: {
   const summarySentence = sentence(opts.summary);
 
   const body: string[] = [firstSentence];
-  if (!isNearDuplicate(opts.action, opts.assessment)) body.push(actionSentence);
-  if (opts.relevantFact && ![opts.assessment, opts.action, opts.caution].some((value) => isNearDuplicate(value, opts.relevantFact ?? ""))) {
+  if (
+    !isGenericSourceLimitGuidance(opts.action) &&
+    !isDocumentScaffoldFact(opts.action) &&
+    !isNearDuplicate(opts.action, opts.assessment)
+  ) body.push(actionSentence);
+  if (
+    opts.relevantFact &&
+    !isGenericSourceLimitGuidance(opts.relevantFact) &&
+    !isDocumentScaffoldFact(opts.relevantFact) &&
+    ![opts.assessment, opts.action, opts.caution].some((value) => isNearDuplicate(value, opts.relevantFact ?? ""))
+  ) {
     body.push(sentence(opts.relevantFact));
   }
   lines.push(body.join(" "));
@@ -369,7 +404,13 @@ function composeNaturalBrief(spec: AnswerSpec, opts: {
     lines.push(`Dikkat edilmesi gereken nokta: ${cautionSentence}`);
   }
 
-  if (!isNearDuplicate(opts.summary, opts.assessment) && !isNearDuplicate(opts.summary, opts.action)) {
+  if (
+    !asksForDefinitionAnswer(spec.userQuery) &&
+    !isGenericSourceLimitGuidance(opts.summary) &&
+    !isDocumentScaffoldFact(opts.summary) &&
+    !isNearDuplicate(opts.summary, opts.assessment) &&
+    !isNearDuplicate(opts.summary, opts.action)
+  ) {
     lines.push(`Kısaca: ${summarySentence}`);
   }
 
