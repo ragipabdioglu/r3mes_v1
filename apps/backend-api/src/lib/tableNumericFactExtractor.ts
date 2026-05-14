@@ -44,12 +44,22 @@ function sourceIdForFact(fact: string, fallback: string): string {
   return fallback;
 }
 
+function isFieldAliasContextAllowed(normalizedFact: string, alias: string, field: RequestedField): boolean {
+  const index = normalizedFact.indexOf(alias);
+  if (index < 0) return false;
+  const before = normalizedFact.slice(Math.max(0, index - 28), index);
+  if (field.id === "donem_kari" && /\b(net|dagitilabilir|dagitilmis|düşülmüş|dusulmus)\s*$/u.test(before)) {
+    return false;
+  }
+  return true;
+}
+
 function bestAliasMatch(normalizedFact: string, field: RequestedField): string | null {
   const aliases = [field.label, ...field.aliases]
     .map(normalize)
     .filter((alias) => alias.length >= 3)
     .sort((left, right) => right.length - left.length);
-  return aliases.find((alias) => normalizedFact.includes(alias)) ?? null;
+  return aliases.find((alias) => isFieldAliasContextAllowed(normalizedFact, alias, field)) ?? null;
 }
 
 function sliceAroundAlias(fact: string, normalizedFact: string, normalizedAlias: string): string {
@@ -61,7 +71,7 @@ function sliceAroundAlias(fact: string, normalizedFact: string, normalizedAlias:
     .trim();
   const aliasIndex = normalizedFact.indexOf(normalizedAlias);
   if (aliasIndex < 0) return searchable.slice(0, 420);
-  return searchable.slice(Math.max(0, aliasIndex - 80), aliasIndex + 420);
+  return searchable.slice(aliasIndex, aliasIndex + 420);
 }
 
 function confidenceFor(numbers: string[], field: RequestedField): StructuredFact["confidence"] {
