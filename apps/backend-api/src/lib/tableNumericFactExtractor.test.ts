@@ -63,4 +63,68 @@ describe("extractTableNumericFacts", () => {
     expect(periodProfit?.value).not.toContain("1574205");
     expect(netProfit?.value).toContain("22.000.501.000,00");
   });
+
+  it("uses numbered KAP rows when labels are stripped from table text", () => {
+    const structuredFacts = extractTableNumericFacts({
+      query: "FROTO 1557060 SPK'ya göre net dönem kârı hangi rakam?",
+      facts: [
+        "FROTO 1557060 Kar Dağıtım Önerisi.pdf: SPK’ya Göre 3. 39.466.789.000 4. (5.480.654.000) 5. 33.986.135.000 6. - 8. 33.986.135.000",
+      ],
+      sourceIds: ["froto-doc"],
+    });
+
+    expect(structuredFacts[0]?.field).toBe("Net Dönem Kârı");
+    expect(structuredFacts[0]?.value).toContain("33.986.135.000");
+  });
+
+  it("prefers the requested SPK column over statutory-record facts", () => {
+    const structuredFacts = extractTableNumericFacts({
+      query: "FROTO SPK'ya göre net dönem kârı hangi rakam?",
+      facts: [
+        "FROTO Kar Dağıtım Önerisi.pdf: Yasal Kayıtlara Göre: Bağışlar Eklenmiş Net Dağıtılabilir Dönem Karı 34.548.172.542 Vergiler ( - ) Net Dönem Kârı ( = ) 21.893.335.017",
+        "FROTO Kar Dağıtım Önerisi.pdf: SPK’ya Göre 3. 39.466.789.000 4. (5.480.654.000) 5. 33.986.135.000 6. -",
+      ],
+      sourceIds: ["froto-doc"],
+    });
+
+    expect(structuredFacts[0]?.table?.columnLabel).toBe("SPK'ya Göre");
+    expect(structuredFacts[0]?.value).toContain("33.986.135.000");
+    expect(structuredFacts[0]?.value).not.toContain("21.893.335.017");
+  });
+
+  it("splits requested share group cash/rate rows into separate structured facts", () => {
+    const structuredFacts = extractTableNumericFacts({
+      query: "KCHOL A Grubu ve B Grubu için nakit tutarı ve oran satırları ne?",
+      facts: [
+        "KCHOL tablo: GRUBU NAKİT (TL) BEDELSİZ (TL) ORAN (%) TUTARI (TL) ORAN (%) A Grubu 4.636.022.474,31 0,00 21,07 6,830000 683,0000 B Grubu 11.258.904.726,02 0,00 51,18 5,805500 580,5500 TOPLAM 15.894.927.200,34",
+      ],
+      sourceIds: ["kchol-doc"],
+    });
+
+    expect(structuredFacts.map((fact) => fact.field)).toEqual(
+      expect.arrayContaining(["A Grubu Nakit Tutar ve Oran", "B Grubu Nakit Tutar ve Oran"]),
+    );
+    expect(structuredFacts.find((fact) => fact.field?.startsWith("A Grubu"))?.value).toContain("6,830000");
+    expect(structuredFacts.find((fact) => fact.field?.startsWith("B Grubu"))?.value).toContain("11.258.904.726,02");
+  });
+
+  it("extracts A/B/C share group rows when all groups are requested", () => {
+    const structuredFacts = extractTableNumericFacts({
+      query: "FROTO A, B ve C grupları için nakit tutarları ve oranları hangi satırlarda geçiyor?",
+      facts: [
+        "FROTO tablo: A Grubu 2.132.563.440 0 3,0940 309,40 B Grubu 5.022.733.697 0 3,6400 364,00 C Grubu 4.979.417.531 0 3,4580 345,80 TOPLAM 12.134.714.668",
+      ],
+      sourceIds: ["froto-doc"],
+    });
+
+    expect(structuredFacts.map((fact) => fact.field)).toEqual(
+      expect.arrayContaining([
+        "A Grubu Nakit Tutar ve Oran",
+        "B Grubu Nakit Tutar ve Oran",
+        "C Grubu Nakit Tutar ve Oran",
+      ]),
+    );
+    expect(structuredFacts.find((fact) => fact.field?.startsWith("C Grubu"))?.value).toContain("4.979.417.531");
+    expect(structuredFacts.find((fact) => fact.field?.startsWith("C Grubu"))?.value).toContain("345,80");
+  });
 });

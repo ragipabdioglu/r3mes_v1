@@ -44,6 +44,23 @@ function selectFactsForFields(facts: StructuredFact[], fields: RequestedField[])
   const selected: StructuredFact[] = [];
   const seen = new Set<string>();
   for (const field of fields) {
+    if (field.id === "nakit_tutar_oran") {
+      const matches = facts
+        .filter((fact) => !seen.has(fact.id) && factMatchesField(fact, field))
+        .sort((left, right) => {
+          const confidenceScore = { high: 3, medium: 2, low: 1 };
+          return (
+            confidenceScore[right.confidence] - confidenceScore[left.confidence] ||
+            (left.field ?? "").localeCompare(right.field ?? "", "tr-TR")
+          );
+        })
+        .slice(0, 6);
+      for (const match of matches) {
+        seen.add(match.id);
+        selected.push(match);
+      }
+      continue;
+    }
     const match = facts
       .filter((fact) => !seen.has(fact.id) && factMatchesField(fact, field))
       .sort((left, right) => {

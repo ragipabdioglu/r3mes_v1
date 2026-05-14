@@ -282,7 +282,7 @@ function composeStructuredFieldAnswer(plan: AnswerPlan): string | null {
     const baseLabel = fact.field ?? fact.subject ?? "Kaynakta bulunan değer";
     const label = fact.table?.columnLabel ? `${baseLabel} (${fact.table.columnLabel})` : baseLabel;
     const value = fact.value ?? fact.provenance.quote;
-    return plan.outputFormat === "bullets" ? `- ${label}: ${value}` : `${label}: ${value}`;
+    return plan.outputFormat === "bullets" ? `- ${label}: ${value}.` : `${label}: ${value}.`;
   });
   if (plan.coverage === "partial" && plan.diagnostics.missingFieldIds.length > 0) {
     lines.push(

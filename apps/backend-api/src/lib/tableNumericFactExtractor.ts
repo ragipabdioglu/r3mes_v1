@@ -23,7 +23,7 @@ function normalize(value: string): string {
 }
 
 function extractNumbers(value: string): string[] {
-  return Array.from(value.matchAll(/\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+[.,]\d+|\d+/gu))
+  return Array.from(value.matchAll(/\d+[.,]\d{4,6}|\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+[.,]\d+|\d+/gu))
     .map((match) => match[0])
     .filter((number) => number.length > 1 && !NOISE_NUMBERS.has(number));
 }
@@ -38,10 +38,35 @@ function extractNumbersForField(value: string, field: RequestedField): string[] 
   return percentLike;
 }
 
+function extractRowNumberedValues(value: string, field: RequestedField): string[] {
+  const rowNumberByField: Record<string, string> = {
+    donem_kari: "3",
+    net_donem_kari: "5",
+    net_dagitilabilir_donem_kari: "8",
+  };
+  const rowNumber = rowNumberByField[field.id];
+  if (!rowNumber) return [];
+  const rowPattern = new RegExp(
+    `(?:^|\\s)${rowNumber}\\.?\\s+(?:[^\\d\\n]{0,90})?((?:\\(?\\d{1,3}(?:[.,]\\d{3})+(?:[.,]\\d+)?\\)?\\s*){1,3})`,
+    "u",
+  );
+  const match = value.match(rowPattern);
+  return match?.[1] ? extractNumbers(match[1]).slice(0, 3) : [];
+}
+
 function sourceIdForFact(fact: string, fallback: string): string {
   const prefix = fact.split(":")[0]?.trim();
   if (prefix && prefix.length <= 120 && !/\d{1,3}(?:[.,]\d{3})/u.test(prefix)) return prefix;
   return fallback;
+}
+
+function requestedShareGroups(query: string): string[] {
+  const normalized = normalize(query);
+  const groups = new Set<string>();
+  if (/\ba(?:\s+grubu)?\b/u.test(normalized)) groups.add("A Grubu");
+  if (/\bb(?:\s+grubu)?\b/u.test(normalized)) groups.add("B Grubu");
+  if (/\bc(?:\s+grubu)?\b/u.test(normalized)) groups.add("C Grubu");
+  return [...groups];
 }
 
 function isFieldAliasContextAllowed(normalizedFact: string, alias: string, field: RequestedField): boolean {
@@ -91,27 +116,108 @@ function inferColumnLabel(fact: string): string | undefined {
   return undefined;
 }
 
+function desiredColumnLabel(query: string): string | undefined {
+  const normalized = normalize(query);
+  if (normalized.includes("spk ya gore") || normalized.includes("spkya gore")) return "SPK'ya Göre";
+  if (normalized.includes("yasal kayitlara gore")) return "Yasal Kayıtlara Göre";
+  return undefined;
+}
+
+function columnScore(columnLabel: string | undefined, desiredColumn: string | undefined): number {
+  if (!desiredColumn) return 0;
+  if (columnLabel === desiredColumn) return 100;
+  if (columnLabel) return -80;
+  return 0;
+}
+
+function extractShareGroupFacts(opts: {
+  query: string;
+  facts: string[];
+  field: RequestedField;
+  fallbackSourceId: string;
+}): StructuredFact[] {
+  if (opts.field.id !== "nakit_tutar_oran") return [];
+  const groups = requestedShareGroups(opts.query);
+  if (groups.length === 0) return [];
+  const out: StructuredFact[] = [];
+  const seen = new Set<string>();
+  for (const fact of opts.facts) {
+    const sourceId = sourceIdForFact(fact, opts.fallbackSourceId);
+    for (const group of groups) {
+      const groupLetter = group[0];
+      const pattern = new RegExp(
+        `\\b${groupLetter}\\s*(?:Grubu)?\\s+((?:\\d{1,3}(?:[.,]\\d{3})+(?:[.,]\\d+)?|\\d+[.,]\\d+|\\d+)\\s+){2,6}`,
+        "iu",
+      );
+      const match = fact.match(pattern);
+      if (!match?.[0]) continue;
+      const numbers = extractNumbers(match[0]).slice(0, 6);
+      if (numbers.length < 2) continue;
+      const key = `${sourceId}|${group}|${numbers.join("/")}`.toLocaleLowerCase("tr-TR");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: `sf_${hashId(key)}`,
+        kind: "table_row",
+        sourceId,
+        field: `${group} Nakit Tutar ve Oran`,
+        value: numbers.join(" / "),
+        unit: unitForValue(numbers.join(" / ")),
+        confidence: numbers.length >= 4 ? "high" : "medium",
+        table: {
+          rowLabel: group,
+          rawRow: match[0].trim(),
+        },
+        provenance: {
+          quote: fact.slice(0, 520),
+          extractor: "share-group-table-v1",
+        },
+      });
+    }
+  }
+  return out;
+}
+
 export function extractTableNumericFacts(input: TableNumericFactExtractionInput): StructuredFact[] {
   const detection = detectRequestedFields(input.query);
   const requestedFields = detection.requestedFields.filter((field) => field.outputHint === "number");
   if (requestedFields.length === 0 || input.facts.length === 0) return [];
 
   const fallbackSourceId = input.sourceIds?.[0] ?? "unknown-source";
+  const desiredColumn = desiredColumnLabel(input.query);
   const structuredFacts: StructuredFact[] = [];
   const seen = new Set<string>();
 
   for (const field of requestedFields) {
-    let best: { fact: string; alias: string; numbers: string[]; sourceId: string } | null = null;
+    if (field.id === "nakit_tutar_oran") {
+      const groupFacts = extractShareGroupFacts({
+        query: input.query,
+        facts: input.facts,
+        field,
+        fallbackSourceId,
+      });
+      for (const fact of groupFacts) {
+        const key = `${fact.field}|${fact.sourceId}|${fact.value}`.toLocaleLowerCase("tr-TR");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        structuredFacts.push(fact);
+      }
+      if (groupFacts.length > 0) continue;
+    }
+    let best: { fact: string; alias: string; numbers: string[]; sourceId: string; columnLabel?: string; score: number } | null = null;
     for (const fact of input.facts) {
       const normalizedFact = normalize(fact);
       const alias = bestAliasMatch(normalizedFact, field);
-      if (!alias) continue;
-      const snippet = sliceAroundAlias(fact, normalizedFact, alias);
-      const numbers = extractNumbersForField(snippet, field).slice(0, 4);
+      const numberedValues = extractRowNumberedValues(fact, field);
+      if (!alias && numberedValues.length === 0) continue;
+      const snippet = alias ? sliceAroundAlias(fact, normalizedFact, alias) : fact.slice(0, 520);
+      const numbers = (numberedValues.length > 0 ? numberedValues : extractNumbersForField(snippet, field)).slice(0, 4);
       if (numbers.length === 0) continue;
       const sourceId = sourceIdForFact(fact, fallbackSourceId);
-      if (!best || numbers.length > best.numbers.length || fact.length > best.fact.length) {
-        best = { fact, alias, numbers, sourceId };
+      const inferredColumn = inferColumnLabel(fact);
+      const score = columnScore(inferredColumn, desiredColumn) + numbers.length * 8 + Math.min(fact.length / 100, 12);
+      if (!best || score > best.score) {
+        best = { fact, alias: alias ?? `row:${field.id}`, numbers, sourceId, columnLabel: inferredColumn, score };
       }
     }
     if (!best) continue;
@@ -131,7 +237,7 @@ export function extractTableNumericFacts(input: TableNumericFactExtractionInput)
       confidence: confidenceFor(best.numbers, field),
       table: {
         rowLabel: field.label,
-        columnLabel: inferColumnLabel(best.fact),
+        columnLabel: best.columnLabel,
         rawRow: best.fact,
       },
       provenance: {

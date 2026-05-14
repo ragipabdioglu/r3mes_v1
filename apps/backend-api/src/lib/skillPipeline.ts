@@ -409,6 +409,16 @@ function isLikelyFinancialTableRow(value: string): boolean {
   ].some((term) => normalized.includes(normalizeConceptText(term)));
 }
 
+function financialEvidenceLineLimit(value: string): number {
+  const normalized = normalizeConceptText(value);
+  const hasShareGroupTable =
+    normalizedIncludesAny(normalized, getEvidenceLexicon().cashRateTerms) &&
+    /(?:^|\s)a\s+grubu\s+[\d.,-]+/u.test(normalized) &&
+    /(?:^|\s)b\s+grubu\s+[\d.,-]+/u.test(normalized);
+  if (hasShareGroupTable) return 820;
+  return isLikelyFinancialTableRow(value) ? 520 : 320;
+}
+
 function financialTableScope(text: string): string {
   const normalized = normalizeConceptText(text);
   const parts: string[] = [];
@@ -1212,7 +1222,7 @@ export function buildDeterministicEvidenceExtraction(
       opts.kind === "supporting" &&
       (opts.force || strongOverlap || coreOverlap > 0 || (opts.allowGenericGuidance && overlap > 0));
     if (acceptDirect || acceptSupporting) {
-      const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized), isLikelyFinancialTableRow(sanitized) ? 520 : 320);
+      const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized), financialEvidenceLineLimit(sanitized));
       usableFacts.push(line);
       if (opts.kind === "supporting") {
         supportingContext.push(line);
