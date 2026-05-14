@@ -106,6 +106,10 @@ function readEvidenceText(evidence, fields) {
     .join(" ");
 }
 
+function wordCount(value) {
+  return tokenize(value).length;
+}
+
 const CONCEPT_SYNONYMS = new Map([
   ["muayene", ["muayene", "değerlendirme", "degerlendirme", "kontrol", "doktor"]],
   ["kontrol", ["kontrol", "takip", "değerlendirme", "degerlendirme", "doktor"]],
@@ -655,6 +659,48 @@ function scoreCase(testCase, response) {
   const missing = missingRequiredConcepts(content, testCase.requiredConcepts ?? []);
   if (missing.length > 0) {
     failures.push(`missing_concepts:${missing.join(",")}`);
+  }
+
+  if (Array.isArray(testCase.requiredAnswerTerms) && testCase.requiredAnswerTerms.length > 0) {
+    const missingAnswerTerms = testCase.requiredAnswerTerms.filter((term) => !normalize(content).includes(normalize(term)));
+    if (missingAnswerTerms.length > 0) {
+      failures.push(`missing_answer_terms:${missingAnswerTerms.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(testCase.forbiddenAnswerTerms) && testCase.forbiddenAnswerTerms.length > 0) {
+    const forbiddenAnswerTerms = includesForbiddenAny(content, testCase.forbiddenAnswerTerms);
+    if (forbiddenAnswerTerms.length > 0) {
+      failures.push(`forbidden_answer_terms:${forbiddenAnswerTerms.join(",")}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.maxAnswerWords))) {
+    const actualWords = wordCount(content);
+    if (actualWords > Number(testCase.maxAnswerWords)) {
+      failures.push(`answer_words:${actualWords}>${Number(testCase.maxAnswerWords)}`);
+    }
+  }
+
+  if (Number.isFinite(Number(testCase.maxAnswerChars))) {
+    const actualChars = content.length;
+    if (actualChars > Number(testCase.maxAnswerChars)) {
+      failures.push(`answer_chars:${actualChars}>${Number(testCase.maxAnswerChars)}`);
+    }
+  }
+
+  if (testCase.mustNotUseGenericCaution === true) {
+    const genericCautions = [
+      "Dikkat edilmesi gereken nokta",
+      "Kaynakta özel alarm",
+      "Kaynakta açık dayanak yoksa",
+      "risk koşulu açıkça belirtilmemiş",
+      "kesin sonuç veya garanti",
+    ];
+    const matchedGenericCautions = includesForbiddenAny(content, genericCautions);
+    if (matchedGenericCautions.length > 0) {
+      failures.push(`generic_caution:${matchedGenericCautions.join(",")}`);
+    }
   }
 
   if (Array.isArray(testCase.requiredEvidenceTerms) && testCase.requiredEvidenceTerms.length > 0) {

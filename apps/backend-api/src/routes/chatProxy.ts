@@ -78,7 +78,7 @@ interface ChatRetrievalDebug {
   retrievalMode?: "true_hybrid" | "qdrant" | "prisma" | "legacy_hybrid";
   retrievalDiagnostics?: Record<string, unknown>;
   sourceSelection: {
-    selectionMode: "none" | "selected" | "public" | "selected_plus_public";
+    selectionMode: "none" | "selected" | "public" | "selected_plus_public" | "auto_private";
     requestedCollectionIds: string[];
     accessibleCollectionIds: string[];
     searchedCollectionIds: string[];
@@ -220,6 +220,8 @@ function buildSourceSelectionSummary(opts: {
         ? "selected"
       : opts.includePublic
         ? "public"
+      : opts.accessibleCollectionIds.length > 0
+        ? "auto_private"
         : "none";
   const excluded = new Set([...usedCollectionIds, ...opts.requestedCollectionIds]);
   const retrievalSuggestedIds = opts.retrievalSuggestedCollectionIds ?? [];
@@ -1469,18 +1471,18 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         ...summarizeQueryUnderstandingForTrace(queryUnderstanding),
       });
       const sourceAccessTrace = chatTrace.start("source_access");
-      const accessibleCollections =
-        requestedCollectionIds.length > 0 || includePublic
-          ? await resolveAccessibleKnowledgeCollections({
-              walletAddress: wallet,
-              requestedCollectionIds,
-              includePublic,
-            })
-          : [];
+      const accessibleCollections = retrievalQuery
+        ? await resolveAccessibleKnowledgeCollections({
+            walletAddress: wallet,
+            requestedCollectionIds,
+            includePublic,
+          })
+        : [];
       chatTrace.finish(sourceAccessTrace, "ok", {
         requestedCollectionCount: requestedCollectionIds.length,
         accessibleCollectionCount: accessibleCollections.length,
         includePublic,
+        autoPrivateSourceDefault: retrievalQuery.trim().length > 0 && requestedCollectionIds.length === 0 && !includePublic,
       });
 
       if (requestedCollectionIds.length > 0 && accessibleCollections.length !== requestedCollectionIds.length) {

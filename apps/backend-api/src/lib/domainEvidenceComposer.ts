@@ -64,6 +64,27 @@ function asksForBriefNaturalAnswer(query: string): boolean {
   return /\b(kisa|kısa|sakin|basit|dogal|doğal|acikla|açıkla)\b/u.test(normalized) && !asksForStructuredList(query);
 }
 
+function asksToAvoidExtraCaution(query: string): boolean {
+  const normalized = compactForCompare(query);
+  return (
+    /\b(risk|alarm|yorum|uyari|uyarı|tavsiye)\s+(ekleme|katma|yazma|verme)\b/u.test(normalized) ||
+    /\bsadece\s+(sorulan|rakam|rakamlari|rakamları|sayi|sayı|sayilari|sayıları|deger|değer)\b/u.test(normalized)
+  );
+}
+
+function asksForNumericTableAnswer(query: string): boolean {
+  const normalized = compactForCompare(query);
+  return (
+    /\b(tablo|rakam|rakamlari|rakamları|sayi|sayı|sayilari|sayıları|tutar|oran|net donem|net dönem|kar|kâr)\b/u
+      .test(normalized)
+  );
+}
+
+function shouldOmitOptionalCaution(spec: AnswerSpec): boolean {
+  if (lowGroundingLead(spec)) return false;
+  return spec.answerDomain === "finance" && asksForNumericTableAnswer(spec.userQuery) && asksToAvoidExtraCaution(spec.userQuery);
+}
+
 function matchTokens(value: string): string[] {
   const stopwords = new Set([
     "acaba",
@@ -99,6 +120,159 @@ function matchTokens(value: string): string[] {
     .filter((part) => part.length >= 3 && !stopwords.has(part));
   const expandedTokens = buildExpandedQueryTokens(value, null, 96).filter((part) => part.length >= 3 && !stopwords.has(part));
   return Array.from(new Set([...baseTokens, ...expandedTokens]));
+}
+
+const TABLE_QUERY_STOPWORDS = new Set([
+  "acikla",
+  "cevapla",
+  "geciyor",
+  "geçiyor",
+  "hangi",
+  "karistirma",
+  "karıştırma",
+  "kaynak",
+  "kisa",
+  "kısa",
+  "maddelerle",
+  "rakam",
+  "rakamlari",
+  "rakamları",
+  "risk",
+  "sadece",
+  "satiri",
+  "satırı",
+  "soyle",
+  "söyle",
+  "tablosunda",
+  "turkce",
+  "türkçe",
+  "yorum",
+  "yaz",
+]);
+
+const TABLE_LABEL_SIGNAL_TOKENS = new Set([
+  "bagis",
+  "bağış",
+  "dagitilabilir",
+  "dağıtılabilir",
+  "dagitilmasi",
+  "dağıtılması",
+  "diger",
+  "diğer",
+  "donem",
+  "dönem",
+  "grubu",
+  "kar",
+  "kâr",
+  "kaynaklar",
+  "nakit",
+  "net",
+  "olaganustu",
+  "olağanüstü",
+  "oran",
+  "stopaj",
+  "tutar",
+  "yedek",
+  "yedekler",
+]);
+
+function compactTableLabel(value: string): string {
+  return value
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !TABLE_QUERY_STOPWORDS.has(token))
+    .join(" ")
+    .trim();
+}
+
+function isNegatedTableCandidate(normalizedQuery: string, candidate: string): boolean {
+  const index = normalizedQuery.indexOf(candidate);
+  if (index < 0) return false;
+  const window = normalizedQuery.slice(index, index + candidate.length + 24);
+  return /\b(karistirma|karıştırma|kullanma|cevap\s+sanma)\b/u.test(window);
+}
+
+function tableLabelCandidates(query: string): string[] {
+  const normalized = compactForCompare(query);
+  const tokens = normalized
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const candidates: Array<{ label: string; score: number }> = [];
+  for (let size = 2; size <= 6; size += 1) {
+    for (let index = 0; index <= tokens.length - size; index += 1) {
+      const raw = tokens.slice(index, index + size).join(" ");
+      const label = compactTableLabel(raw);
+      if (!label || label.split(/\s+/).length < 2) continue;
+      if (isNegatedTableCandidate(normalized, label)) continue;
+      const labelTokens = label.split(/\s+/);
+      const signalCount = labelTokens.filter((token) => TABLE_LABEL_SIGNAL_TOKENS.has(token)).length;
+      if (signalCount === 0) continue;
+      const score = signalCount * 10 + labelTokens.length;
+      candidates.push({ label, score });
+    }
+  }
+
+  const selected: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates.sort((a, b) => b.score - a.score || b.label.length - a.label.length)) {
+    if (seen.has(candidate.label)) continue;
+    seen.add(candidate.label);
+    selected.push(candidate.label);
+    if (selected.length >= 64) break;
+  }
+  return selected;
+}
+
+function extractNumbers(value: string): string[] {
+  return Array.from(value.matchAll(/\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+[.,]\d+|\d+/gu))
+    .map((match) => match[0])
+    .filter((number) => number.length > 1);
+}
+
+function titleCaseTurkishLabel(label: string): string {
+  return label
+    .split(/\s+/)
+    .map((token) => token.charAt(0).toLocaleUpperCase("tr-TR") + token.slice(1))
+    .join(" ");
+}
+
+function composeFinanceTableFacts(spec: AnswerSpec): string | null {
+  if (!shouldOmitOptionalCaution(spec)) return null;
+  const labels = tableLabelCandidates(spec.userQuery);
+  if (labels.length === 0) return null;
+  const facts = spec.facts.map((fact) => ({
+    original: fact,
+    normalized: compactForCompare(fact),
+    searchable: fact
+      .normalize("NFKC")
+      .toLocaleLowerCase("tr-TR")
+      .replace(/[^\p{L}\p{N}.,\s-]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  }));
+  const lines: string[] = [];
+  const usedLabels: string[] = [];
+  for (const label of labels) {
+    if (usedLabels.some((used) => used.includes(label) || label.includes(used))) continue;
+    const matches = facts
+      .filter((item) => item.normalized.includes(label) || item.searchable.includes(label))
+      .map((fact) => {
+        const start = Math.max(0, fact.searchable.indexOf(label));
+        const snippet = fact.searchable.slice(start, start + 320);
+        const numbers = extractNumbers(snippet)
+          .filter((number) => !/^20$|^21$|^2025$|^1578858$/u.test(number))
+          .slice(0, 3);
+        return { numbers, sourceLength: fact.searchable.length };
+      })
+      .sort((a, b) => b.numbers.length - a.numbers.length || b.sourceLength - a.sourceLength);
+    const numbers = matches[0]?.numbers ?? [];
+    if (numbers.length === 0) continue;
+    lines.push(`- ${titleCaseTurkishLabel(label)}: ${numbers.join(" / ")}`);
+    usedLabels.push(label);
+    if (lines.length >= 4) break;
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 function queryRelevantFact(spec: AnswerSpec, usedText: string): string | null {
@@ -157,7 +331,7 @@ function composeNaturalBrief(spec: AnswerSpec, opts: {
   }
   lines.push(body.join(" "));
 
-  if (!isNearDuplicate(opts.caution, opts.assessment) && !isNearDuplicate(opts.caution, opts.action)) {
+  if (!shouldOmitOptionalCaution(spec) && !isNearDuplicate(opts.caution, opts.assessment) && !isNearDuplicate(opts.caution, opts.action)) {
     lines.push(`Dikkat edilmesi gereken nokta: ${cautionSentence}`);
   }
 
@@ -170,6 +344,8 @@ function composeNaturalBrief(spec: AnswerSpec, opts: {
 
 export function composeAnswerSpec(spec: AnswerSpec): string {
   const policy = getDomainPolicy(spec.answerDomain);
+  const financeTableAnswer = composeFinanceTableFacts(spec);
+  if (financeTableAnswer) return financeTableAnswer;
   const sourceNote =
     spec.groundingConfidence === "low"
       ? "Eldeki kaynak dayanağı sınırlı."
@@ -199,7 +375,7 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
       return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
     }
     lines.push(`Kısa plan:`);
-    uniqueSentences([action, assessment, caution], 3).forEach((item, index) => {
+    uniqueSentences([action, assessment, ...(shouldOmitOptionalCaution(spec) ? [] : [caution])], 3).forEach((item, index) => {
       lines.push(`${index + 1}. ${item}`);
     });
     if (relevantFact) lines.push(`Ek kontrol: ${sentence(relevantFact)}`);
@@ -215,7 +391,7 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
       `Kısa cevap: ${sentence(assessment)}`,
       `Bu, tek başına kesin veya panik gerektiren bir sonuç gibi sunulmamalı; kaynakların desteklediği sınır burada kalıyor.`,
       `${policy.answerLabels.action}: ${sentence(action)}`,
-      `${policy.answerLabels.caution}: ${sentence(caution)}`,
+      ...(shouldOmitOptionalCaution(spec) ? [] : [`${policy.answerLabels.caution}: ${sentence(caution)}`]),
     );
     if (relevantFact) lines.push(`Ek kontrol: ${sentence(relevantFact)}`);
     return lines.join("\n");
@@ -225,7 +401,7 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
     lines.push(
       `${policy.answerLabels.assessment}: ${sentence(assessment)}`,
       `Karşılaştırırken kullanılabilecek dayanak: ${sentence(summary)}`,
-      `${policy.answerLabels.caution}: ${sentence(caution)}`,
+      ...(shouldOmitOptionalCaution(spec) ? [] : [`${policy.answerLabels.caution}: ${sentence(caution)}`]),
       `${policy.answerLabels.action}: ${sentence(action)}`,
     );
     return lines.join("\n");
@@ -238,7 +414,7 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
     lines.push(
       `${sentence(assessment)}`,
       `Pratik anlamı: ${sentence(action)}`,
-      `Dikkat: ${sentence(caution)}`,
+      ...(shouldOmitOptionalCaution(spec) ? [] : [`Dikkat: ${sentence(caution)}`]),
       `Kısa özet: ${sentence(summary)}`,
     );
     return lines.join("\n");
@@ -251,7 +427,7 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
   lines.push(
     `${policy.answerLabels.assessment}: ${sentence(assessment)}`,
     `${policy.answerLabels.action}: ${sentence(action)}`,
-    `${policy.answerLabels.caution}: ${sentence(caution)}`,
+    ...(shouldOmitOptionalCaution(spec) ? [] : [`${policy.answerLabels.caution}: ${sentence(caution)}`]),
     `${policy.answerLabels.summary}: ${sentence(summary)}`,
   );
   return lines.join("\n");

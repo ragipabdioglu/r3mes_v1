@@ -84,6 +84,14 @@ function includesAny(text: string, terms: string[]): boolean {
   return terms.some((term) => normalized.includes(normalize(term)));
 }
 
+function queryExplicitlySuppressesRiskComment(query: string): boolean {
+  const normalized = normalize(query).replace(/\s+/g, " ").trim();
+  return (
+    /\b(risk|alarm|uyar[ıi]|yorum|tavsiye)\s+(?:yorumu\s+)?(?:ekleme|katma|yazma|verme)\b/iu.test(normalized) ||
+    /\bsadece\s+(?:sorulan|rakam|rakamlar[ıi]|say[ıi]|say[ıi]lar[ıi]|de[ğg]er|de[ğg]erleri)\b/iu.test(normalized)
+  );
+}
+
 function addUnique(values: string[], value: string): void {
   if (!values.includes(value)) values.push(value);
 }
@@ -277,7 +285,10 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
 
   if (
     !sourceSuggestionWithoutGrounding &&
-    (includesAny(query, policy.redFlagTerms) || (evidenceRedFlagCount > 0 && evidence?.answerIntent === "triage")) &&
+    (
+      (includesAny(query, policy.redFlagTerms) && !queryExplicitlySuppressesRiskComment(query)) ||
+      (evidenceRedFlagCount > 0 && evidence?.answerIntent === "triage")
+    ) &&
     !includesAny(answerText, policy.requiredGuidanceTerms)
   ) {
     addRail("RED_FLAG_WITHOUT_URGENT_GUIDANCE");

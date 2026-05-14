@@ -31,6 +31,7 @@
     "eval:realistic-rag": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/realistic-rag/golden.jsonl --out artifacts/evals/realistic-rag/latest.json",
     "eval:real-world-stress": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/real-world-stress/golden.jsonl --out artifacts/evals/real-world-stress/latest.json",
     "eval:kap-pilot": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/kap-pilot/golden.jsonl --out artifacts/evals/kap-pilot/latest.json",
+    "eval:answer-quality": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/answer-quality/golden.jsonl --out artifacts/evals/answer-quality/latest.json",
     "eval:production-rag": "node --env-file=.env scripts/run-production-rag-eval.mjs",
     "eval:generate-100": "node ../../infrastructure/scripts/generate-eval-100.mjs",
     "eval:100": "pnpm run eval:generate-100 && node scripts/run-grounded-response-eval.mjs --file artifacts/evals/eval-100/golden.jsonl --out artifacts/evals/eval-100/latest.json",

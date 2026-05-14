@@ -7,7 +7,7 @@ import type {
 import type { DomainRoutePlan } from "./queryRouter.js";
 
 export interface RouteDecisionLogSourceSelection {
-  selectionMode: "none" | "selected" | "public" | "selected_plus_public";
+  selectionMode: "none" | "selected" | "public" | "selected_plus_public" | "auto_private";
   requestedCollectionIds: string[];
   accessibleCollectionIds: string[];
   searchedCollectionIds?: string[];
