@@ -18,6 +18,9 @@ describe("decision config registry", () => {
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBeGreaterThan(0);
     expect(config.feedbackRuntime.mode).toBe("shadow");
     expect(config.feedbackRuntime.promotionMaxAbsDelta).toBe(0.35);
+    expect(config.feedbackProposal.minSignals).toBe(2);
+    expect(config.feedbackProposal.baseScoreDelta).toBe(0.08);
+    expect(config.feedbackProposal.expectedBoostMultiplier).toBe(0.75);
   });
 
   it("keeps env overrides centralized without changing callers", () => {
@@ -35,6 +38,9 @@ describe("decision config registry", () => {
       R3MES_EVIDENCE_SCORE_SHARE_GROUP_DENSE_TABLE_BONUS: "44",
       R3MES_FEEDBACK_RUNTIME_MODE: "active",
       R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA: "0.2",
+      R3MES_FEEDBACK_PROPOSAL_MIN_SIGNALS: "3",
+      R3MES_FEEDBACK_PROPOSAL_BASE_SCORE_DELTA: "0.05",
+      R3MES_FEEDBACK_PROPOSAL_EXPECTED_BOOST_MULTIPLIER: "0.5",
     });
 
     expect(config.version).toBe("lab-v2");
@@ -50,5 +56,8 @@ describe("decision config registry", () => {
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBe(44);
     expect(config.feedbackRuntime.mode).toBe("active");
     expect(config.feedbackRuntime.promotionMaxAbsDelta).toBe(0.2);
+    expect(config.feedbackProposal.minSignals).toBe(3);
+    expect(config.feedbackProposal.baseScoreDelta).toBe(0.05);
+    expect(config.feedbackProposal.expectedBoostMultiplier).toBe(0.5);
   });
 });

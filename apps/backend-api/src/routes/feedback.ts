@@ -56,7 +56,6 @@ import { walletAuthPreHandler } from "../lib/walletAuth.js";
 
 const HASH_RE = /^[a-f0-9]{8,64}$/i;
 const DEFAULT_FEEDBACK_LIMIT = 200;
-const DEFAULT_PROPOSAL_MIN_SIGNALS = 2;
 
 function hashQuery(query: string): string {
   return createHash("sha256").update(query.trim(), "utf8").digest("hex").slice(0, 16);
@@ -239,7 +238,9 @@ function buildImpact(proposal: KnowledgeFeedbackProposalItem): {
   impact: KnowledgeFeedbackProposalImpactItem;
   nextSafeAction: KnowledgeFeedbackProposalImpactResponse["nextSafeAction"];
 } {
-  const promotionMaxAbsDelta = getDecisionConfig().feedbackRuntime.promotionMaxAbsDelta;
+  const decisionConfig = getDecisionConfig();
+  const promotionMaxAbsDelta = decisionConfig.feedbackRuntime.promotionMaxAbsDelta;
+  const proposalConfig = decisionConfig.feedbackProposal;
   const signalCount = evidenceSignalCount(proposal);
   const confidence = Math.max(0, Math.min(1, proposal.confidence));
   const direction =
@@ -251,11 +252,15 @@ function buildImpact(proposal: KnowledgeFeedbackProposalItem): {
   const estimatedScoreDelta =
     direction === 0
       ? 0
-      : Number((direction * Math.min(promotionMaxAbsDelta, 0.08 + signalCount * 0.04) * Math.max(confidence, 0.25)).toFixed(3));
+      : Number((
+        direction *
+        Math.min(promotionMaxAbsDelta, proposalConfig.baseScoreDelta + signalCount * proposalConfig.perSignalScoreDelta) *
+        Math.max(confidence, proposalConfig.minConfidenceFactor)
+      ).toFixed(3));
   const riskLevel =
     proposal.status !== "APPROVED"
       ? "low"
-      : Math.abs(estimatedScoreDelta) >= 0.2 || proposal.action === "PENALIZE_SOURCE"
+      : Math.abs(estimatedScoreDelta) >= proposalConfig.mediumRiskAbsDelta || proposal.action === "PENALIZE_SOURCE"
         ? "medium"
         : "low";
   const rationale = [
@@ -285,7 +290,7 @@ function buildImpact(proposal: KnowledgeFeedbackProposalItem): {
       rationale,
     },
     nextSafeAction:
-      signalCount < DEFAULT_PROPOSAL_MIN_SIGNALS
+      signalCount < proposalConfig.minSignals
         ? "needs_more_feedback"
         : proposal.status === "APPROVED"
           ? "run_eval_before_apply"
@@ -297,6 +302,7 @@ function buildApplyPlan(proposal: KnowledgeFeedbackProposalItem): {
   steps: KnowledgeFeedbackApplyPlanStep[];
   blockedReasons: string[];
 } {
+  const proposalConfig = getDecisionConfig().feedbackProposal;
   const { impact, nextSafeAction } = buildImpact(proposal);
   const blockedReasons = [
     "mutation disabled: controlled apply preview only",
@@ -309,7 +315,10 @@ function buildApplyPlan(proposal: KnowledgeFeedbackProposalItem): {
     blockedReasons.push(`next safe action is ${nextSafeAction}`);
   }
 
-  const absDelta = Math.max(0.03, Math.min(0.25, Math.abs(impact.estimatedScoreDelta)));
+  const absDelta = Math.max(
+    proposalConfig.applyMinAbsDelta,
+    Math.min(proposalConfig.applyMaxAbsDelta, Math.abs(impact.estimatedScoreDelta)),
+  );
   const base = {
     expectedCollectionId: proposal.expectedCollectionId,
     queryHash: proposal.queryHash,
@@ -333,7 +342,7 @@ function buildApplyPlan(proposal: KnowledgeFeedbackProposalItem): {
         id: `${proposal.id}:boost-expected:${proposal.expectedCollectionId}`,
         kind: "BOOST_COLLECTION_SCORE",
         targetCollectionId: proposal.expectedCollectionId,
-        scoreDelta: Math.min(0.18, absDelta * 0.75),
+        scoreDelta: Math.min(proposalConfig.expectedBoostMaxAbsDelta, absDelta * proposalConfig.expectedBoostMultiplier),
         rollback: "Remove this query-scoped expected-source boost.",
         rationale: "Feedback included an expected collection, so the safer preview pairs penalty with a smaller expected-source boost.",
       });
@@ -926,7 +935,7 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
     }
     const user = await ensureUser(wallet);
     const query = req.query as Record<string, unknown>;
-    const minSignals = parsePositiveInt(query.minSignals, DEFAULT_PROPOSAL_MIN_SIGNALS, 20);
+    const minSignals = parsePositiveInt(query.minSignals, getDecisionConfig().feedbackProposal.minSignals, 20);
     const rows = await prisma.knowledgeFeedback.findMany({
       where: { userId: user.id, appliedAt: null },
       orderBy: { createdAt: "desc" },

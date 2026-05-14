@@ -74,6 +74,18 @@ export interface FeedbackRuntimeConfig {
   candidateLimit: number;
 }
 
+export interface FeedbackProposalConfig {
+  minSignals: number;
+  baseScoreDelta: number;
+  perSignalScoreDelta: number;
+  minConfidenceFactor: number;
+  mediumRiskAbsDelta: number;
+  applyMinAbsDelta: number;
+  applyMaxAbsDelta: number;
+  expectedBoostMaxAbsDelta: number;
+  expectedBoostMultiplier: number;
+}
+
 export interface DecisionConfig {
   version: string;
   router: {
@@ -95,6 +107,7 @@ export interface DecisionConfig {
   evidenceCompiler: EvidenceCompilerConfig;
   evidenceScoring: EvidenceScoringConfig;
   feedbackRuntime: FeedbackRuntimeConfig;
+  feedbackProposal: FeedbackProposalConfig;
 }
 
 const DEFAULT_ROUTER_WEIGHTS: RouterWeights = {
@@ -365,6 +378,17 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
       mode: (env.R3MES_FEEDBACK_RUNTIME_MODE ?? "shadow").trim().toLowerCase() === "active" ? "active" : "shadow",
       promotionMaxAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA, 0.35),
       candidateLimit: readPositiveInt(env.R3MES_FEEDBACK_RUNTIME_CANDIDATE_LIMIT, 25),
+    },
+    feedbackProposal: {
+      minSignals: readPositiveInt(env.R3MES_FEEDBACK_PROPOSAL_MIN_SIGNALS, 2),
+      baseScoreDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROPOSAL_BASE_SCORE_DELTA, 0.08),
+      perSignalScoreDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROPOSAL_PER_SIGNAL_DELTA, 0.04),
+      minConfidenceFactor: readPositiveFloat(env.R3MES_FEEDBACK_PROPOSAL_MIN_CONFIDENCE_FACTOR, 0.25),
+      mediumRiskAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROPOSAL_MEDIUM_RISK_ABS_DELTA, 0.2),
+      applyMinAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROPOSAL_APPLY_MIN_ABS_DELTA, 0.03),
+      applyMaxAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROPOSAL_APPLY_MAX_ABS_DELTA, 0.25),
+      expectedBoostMaxAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROPOSAL_EXPECTED_BOOST_MAX_ABS_DELTA, 0.18),
+      expectedBoostMultiplier: readPositiveFloat(env.R3MES_FEEDBACK_PROPOSAL_EXPECTED_BOOST_MULTIPLIER, 0.75),
     },
   };
 }
