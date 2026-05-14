@@ -483,19 +483,13 @@ function queryRejectsConcept(normalizedQuery: string, concept: string): boolean 
 }
 
 function financeTargetedFragments(text: string, query: string): string[] {
+  const lexicon = getEvidenceLexicon();
   const normalizedQuery = normalizeConceptText(query);
   const fragments: string[] = [];
 
   if (
-    (normalizedQuery.includes("grup") || normalizedQuery.includes("grub") || normalizedQuery.includes("group")) &&
-    (
-      normalizedQuery.includes("nakit") ||
-      normalizedQuery.includes("cash") ||
-      normalizedQuery.includes("bedelsiz") ||
-      normalizedQuery.includes("bonus") ||
-      normalizedQuery.includes("oran") ||
-      normalizedQuery.includes("rate")
-    )
+    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.cashRateTerms)
   ) {
     const shareGroupRows = firstTableSegment(text, [
       /(?:GRUBU|PAY\s+GRUBU|SHARE\s+GROUP|GROUP)[\s\S]{0,260}(?:NAK\s*[İI]\s*T|NAK[İI]T|CASH)[\s\S]{0,760}(?:TOPLAM|TOTAL)[\s\S]{0,160}/iu,
@@ -505,7 +499,7 @@ function financeTargetedFragments(text: string, query: string): string[] {
     if (shareGroupRows) fragments.push(`Pay grubu nakit/oran satırları: ${shareGroupRows}`);
   }
 
-  if (normalizedQuery.includes("net donem") && normalizedQuery.includes("spk")) {
+  if (normalizedIncludesAny(normalizedQuery, lexicon.netPeriodTerms) && normalizedIncludesAny(normalizedQuery, lexicon.spkTerms)) {
     const value = firstMatch(text, [
       /SPK[\s\S]{0,24}?Göre[\s\S]{0,260}?(?:^|[^\d])5\.\s+[\d.]+(?:,\d+)?/ium,
       /According\s+to\s+CMB[\s\S]{0,260}?(?:^|[^\d])5\.\s+[\d.]+(?:,\d+)?/ium,
@@ -514,7 +508,7 @@ function financeTargetedFragments(text: string, query: string): string[] {
     if (value) fragments.push(`SPK'ya Göre: 5. Net Dönem Kârı = ${value.match(/(?:^|[^\d])5\.\s+([\d.]+(?:,\d+)?)/u)?.[1] ?? value}`);
   }
 
-  if (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) {
+  if (normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms)) {
     const withholding = firstMatch(text, [
       /(?:stopaj|withholding\s+tax)[\s\S]{0,340}?(?:0\s*%|%\s*0|%0|0,00)[\s\S]{0,340}?(?:5\s*%|%\s*5|%5|5,00)/iu,
       /(?:%|percent|oranı|orani|rate)[\s\S]{0,100}?(?:0|5)[\s\S]{0,260}?(?:%|percent|oranı|orani|rate)[\s\S]{0,100}?(?:0|5)/iu,
@@ -526,16 +520,15 @@ function financeTargetedFragments(text: string, query: string): string[] {
   }
 
   if (
-    normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") ||
-    normalizedQuery.includes("other sources") ||
+    normalizedIncludesAny(normalizedQuery, lexicon.otherSourcesTerms) ||
     (
-      (normalizedQuery.includes("olaganustu yedek") || normalizedQuery.includes("extraordinary reserves")) &&
+      normalizedIncludesAny(normalizedQuery, lexicon.otherSourcesTerms) &&
       !queryRejectsConcept(normalizedQuery, "olaganustu yedek") &&
       !queryRejectsConcept(normalizedQuery, "extraordinary reserves")
     )
   ) {
     const wantsOnlyOtherSources =
-      (normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") || normalizedQuery.includes("other sources")) &&
+      normalizedIncludesAny(normalizedQuery, lexicon.otherSourcesTerms) &&
       (
         queryRejectsConcept(normalizedQuery, "olaganustu yedek") ||
         queryRejectsConcept(normalizedQuery, "extraordinary reserves")
@@ -669,17 +662,18 @@ function evidenceRelevanceScore(query: string, fact: string): number {
 }
 
 function addQueryLanguageAlias(query: string, fragment: string): string {
+  const lexicon = getEvidenceLexicon();
   const normalizedQuery = normalizeConceptText(query);
   const normalizedFragment = normalizeConceptText(fragment);
   if (
-    normalizedQuery.includes("stopaj") &&
+    normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms) &&
     normalizedFragment.includes("withholding") &&
     !normalizedFragment.includes("stopaj")
   ) {
     return `Stopaj oranı / withholding tax rate: ${fragment}`;
   }
   if (
-    normalizedQuery.includes("spk") &&
+    normalizedIncludesAny(normalizedQuery, lexicon.spkTerms) &&
     normalizedFragment.includes("capital markets board") &&
     !normalizedFragment.includes("spk")
   ) {
@@ -696,14 +690,15 @@ function rankEvidenceFacts(query: string, facts: string[]): string[] {
 }
 
 function promoteCriticalDirectFacts(query: string, directFacts: string[], usableFacts: string[]): string[] {
+  const lexicon = getEvidenceLexicon();
   const normalizedQuery = normalizeConceptText(query);
   const promoted: string[] = [];
-  if (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) {
+  if (normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms)) {
     promoted.push(
       ...usableFacts.filter((fact) => {
         const normalizedFact = normalizeConceptText(fact);
         return (
-          (normalizedFact.includes("stopaj") || normalizedFact.includes("withholding")) &&
+          normalizedIncludesAny(normalizedFact, lexicon.withholdingTerms) &&
           (
             /(?:^|\s)0(?:\s|$)|0,00|%0/u.test(normalizedFact) ||
             normalizedFact.includes("group b") ||
@@ -714,13 +709,8 @@ function promoteCriticalDirectFacts(query: string, directFacts: string[], usable
     );
   }
   if (
-    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
-    (normalizedQuery.includes("nakit") ||
-      normalizedQuery.includes("cash") ||
-      normalizedQuery.includes("bedelsiz") ||
-      normalizedQuery.includes("bonus") ||
-      normalizedQuery.includes("oran") ||
-      normalizedQuery.includes("rate"))
+    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.cashRateTerms)
   ) {
     promoted.push(
       ...usableFacts.filter((fact) => {
@@ -728,12 +718,7 @@ function promoteCriticalDirectFacts(query: string, directFacts: string[], usable
         return (
           /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
           /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
-          (normalizedFact.includes("cash") ||
-            normalizedFact.includes("nakit") ||
-            normalizedFact.includes("bonus") ||
-            normalizedFact.includes("bedelsiz") ||
-            normalizedFact.includes("rate") ||
-            normalizedFact.includes("oran"))
+          normalizedIncludesAny(normalizedFact, lexicon.cashRateTerms)
         );
       }),
     );
@@ -742,16 +727,11 @@ function promoteCriticalDirectFacts(query: string, directFacts: string[], usable
 }
 
 function asksForSourceTitleEvidence(query: string): boolean {
+  const lexicon = getEvidenceLexicon();
   const normalized = normalizeConceptText(query);
   const asksForTableDetails =
-    normalized.includes("grubu") ||
-    normalized.includes("group") ||
-    normalized.includes("nakit") ||
-    normalized.includes("cash") ||
-    normalized.includes("bonus") ||
-    normalized.includes("bedelsiz") ||
-    normalized.includes("oran") ||
-    normalized.includes("rate");
+    normalizedIncludesAny(normalized, lexicon.shareGroupTerms) ||
+    normalizedIncludesAny(normalized, lexicon.cashRateTerms);
   return (
     (normalized.includes("kaynak") && normalized.includes("baslik")) ||
     normalized.includes("bildirim indeksi") ||
