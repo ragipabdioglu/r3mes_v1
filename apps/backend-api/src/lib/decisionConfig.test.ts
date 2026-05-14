@@ -18,6 +18,8 @@ describe("decision config registry", () => {
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBeGreaterThan(0);
     expect(config.evidenceScoring.answerFactOverlapWeight).toBe(6);
     expect(config.evidenceScoring.fragmentMinScore).toBe(-8);
+    expect(config.evidenceLexicon.withholdingTerms).toContain("stopaj");
+    expect(config.evidenceLexicon.cashRateTerms).toContain("cash");
     expect(config.feedbackRuntime.mode).toBe("shadow");
     expect(config.feedbackRuntime.promotionMaxAbsDelta).toBe(0.35);
     expect(config.feedbackProposal.minSignals).toBe(2);
@@ -40,6 +42,8 @@ describe("decision config registry", () => {
       R3MES_EVIDENCE_SCORE_SHARE_GROUP_DENSE_TABLE_BONUS: "44",
       R3MES_EVIDENCE_SCORE_ANSWER_FACT_OVERLAP_WEIGHT: "7",
       R3MES_EVIDENCE_SCORE_FRAGMENT_MIN_SCORE: "0",
+      R3MES_EVIDENCE_LEXICON_WITHHOLDING_TERMS: "tevkifat,withholding",
+      R3MES_EVIDENCE_LEXICON_CASH_RATE_TERMS: "nakdi,oran",
       R3MES_FEEDBACK_RUNTIME_MODE: "active",
       R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA: "0.2",
       R3MES_FEEDBACK_PROPOSAL_MIN_SIGNALS: "3",
@@ -60,6 +64,8 @@ describe("decision config registry", () => {
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBe(44);
     expect(config.evidenceScoring.answerFactOverlapWeight).toBe(7);
     expect(config.evidenceScoring.fragmentMinScore).toBe(0);
+    expect(config.evidenceLexicon.withholdingTerms).toEqual(["tevkifat", "withholding"]);
+    expect(config.evidenceLexicon.cashRateTerms).toEqual(["nakdi", "oran"]);
     expect(config.feedbackRuntime.mode).toBe("active");
     expect(config.feedbackRuntime.promotionMaxAbsDelta).toBe(0.2);
     expect(config.feedbackProposal.minSignals).toBe(3);

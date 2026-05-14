@@ -1,6 +1,7 @@
 import type { AnswerDomain, AnswerIntent, GroundedMedicalAnswer, GroundingConfidence } from "./answerSchema.js";
 import type { CompiledEvidence } from "./compiledEvidence.js";
 import { getDecisionConfig } from "./decisionConfig.js";
+import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 export interface AnswerSpec {
@@ -222,6 +223,7 @@ function hasNumericTableValue(value: string): boolean {
 
 function factQualityScore(value: string, userQuery: string): number {
   const scoring = getDecisionConfig().evidenceScoring;
+  const lexicon = getEvidenceLexicon();
   const tokens = factTokens(value);
   if (tokens.length === 0) return -100;
   const queryTokens = new Set(factTokens(userQuery));
@@ -243,48 +245,43 @@ function factQualityScore(value: string, userQuery: string): number {
     : 0;
   const numericTableBonus = hasNumericTableValue(value) ? scoring.tableRowBonus : 0;
   const shareGroupTableBonus =
-    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
-    (normalizedQuery.includes("nakit") || normalizedQuery.includes("cash") || normalizedQuery.includes("oran") || normalizedQuery.includes("rate") || normalizedQuery.includes("bonus")) &&
-    (normalizedValue.includes("grubu") || normalizedValue.includes("group")) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.cashRateTerms) &&
+    normalizedIncludesAny(normalizedValue, lexicon.shareGroupTerms) &&
     (/\ba\s+grubu\b|\ba\s+\d/u.test(normalizedValue)) &&
     (/\bb\s+grubu\b|\bb\s+\d/u.test(normalizedValue)) &&
     hasNumericTableValue(value)
       ? scoring.answerShareGroupTableBonus
       : 0;
   const denseShareGroupTableBonus =
-    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
-    (normalizedQuery.includes("nakit") ||
-      normalizedQuery.includes("cash") ||
-      normalizedQuery.includes("oran") ||
-      normalizedQuery.includes("rate") ||
-      normalizedQuery.includes("bonus") ||
-      normalizedQuery.includes("bedelsiz")) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.cashRateTerms) &&
     /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedValue) &&
     /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedValue)
       ? scoring.answerShareGroupDenseTableBonus
       : 0;
   const withholdingGroupRateBonus =
-    (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
-    (normalizedValue.includes("stopaj") || normalizedValue.includes("withholding")) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms) &&
+    normalizedIncludesAny(normalizedValue, lexicon.withholdingTerms) &&
     /(?:%?\s*0|0\s*%|0,00)/u.test(normalizedValue) &&
     /(?:%?\s*5|5\s*%|5,00)/u.test(normalizedValue)
       ? scoring.answerWithholdingGroupRateBonus
       : 0;
   const exactFinanceBonus =
-    normalizedQuery.includes("net donem") && normalizedValue.includes("net donem")
+    normalizedIncludesAny(normalizedQuery, lexicon.netPeriodTerms) && normalizedIncludesAny(normalizedValue, lexicon.netPeriodTerms)
       ? scoring.exactNetPeriodBonus
-      : normalizedQuery.includes("donem kari") && normalizedValue.includes("donem kari")
+      : normalizedIncludesAny(normalizedQuery, lexicon.periodProfitTerms) && normalizedIncludesAny(normalizedValue, lexicon.periodProfitTerms)
         ? scoring.exactPeriodProfitBonus
         : 0;
   const plainPeriodProfitBonus =
-    normalizedQuery.includes("donem kari") &&
-    !normalizedQuery.includes("sadece net donem") &&
+    normalizedIncludesAny(normalizedQuery, lexicon.periodProfitTerms) &&
+    !normalizedQuery.includes(`sadece ${lexicon.netPeriodTerms[0] ?? "net donem"}`) &&
     /(?:^|:\s*)\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(value)
       ? scoring.plainPeriodProfitBonus
       : 0;
   const unrequestedNetDistributablePenalty =
-    normalizedValue.includes("dagitilabilir") &&
-    !normalizedQuery.includes("dagitilabilir") &&
+    normalizedIncludesAny(normalizedValue, lexicon.distributableTerms) &&
+    !normalizedIncludesAny(normalizedQuery, lexicon.distributableTerms) &&
     shareGroupTableBonus === 0 &&
     denseShareGroupTableBonus === 0 &&
     withholdingGroupRateBonus === 0

@@ -70,6 +70,17 @@ export interface EvidenceScoringConfig {
   answerFirstUsefulFactMinScore: number;
 }
 
+export interface EvidenceLexiconConfig {
+  shareGroupTerms: string[];
+  cashRateTerms: string[];
+  withholdingTerms: string[];
+  spkTerms: string[];
+  otherSourcesTerms: string[];
+  netPeriodTerms: string[];
+  periodProfitTerms: string[];
+  distributableTerms: string[];
+}
+
 export interface EvidenceBudgetConfig {
   directFactLimit: number;
   supportingFactLimit: number;
@@ -125,6 +136,7 @@ export interface DecisionConfig {
   evidenceBudget: EvidenceBudgetConfig;
   evidenceCompiler: EvidenceCompilerConfig;
   evidenceScoring: EvidenceScoringConfig;
+  evidenceLexicon: EvidenceLexiconConfig;
   feedbackRuntime: FeedbackRuntimeConfig;
   feedbackProposal: FeedbackProposalConfig;
 }
@@ -206,6 +218,17 @@ const DEFAULT_EVIDENCE_SCORING: EvidenceScoringConfig = {
   answerFirstUsefulFactMinScore: 1,
 };
 
+const DEFAULT_EVIDENCE_LEXICON: EvidenceLexiconConfig = {
+  shareGroupTerms: ["grubu", "grub", "group", "pay grubu"],
+  cashRateTerms: ["nakit", "cash", "oran", "rate", "bonus", "bedelsiz"],
+  withholdingTerms: ["stopaj", "withholding"],
+  spkTerms: ["spk", "capital markets board"],
+  otherSourcesTerms: ["dagitilmasi ongorulen diger kaynak", "other sources", "olaganustu yedek", "extraordinary reserves"],
+  netPeriodTerms: ["net donem"],
+  periodProfitTerms: ["donem kari", "donem kâri"],
+  distributableTerms: ["dagitilabilir"],
+};
+
 const ROUTER_WEIGHT_ENV_KEYS: Record<keyof RouterWeights, string> = {
   profileEmbedding: "R3MES_ROUTER_WEIGHT_PROFILE_EMBEDDING",
   lexicalKeyword: "R3MES_ROUTER_WEIGHT_LEXICAL_KEYWORD",
@@ -265,6 +288,17 @@ const EVIDENCE_ENV_KEYS: Record<keyof EvidenceScoringConfig, string> = {
   fragmentMinScore: "R3MES_EVIDENCE_SCORE_FRAGMENT_MIN_SCORE",
   answerFactMinScore: "R3MES_EVIDENCE_SCORE_ANSWER_FACT_MIN_SCORE",
   answerFirstUsefulFactMinScore: "R3MES_EVIDENCE_SCORE_ANSWER_FIRST_USEFUL_FACT_MIN_SCORE",
+};
+
+const EVIDENCE_LEXICON_ENV_KEYS: Record<keyof EvidenceLexiconConfig, string> = {
+  shareGroupTerms: "R3MES_EVIDENCE_LEXICON_SHARE_GROUP_TERMS",
+  cashRateTerms: "R3MES_EVIDENCE_LEXICON_CASH_RATE_TERMS",
+  withholdingTerms: "R3MES_EVIDENCE_LEXICON_WITHHOLDING_TERMS",
+  spkTerms: "R3MES_EVIDENCE_LEXICON_SPK_TERMS",
+  otherSourcesTerms: "R3MES_EVIDENCE_LEXICON_OTHER_SOURCES_TERMS",
+  netPeriodTerms: "R3MES_EVIDENCE_LEXICON_NET_PERIOD_TERMS",
+  periodProfitTerms: "R3MES_EVIDENCE_LEXICON_PERIOD_PROFIT_TERMS",
+  distributableTerms: "R3MES_EVIDENCE_LEXICON_DISTRIBUTABLE_TERMS",
 };
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -381,6 +415,19 @@ function readEvidenceScoringConfig(env: NodeJS.ProcessEnv): EvidenceScoringConfi
   return merged;
 }
 
+function readEvidenceLexiconConfig(env: NodeJS.ProcessEnv): EvidenceLexiconConfig {
+  const parsed = readJsonObject<Partial<Record<keyof EvidenceLexiconConfig, unknown>>>(env.R3MES_EVIDENCE_LEXICON_JSON);
+  const merged: EvidenceLexiconConfig = { ...DEFAULT_EVIDENCE_LEXICON };
+  for (const key of Object.keys(DEFAULT_EVIDENCE_LEXICON) as Array<keyof EvidenceLexiconConfig>) {
+    const jsonValue = Array.isArray(parsed[key])
+      ? (parsed[key] as unknown[]).map((item) => String(item).trim()).filter(Boolean)
+      : [];
+    if (jsonValue.length > 0) merged[key] = jsonValue;
+    merged[key] = readCsv(env[EVIDENCE_LEXICON_ENV_KEYS[key]], merged[key]);
+  }
+  return merged;
+}
+
 export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): DecisionConfig {
   return {
     version: env.R3MES_DECISION_CONFIG_VERSION?.trim() || DECISION_CONFIG_VERSION,
@@ -431,6 +478,7 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
       contradictionDowngradesToLow: readBoolean(env.R3MES_EVIDENCE_COMPILER_CONTRADICTION_LOW, true),
     },
     evidenceScoring: readEvidenceScoringConfig(env),
+    evidenceLexicon: readEvidenceLexiconConfig(env),
     feedbackRuntime: {
       mode: (env.R3MES_FEEDBACK_RUNTIME_MODE ?? "shadow").trim().toLowerCase() === "active" ? "active" : "shadow",
       promotionMaxAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA, 0.35),

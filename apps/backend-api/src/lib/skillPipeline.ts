@@ -2,6 +2,7 @@ import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import type { AnswerIntent } from "./answerSchema.js";
 import { expandConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { getDecisionConfig } from "./decisionConfig.js";
+import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
 
 export type SkillName =
   | "intent-router"
@@ -370,33 +371,36 @@ function hasFinancialTableValue(value: string): boolean {
 }
 
 function isLikelyFinancialTableRow(value: string): boolean {
+  const lexicon = getEvidenceLexicon();
   const normalized = normalizeConceptText(value);
   if (!hasFinancialTableValue(value)) return false;
   const hasShareGroupTableRows =
     /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalized) &&
     /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalized) &&
-    (normalized.includes("cash") ||
-      normalized.includes("nakit") ||
-      normalized.includes("bonus") ||
-      normalized.includes("bedelsiz") ||
-      normalized.includes("rate") ||
-      normalized.includes("oran"));
+    normalizedIncludesAny(normalized, lexicon.cashRateTerms);
   if (hasShareGroupTableRows) return true;
-  const hasLineItemLabel = /^\s*\d{1,2}\.\s*\p{L}/u.test(value) || /(net\s+donem|donem\s+kari|donem\s+kâri|dagitilabilir|profit|dividend|stopaj|withholding)/u.test(normalized);
+  const hasLineItemLabel =
+    /^\s*\d{1,2}\.\s*\p{L}/u.test(value) ||
+    normalizedIncludesAny(normalized, [
+      ...lexicon.netPeriodTerms,
+      ...lexicon.periodProfitTerms,
+      ...lexicon.distributableTerms,
+      ...lexicon.withholdingTerms,
+      "profit",
+      "dividend",
+    ]);
   if (!hasLineItemLabel) return false;
   return [
-    "donem kari",
-    "donem kâri",
-    "net donem",
-    "dagitilabilir",
-    "spk",
+    ...lexicon.periodProfitTerms,
+    ...lexicon.netPeriodTerms,
+    ...lexicon.distributableTerms,
+    ...lexicon.spkTerms,
     "yasal kayit",
     "tax",
     "profit",
     "net profit",
     "dividend",
-    "stopaj",
-    "withholding",
+    ...lexicon.withholdingTerms,
     "sermaye",
     "capital",
   ].some((term) => normalized.includes(normalizeConceptText(term)));
@@ -557,6 +561,7 @@ function financeTargetedFragments(text: string, query: string): string[] {
 
 function evidenceRelevanceScore(query: string, fact: string): number {
   const scoring = getDecisionConfig().evidenceScoring;
+  const lexicon = getEvidenceLexicon();
   const normalizedQuery = normalizeConceptText(query);
   const normalizedFact = normalizeConceptText(fact);
   const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
@@ -574,33 +579,34 @@ function evidenceRelevanceScore(query: string, fact: string): number {
   const tableValueBonus = hasFinancialTableValue(fact) ? scoring.tableValueBonus : 0;
   const tableRowBonus = isLikelyFinancialTableRow(fact) ? scoring.tableRowBonus : 0;
   const exactPhraseBonus =
-    normalizedQuery.includes("net donem") && normalizedFact.includes("net donem")
+    normalizedIncludesAny(normalizedQuery, lexicon.netPeriodTerms) && normalizedIncludesAny(normalizedFact, lexicon.netPeriodTerms)
       ? scoring.exactNetPeriodBonus
-      : normalizedQuery.includes("donem kari") && normalizedFact.includes("donem kari")
+      : normalizedIncludesAny(normalizedQuery, lexicon.periodProfitTerms) && normalizedIncludesAny(normalizedFact, lexicon.periodProfitTerms)
         ? scoring.exactPeriodProfitBonus
         : 0;
   const requestedPlainPeriodProfit =
-    normalizedQuery.includes("donem kari") && !normalizedQuery.includes("sadece net donem");
+    normalizedIncludesAny(normalizedQuery, lexicon.periodProfitTerms) &&
+    !normalizedQuery.includes(`sadece ${lexicon.netPeriodTerms[0] ?? "net donem"}`);
   const plainPeriodProfitBonus =
     requestedPlainPeriodProfit && /(?:^|:\s*)\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(fact)
       ? scoring.plainPeriodProfitBonus
       : 0;
   const shortRelevantBonus = fact.length <= 360 ? scoring.shortRelevantBonus : 0;
   const spkScopeBonus =
-    normalizedQuery.includes("spk") && normalizedFact.includes("spk")
+    normalizedIncludesAny(normalizedQuery, lexicon.spkTerms) && normalizedFact.includes("spk")
       ? scoring.spkScopeBonus
-      : normalizedQuery.includes("spk") && normalizedFact.includes("capital markets board")
+      : normalizedIncludesAny(normalizedQuery, lexicon.spkTerms) && normalizedFact.includes("capital markets board")
         ? scoring.spkEnglishScopeBonus
         : 0;
   const stopajScopeBonus =
-    (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
-    (normalizedFact.includes("stopaj") || normalizedFact.includes("withholding"))
+    normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms) &&
+    normalizedIncludesAny(normalizedFact, lexicon.withholdingTerms)
       ? scoring.stopajScopeBonus
       : 0;
   const stopajGroupRateBonus =
-    (normalizedQuery.includes("stopaj") || normalizedQuery.includes("withholding")) &&
-    (normalizedQuery.includes("b") || normalizedQuery.includes("c") || normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
-    (normalizedFact.includes("stopaj") || normalizedFact.includes("withholding")) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms) &&
+    (normalizedQuery.includes("b") || normalizedQuery.includes("c") || normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms)) &&
+    normalizedIncludesAny(normalizedFact, lexicon.withholdingTerms) &&
     (normalizedFact.includes("b") || normalizedFact.includes("group b") || normalizedFact.includes("b grubu")) &&
     (normalizedFact.includes("c") || normalizedFact.includes("group c") || normalizedFact.includes("c grubu")) &&
     /(?:%?\s*0|0\s*%|0,00)/u.test(normalizedFact) &&
@@ -608,29 +614,19 @@ function evidenceRelevanceScore(query: string, fact: string): number {
       ? scoring.stopajGroupRateBonus
       : 0;
   const otherSourcesScopeBonus =
-    (normalizedQuery.includes("dagitilmasi ongorulen diger kaynak") ||
-      normalizedQuery.includes("other sources") ||
-      normalizedQuery.includes("olaganustu yedek")) &&
-    (normalizedFact.includes("dagitilmasi ongorulen diger kaynak") ||
-      normalizedFact.includes("other sources") ||
-      normalizedFact.includes("olaganustu yedek") ||
-      normalizedFact.includes("extraordinary reserves"))
+    normalizedIncludesAny(normalizedQuery, lexicon.otherSourcesTerms) &&
+    normalizedIncludesAny(normalizedFact, lexicon.otherSourcesTerms)
       ? scoring.otherSourcesScopeBonus
       : 0;
   const shareGroupScopeBonus =
-    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
-    (normalizedFact.includes("grubu") || normalizedFact.includes("group") || normalizedFact.includes("pay grubu")) &&
-    (normalizedFact.includes("nakit") || normalizedFact.includes("cash") || normalizedFact.includes("bedelsiz") || normalizedFact.includes("bonus") || normalizedFact.includes("rate") || normalizedFact.includes("oran"))
+    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
+    normalizedIncludesAny(normalizedFact, lexicon.shareGroupTerms) &&
+    normalizedIncludesAny(normalizedFact, lexicon.cashRateTerms)
       ? scoring.shareGroupScopeBonus
       : 0;
   const shareGroupDenseTableBonus =
-    (normalizedQuery.includes("grubu") || normalizedQuery.includes("group")) &&
-    (normalizedQuery.includes("nakit") ||
-      normalizedQuery.includes("cash") ||
-      normalizedQuery.includes("bedelsiz") ||
-      normalizedQuery.includes("bonus") ||
-      normalizedQuery.includes("oran") ||
-      normalizedQuery.includes("rate")) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
+    normalizedIncludesAny(normalizedQuery, lexicon.cashRateTerms) &&
     /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
     /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact)
       ? scoring.shareGroupDenseTableBonus
@@ -641,8 +637,8 @@ function evidenceRelevanceScore(query: string, fact: string): number {
       ? scoring.rejectedExtraordinaryReservePenalty
       : 0;
   const unrequestedNetDistributablePenalty =
-    normalizedFact.includes("dagitilabilir") &&
-    !normalizedQuery.includes("dagitilabilir") &&
+    normalizedIncludesAny(normalizedFact, lexicon.distributableTerms) &&
+    !normalizedIncludesAny(normalizedQuery, lexicon.distributableTerms) &&
     shareGroupScopeBonus === 0 &&
     stopajGroupRateBonus === 0 &&
     otherSourcesScopeBonus === 0 &&
