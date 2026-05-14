@@ -1479,6 +1479,20 @@ function isFeeConfigured(): boolean {
   );
 }
 
+function isSourceDiscoveryQuery(query: string): boolean {
+  const normalized = query
+    .normalize("NFKC")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return false;
+  return [
+    /\bhangi\s+(?:kaynak|kaynağa|kaynaga|kaynaktan|collection|koleksiyon|belge|dokuman|doküman|veri)\b/u,
+    /\b(?:kaynak|kaynağa|kaynaga|kaynaktan|collection|koleksiyon|belge|dokuman|doküman)\b[\s\S]{0,60}\b(?:konusabilirsin|konuşabilirsin|kullanabilirsin|onerirsin|önerirsin|secersin|seçersin)\b/u,
+  ].some((pattern) => pattern.test(normalized));
+}
+
 export async function registerChatProxyRoutes(app: FastifyInstance) {
   app.post(
     "/v1/chat/completions",
@@ -1544,9 +1558,11 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         contextUserMessageCount: extractedRetrievalQuery.contextUserMessageCount,
       });
       const queryUnderstanding = buildQueryUnderstanding(retrievalQuery);
+      const sourceDiscoveryIntent = isSourceDiscoveryQuery(retrievalQuery);
       chatTrace.recordNow("query_understanding", "ok", {
         name: "query_understanding",
         decisionConfigVersion: getDecisionConfigVersion(),
+        sourceDiscoveryIntent,
         ...summarizeQueryUnderstandingForTrace(queryUnderstanding),
       });
       const sourceAccessTrace = chatTrace.start("source_access");
@@ -1603,7 +1619,16 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         );
       }
 
-      const queryUnderstandingProfiles = queryUnderstandingProfilesForCollections(accessibleCollections);
+      const activeAccessibleCollections = sourceDiscoveryIntent ? [] : accessibleCollections;
+      if (sourceDiscoveryIntent) {
+        chatTrace.recordNow("source_access", "ok", {
+          name: "source_discovery_intent",
+          reason: "user asked which source/collection can answer; retrieval answer path disabled",
+          accessibleCollectionCount: accessibleCollections.length,
+        });
+      }
+
+      const queryUnderstandingProfiles = queryUnderstandingProfilesForCollections(activeAccessibleCollections);
       const retrievalQueryUnderstanding = queryUnderstandingProfiles.length > 0
         ? buildQueryUnderstanding(retrievalQuery, { profiles: queryUnderstandingProfiles })
         : queryUnderstanding;
@@ -1639,7 +1664,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         plannedQueryChanged: plannedRetrievalQuery !== retrievalQuery,
       });
 
-      const accessibleCollectionIds = accessibleCollections.map((item) => item.id);
+      const accessibleCollectionIds = activeAccessibleCollections.map((item) => item.id);
       const retrievalTrace = chatTrace.start("retrieval");
       const retrievalBudget = resolveRetrievalBudget({
         routePlan,
@@ -1650,8 +1675,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       });
       const selectedSourcesAreStrictIneligible =
         requestedCollectionIds.length > 0 &&
-        accessibleCollections.length > 0 &&
-        accessibleCollections.every((collection) => !readKnowledgeCollectionStrictRouteEligible(collection));
+        activeAccessibleCollections.length > 0 &&
+        activeAccessibleCollections.every((collection) => !readKnowledgeCollectionStrictRouteEligible(collection));
       const retrievalRoutePlan = selectedSourcesAreStrictIneligible ? null : routePlan;
       if (selectedSourcesAreStrictIneligible) {
         chatTrace.recordNow("query_planning", "ok", {
@@ -1810,7 +1835,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const selectedCollectionDomainForAnswer =
         retrieval.sources.length > 0 && sourceSelection.routeDecision.mode !== "suggest"
           ? inferKnowledgeCollectionAnswerDomain({
-              collections: accessibleCollections,
+              collections: activeAccessibleCollections,
               usedCollectionIds: sourceSelection.usedCollectionIds,
             })
           : null;

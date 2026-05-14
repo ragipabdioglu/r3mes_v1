@@ -86,6 +86,15 @@ function shouldOmitOptionalCaution(spec: AnswerSpec): boolean {
   return spec.answerDomain === "finance" && asksForNumericTableAnswer(spec.userQuery) && asksToAvoidExtraCaution(spec.userQuery);
 }
 
+function shouldIncludeOptionalCaution(spec: AnswerSpec, answerPlan?: AnswerPlan): boolean {
+  if (shouldOmitOptionalCaution(spec)) return false;
+  if (lowGroundingLead(spec)) return true;
+  if (spec.answerDomain === "medical" || spec.answerDomain === "finance") return true;
+  if (spec.answerIntent === "triage") return true;
+  if (answerPlan?.outputFormat === "bullets" || asksForBriefNaturalAnswer(spec.userQuery)) return false;
+  return true;
+}
+
 function matchTokens(value: string): string[] {
   const stopwords = new Set([
     "acaba",
@@ -329,6 +338,7 @@ function lowGroundingLead(spec: AnswerSpec): string | null {
 }
 
 function composeNaturalBrief(spec: AnswerSpec, opts: {
+  answerPlan?: AnswerPlan;
   assessment: string;
   action: string;
   caution: string;
@@ -351,7 +361,11 @@ function composeNaturalBrief(spec: AnswerSpec, opts: {
   }
   lines.push(body.join(" "));
 
-  if (!shouldOmitOptionalCaution(spec) && !isNearDuplicate(opts.caution, opts.assessment) && !isNearDuplicate(opts.caution, opts.action)) {
+  if (
+    shouldIncludeOptionalCaution(spec, opts.answerPlan) &&
+    !isNearDuplicate(opts.caution, opts.assessment) &&
+    !isNearDuplicate(opts.caution, opts.action)
+  ) {
     lines.push(`Dikkat edilmesi gereken nokta: ${cautionSentence}`);
   }
 
@@ -360,6 +374,25 @@ function composeNaturalBrief(spec: AnswerSpec, opts: {
   }
 
   return lines.join("\n");
+}
+
+function composeBulletAnswer(spec: AnswerSpec, answerPlan: AnswerPlan, opts: {
+  assessment: string;
+  action: string;
+  caution: string;
+  summary: string;
+  relevantFact: string | null;
+}): string {
+  const candidates = [
+    opts.action,
+    opts.assessment,
+    ...(opts.relevantFact ? [opts.relevantFact] : []),
+    ...(shouldIncludeOptionalCaution(spec, answerPlan) ? [opts.caution] : []),
+    opts.summary,
+  ];
+  return uniqueSentences(candidates, 4)
+    .map((item) => `- ${item}`)
+    .join("\n");
 }
 
 export function composeAnswerSpec(spec: AnswerSpec): string {
@@ -383,9 +416,14 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
   const lines: string[] = [];
   if (lead) lines.push(lead);
 
+  if (answerPlan.outputFormat === "bullets") {
+    const bullets = composeBulletAnswer(spec, answerPlan, { assessment, action, caution, summary, relevantFact });
+    return lead ? `${lead}\n${bullets}` : bullets;
+  }
+
   if (spec.answerIntent === "triage") {
     lines.push(
-      `${policy.answerLabels.caution}: ${sentence(caution)}`,
+      ...(shouldIncludeOptionalCaution(spec, answerPlan) ? [`${policy.answerLabels.caution}: ${sentence(caution)}`] : []),
       `${policy.answerLabels.assessment}: ${sentence(assessment)}`,
       `${policy.answerLabels.action}: ${sentence(action)}`,
       `Özet: ${sentence(summary)}`,
@@ -395,10 +433,10 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
 
   if (spec.answerIntent === "steps") {
     if (asksForBriefNaturalAnswer(spec.userQuery)) {
-      return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
+      return composeNaturalBrief(spec, { answerPlan, assessment, action, caution, summary, relevantFact });
     }
     lines.push(`Kısa plan:`);
-    uniqueSentences([action, assessment, ...(shouldOmitOptionalCaution(spec) ? [] : [caution])], 3).forEach((item, index) => {
+    uniqueSentences([action, assessment, ...(shouldIncludeOptionalCaution(spec, answerPlan) ? [caution] : [])], 3).forEach((item, index) => {
       lines.push(`${index + 1}. ${item}`);
     });
     if (relevantFact) lines.push(`Ek kontrol: ${sentence(relevantFact)}`);
@@ -408,13 +446,13 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
 
   if (spec.answerIntent === "reassure") {
     if (asksForBriefNaturalAnswer(spec.userQuery)) {
-      return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
+      return composeNaturalBrief(spec, { answerPlan, assessment, action, caution, summary, relevantFact });
     }
     lines.push(
       `Kısa cevap: ${sentence(assessment)}`,
       `Bu, tek başına kesin veya panik gerektiren bir sonuç gibi sunulmamalı; kaynakların desteklediği sınır burada kalıyor.`,
       `${policy.answerLabels.action}: ${sentence(action)}`,
-      ...(shouldOmitOptionalCaution(spec) ? [] : [`${policy.answerLabels.caution}: ${sentence(caution)}`]),
+      ...(shouldIncludeOptionalCaution(spec, answerPlan) ? [`${policy.answerLabels.caution}: ${sentence(caution)}`] : []),
     );
     if (relevantFact) lines.push(`Ek kontrol: ${sentence(relevantFact)}`);
     return lines.join("\n");
@@ -424,7 +462,7 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
     lines.push(
       `${policy.answerLabels.assessment}: ${sentence(assessment)}`,
       `Karşılaştırırken kullanılabilecek dayanak: ${sentence(summary)}`,
-      ...(shouldOmitOptionalCaution(spec) ? [] : [`${policy.answerLabels.caution}: ${sentence(caution)}`]),
+      ...(shouldIncludeOptionalCaution(spec, answerPlan) ? [`${policy.answerLabels.caution}: ${sentence(caution)}`] : []),
       `${policy.answerLabels.action}: ${sentence(action)}`,
     );
     return lines.join("\n");
@@ -432,25 +470,25 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
 
   if (spec.answerIntent === "explain") {
     if (asksForBriefNaturalAnswer(spec.userQuery)) {
-      return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
+      return composeNaturalBrief(spec, { answerPlan, assessment, action, caution, summary, relevantFact });
     }
     lines.push(
       `${sentence(assessment)}`,
       `Pratik anlamı: ${sentence(action)}`,
-      ...(shouldOmitOptionalCaution(spec) ? [] : [`Dikkat: ${sentence(caution)}`]),
+      ...(shouldIncludeOptionalCaution(spec, answerPlan) ? [`Dikkat: ${sentence(caution)}`] : []),
       `Kısa özet: ${sentence(summary)}`,
     );
     return lines.join("\n");
   }
 
   if (asksForBriefNaturalAnswer(spec.userQuery)) {
-    return composeNaturalBrief(spec, { assessment, action, caution, summary, relevantFact });
+    return composeNaturalBrief(spec, { answerPlan, assessment, action, caution, summary, relevantFact });
   }
 
   lines.push(
     `${policy.answerLabels.assessment}: ${sentence(assessment)}`,
     `${policy.answerLabels.action}: ${sentence(action)}`,
-    ...(shouldOmitOptionalCaution(spec) ? [] : [`${policy.answerLabels.caution}: ${sentence(caution)}`]),
+    ...(shouldIncludeOptionalCaution(spec, answerPlan) ? [`${policy.answerLabels.caution}: ${sentence(caution)}`] : []),
     `${policy.answerLabels.summary}: ${sentence(summary)}`,
   );
   return lines.join("\n");
