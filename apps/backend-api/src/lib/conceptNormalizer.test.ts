@@ -20,8 +20,9 @@ describe("conceptNormalizer", () => {
   });
 
   it("expands colloquial Turkish verb endings without domain-specific query rules", () => {
-    const surface = expandSurfaceTokenVariants("agriyo ilerliyo");
+    const surface = expandSurfaceTokenVariants("agriyo ilerliyom bakiyon agriyorrr");
 
-    expect(surface).toEqual(expect.arrayContaining(["agriyor", "ilerliyor"]));
+    expect(surface).toEqual(expect.arrayContaining(["agriyor", "ilerliyorum", "bakiyorsun"]));
+    expect(surface).toContain("agriyor");
   });
 });

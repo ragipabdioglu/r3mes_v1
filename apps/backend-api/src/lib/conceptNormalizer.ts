@@ -91,14 +91,37 @@ function softenFinalConsonant(value: string): string[] {
   return [value];
 }
 
+function collapseRepeatedLetters(value: string): string {
+  return value.replace(/([\p{L}])\1{2,}/gu, "$1");
+}
+
 function lightTokenVariants(value: string): string[] {
   const normalized = normalizeConceptText(value);
   const variants = new Set<string>(softenFinalConsonant(normalized));
-  if (normalized.length >= 5 && normalized.endsWith("yo")) {
-    variants.add(`${normalized.slice(0, -2)}yor`);
+  const collapsed = collapseRepeatedLetters(normalized);
+  if (collapsed !== normalized && collapsed.length >= 3) {
+    variants.add(collapsed);
+    for (const variant of softenFinalConsonant(collapsed)) variants.add(variant);
   }
-  if (normalized.length >= 6 && normalized.endsWith("iyo")) {
-    variants.add(`${normalized.slice(0, -3)}iyor`);
+  for (const candidate of [...variants]) {
+    if (candidate.length >= 5 && candidate.endsWith("yo")) {
+      variants.add(`${candidate.slice(0, -2)}yor`);
+    }
+    if (candidate.length >= 6 && candidate.endsWith("iyo")) {
+      variants.add(`${candidate.slice(0, -3)}iyor`);
+    }
+    if (candidate.length >= 6 && candidate.endsWith("yom")) {
+      variants.add(`${candidate.slice(0, -3)}yorum`);
+    }
+    if (candidate.length >= 7 && candidate.endsWith("iyom")) {
+      variants.add(`${candidate.slice(0, -4)}iyorum`);
+    }
+    if (candidate.length >= 7 && candidate.endsWith("yon")) {
+      variants.add(`${candidate.slice(0, -3)}yorsun`);
+    }
+    if (candidate.length >= 8 && candidate.endsWith("iyon")) {
+      variants.add(`${candidate.slice(0, -4)}iyorsun`);
+    }
   }
   for (const suffix of LIGHT_TURKISH_SUFFIXES) {
     if (!normalized.endsWith(suffix)) continue;
