@@ -141,6 +141,9 @@ function buildFallback(
   answerSpec: AnswerSpec | undefined,
   fallbackMode: SafetyGateResult["fallbackMode"],
 ): string {
+  if (fallbackMode === "source_suggestion" && sources.length === 0) {
+    return "Seçili kaynaklarda bu soruya doğrudan yeterli bilgi bulamadım. Doğru collection'ı seçip tekrar deneyin veya ilgili belgeyi yükleyin.";
+  }
   const policy = getDomainSafetyPolicy(answer.answer_domain);
   const sourceNote =
     sources.length > 0

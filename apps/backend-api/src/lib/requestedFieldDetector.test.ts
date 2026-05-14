@@ -35,6 +35,15 @@ describe("detectRequestedFields", () => {
     expect(cashRate.requestedFields.map((field) => field.id)).toContain("nakit_tutar_oran");
   });
 
+  it("prioritizes explicit list/bullet formatting over generic table wording", () => {
+    const result = detectRequestedFields(
+      "FROTO kar dağıtım tablosunda A, B ve C grupları için nakit tutarı ve oranları hangi satırlarda geçiyor? Kısa maddelerle yaz, ham tablo basma.",
+    );
+
+    expect(result.requestedFields.map((field) => field.id)).toContain("nakit_tutar_oran");
+    expect(result.constraints.format).toBe("bullets");
+  });
+
   it("does not split nested net period profit into a second generic period profit request", () => {
     const result = detectRequestedFields("SPK'ya göre net dönem kârı kaç? Yasal kayıtlarla karıştırmadan kısa açıkla.");
 

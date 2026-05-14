@@ -511,4 +511,30 @@ describe("deterministic safety gate", () => {
     expect(result.blockedReasons).toContain("RISKY_CERTAINTY_OR_TREATMENT");
     expect(result.safeFallback).toContain("riskli komut");
   });
+
+  it("keeps source-suggestion fallback concise when no grounded source is available", () => {
+    const result = evaluateSafetyGate({
+      answerText: "Bu soru için yeterli güvenilir kaynak bulunamadı.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "finance",
+        user_query: "AKBNK kar dağıtım bildiriminde net dağıtılabilir dönem kârı kaç?",
+      },
+      sources: [],
+      retrievalWasUsed: true,
+      sourceSelection: {
+        accessibleCollectionIds: ["kap-pilot-real-disclosures"],
+        usedCollectionIds: ["kap-pilot-real-disclosures"],
+        routeDecision: {
+          mode: "suggest",
+        },
+      },
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.fallbackMode).toBe("source_suggestion");
+    expect(result.safeFallback).toBe(
+      "Seçili kaynaklarda bu soruya doğrudan yeterli bilgi bulamadım. Doğru collection'ı seçip tekrar deneyin veya ilgili belgeyi yükleyin.",
+    );
+  });
 });

@@ -160,8 +160,8 @@ function isNegatedAlias(normalizedQuery: string, normalizedAlias: string): boole
 }
 
 function detectFormat(normalizedQuery: string): RequestedFieldDetection["constraints"]["format"] {
-  if (/\b(tablo|table)\b/u.test(normalizedQuery)) return "table";
   if (/\b(madde\w*|bullet|liste\w*)\b/u.test(normalizedQuery)) return "bullets";
+  if (/\b(tablo|table)\b/u.test(normalizedQuery)) return "table";
   if (/\b(kisa|kısa|tek cumle|tek cümle|sadece)\b/u.test(normalizedQuery)) return "short";
   return "freeform";
 }
