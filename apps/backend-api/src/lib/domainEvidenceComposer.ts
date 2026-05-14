@@ -1,6 +1,7 @@
 import type { GroundedMedicalAnswer } from "./answerSchema.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import { buildAnswerSpecFromGroundedAnswer } from "./answerSpec.js";
+import { buildAnswerPlan, type AnswerPlan } from "./answerPlan.js";
 import { polishAnswerText } from "./answerQuality.js";
 import { getDomainPolicy } from "./domainPolicy.js";
 import { buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
@@ -275,6 +276,25 @@ function composeFinanceTableFacts(spec: AnswerSpec): string | null {
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
+function composeStructuredFieldAnswer(plan: AnswerPlan): string | null {
+  if (plan.taskType !== "field_extraction" || plan.coverage === "none" || plan.selectedFacts.length === 0) return null;
+  const lines = plan.selectedFacts.map((fact) => {
+    const baseLabel = fact.field ?? fact.subject ?? "Kaynakta bulunan değer";
+    const label = fact.table?.columnLabel ? `${baseLabel} (${fact.table.columnLabel})` : baseLabel;
+    const value = fact.value ?? fact.provenance.quote;
+    return plan.outputFormat === "bullets" ? `- ${label}: ${value}` : `${label}: ${value}`;
+  });
+  if (plan.coverage === "partial" && plan.diagnostics.missingFieldIds.length > 0) {
+    lines.push(
+      plan.outputFormat === "bullets"
+        ? `- Bulunamayan alanlar: ${plan.diagnostics.missingFieldIds.join(", ")}`
+        : `Bulunamayan alanlar: ${plan.diagnostics.missingFieldIds.join(", ")}`,
+    );
+  }
+  if (plan.outputFormat === "short" && lines.length > 0) return lines.join("; ");
+  return lines.join("\n");
+}
+
 function queryRelevantFact(spec: AnswerSpec, usedText: string): string | null {
   const queryTokens = new Set(matchTokens(spec.userQuery));
   if (queryTokens.size === 0) return null;
@@ -344,6 +364,9 @@ function composeNaturalBrief(spec: AnswerSpec, opts: {
 
 export function composeAnswerSpec(spec: AnswerSpec): string {
   const policy = getDomainPolicy(spec.answerDomain);
+  const answerPlan = buildAnswerPlan(spec);
+  const structuredFieldAnswer = composeStructuredFieldAnswer(answerPlan);
+  if (structuredFieldAnswer) return structuredFieldAnswer;
   const financeTableAnswer = composeFinanceTableFacts(spec);
   if (financeTableAnswer) return financeTableAnswer;
   const sourceNote =

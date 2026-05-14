@@ -1,17 +1,20 @@
 import type { GroundingConfidence } from "./answerSchema.js";
 import { getDecisionConfig, getDecisionConfigVersion } from "./decisionConfig.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import type { StructuredFact } from "./structuredFact.js";
 
 export type CompiledEvidenceConfidence = "low" | "medium" | "high";
 
 export interface CompiledEvidence {
   facts: string[];
+  structuredFacts?: StructuredFact[];
   risks: string[];
   unknowns: string[];
   contradictions: string[];
   sourceIds: string[];
   confidence: CompiledEvidenceConfidence;
   usableFactCount: number;
+  structuredFactCount?: number;
   riskFactCount: number;
   unknownCount: number;
   contradictionCount: number;
@@ -20,12 +23,14 @@ export interface CompiledEvidence {
     confidenceReason: string;
     limits: {
       facts: number;
+      structuredFacts: number;
       risks: number;
       unknowns: number;
       sources: number;
     };
     rawCounts: {
       facts: number;
+      structuredFacts: number;
       risks: number;
       unknowns: number;
       sources: number;
@@ -52,6 +57,27 @@ function uniqueText(values: Array<string | null | undefined>): string[] {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(text);
+  }
+  return out;
+}
+
+function uniqueStructuredFacts(values: Array<StructuredFact | null | undefined>): StructuredFact[] {
+  const seen = new Set<string>();
+  const out: StructuredFact[] = [];
+  for (const value of values) {
+    if (!value) continue;
+    const key = [
+      value.id,
+      value.sourceId,
+      value.field ?? "",
+      value.value ?? "",
+      value.provenance.quote,
+    ]
+      .join("|")
+      .toLocaleLowerCase("tr-TR");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
   }
   return out;
 }
@@ -107,6 +133,7 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
     ...(evidence?.uncertainOrUnusable ?? []),
   ]);
   const facts = rawFacts.slice(0, budget.usableFactLimit);
+  const structuredFacts = uniqueStructuredFacts(evidence?.structuredFacts ?? []).slice(0, budget.usableFactLimit);
   const risks = rawRisks.slice(0, budget.riskFactLimit);
   const unknowns = rawUnknowns.slice(0, budget.notSupportedLimit);
   const contradictions = uniqueText(
@@ -126,12 +153,14 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
 
   return {
     facts,
+    structuredFacts,
     risks,
     unknowns,
     contradictions,
     sourceIds,
     confidence: confidence.confidence,
     usableFactCount: facts.length,
+    structuredFactCount: structuredFacts.length,
     riskFactCount: risks.length,
     unknownCount: unknowns.length,
     contradictionCount: contradictions.length,
@@ -140,12 +169,14 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
       confidenceReason: confidence.reason,
       limits: {
         facts: budget.usableFactLimit,
+        structuredFacts: budget.usableFactLimit,
         risks: budget.riskFactLimit,
         unknowns: budget.notSupportedLimit,
         sources: budget.sourceIdLimit,
       },
       rawCounts: {
         facts: rawFacts.length,
+        structuredFacts: evidence?.structuredFacts?.length ?? 0,
         risks: rawRisks.length,
         unknowns: rawUnknowns.length,
         sources: rawSourceIds.length,

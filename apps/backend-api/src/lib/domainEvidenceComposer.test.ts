@@ -225,6 +225,56 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("2. Yüksek ateş");
   });
 
+  it("uses structured facts for requested table fields without adding caution", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "finance",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery:
+        "EREGL kar payında dağıtılması öngörülen diğer kaynaklar ve olağanüstü yedekler nedir? Sadece rakamları kısa maddelerle yaz, risk yorumu ekleme.",
+      tone: "direct",
+      sections: ["assessment", "action", "summary"],
+      assessment: "Kaynakta ilgili KAP tablo satırları var.",
+      action: "Sadece sorulan tablo değerleri yazılmalıdır.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Sorulan alanlar KAP tablosundan alınmalıdır.",
+      unknowns: [],
+      sourceIds: ["kap-doc"],
+      facts: [],
+      structuredFacts: [
+        {
+          id: "sf-1",
+          kind: "table_row",
+          sourceId: "kap-doc",
+          field: "Dağıtılması Öngörülen Diğer Kaynaklar",
+          value: "3.352.908.083 / 3.850.000.000",
+          confidence: "high",
+          provenance: {
+            quote: "Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083 3.850.000.000",
+            extractor: "table-numeric-v1",
+          },
+        },
+        {
+          id: "sf-2",
+          kind: "table_row",
+          sourceId: "kap-doc",
+          field: "Olağanüstü Yedekler",
+          value: "3.352.908.083 / 3.850.000.000",
+          confidence: "high",
+          provenance: {
+            quote: "Olağanüstü Yedekler 3.352.908.083 3.850.000.000",
+            extractor: "table-numeric-v1",
+          },
+        },
+      ],
+    });
+
+    expect(rendered).toContain("- Dağıtılması Öngörülen Diğer Kaynaklar: 3.352.908.083");
+    expect(rendered).toContain("- Olağanüstü Yedekler: 3.352.908.083");
+    expect(rendered).not.toContain("Dikkat");
+    expect(rendered).not.toContain("risk koşulu");
+  });
+
   it("uses a natural brief answer when the user asks for a short calm explanation", () => {
     const rendered = composeAnswerSpec({
       answerDomain: "medical",

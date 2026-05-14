@@ -5,6 +5,7 @@ import {
   normalizeTurkishQuery,
   type TurkishQueryNormalization,
 } from "./turkishQueryNormalizer.js";
+import { detectRequestedFields, type RequestedFieldDetection } from "./requestedFieldDetector.js";
 
 export type QueryUnderstandingMode = "conversation" | "knowledge";
 export type QueryRetrievalIntent = "conversation" | "knowledge_lookup" | "source_selection" | "unclear";
@@ -44,6 +45,7 @@ export interface QueryUnderstanding {
   mode: QueryUnderstandingMode;
   retrievalIntent: QueryRetrievalIntent;
   conversationalIntent: ConversationalIntentDecision | null;
+  requestedFieldDetection: RequestedFieldDetection;
   confidence: "low" | "medium" | "high";
   warnings: string[];
 }
@@ -273,6 +275,7 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
     16,
   );
   const conversationalIntent = detectConversationalIntent(query);
+  const requestedFieldDetection = detectRequestedFields(query);
   const mode: QueryUnderstandingMode = conversationalIntent ? "conversation" : "knowledge";
   const quality = inferQueryQuality({
     normalized,
@@ -313,6 +316,7 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
     mode,
     retrievalIntent,
     conversationalIntent,
+    requestedFieldDetection,
     confidence,
     warnings,
   };
@@ -335,6 +339,14 @@ export function summarizeQueryUnderstandingForTrace(
     concepts: understanding.concepts.slice(0, 8),
     profileConcepts: understanding.profileConcepts.slice(0, 8),
     retrievalIntent: understanding.retrievalIntent,
+    requestedFieldCount: understanding.requestedFieldDetection.requestedFields.length,
+    requestedFields: understanding.requestedFieldDetection.requestedFields.slice(0, 8).map((field) => ({
+      id: field.id,
+      label: field.label,
+      outputHint: field.outputHint,
+      confidence: field.confidence,
+    })),
+    outputConstraints: understanding.requestedFieldDetection.constraints,
     language: understanding.signals.language,
     intent: understanding.signals.intent,
     routeDomain: understanding.signals.routeHints.domain,

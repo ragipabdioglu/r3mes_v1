@@ -110,6 +110,74 @@ function wordCount(value) {
   return tokenize(value).length;
 }
 
+function detectAnswerQualityFindings(testCase, content) {
+  const expectations = testCase.qualityExpectations;
+  if (!expectations || typeof expectations !== "object") return [];
+  const findings = [];
+  const normalized = normalize(content);
+  const words = wordCount(content);
+  const push = (bucket, severity, message) => findings.push({ bucket, severity, message });
+
+  if (Number.isFinite(Number(expectations.maxWords)) && words > Number(expectations.maxWords)) {
+    push("answer_too_long", "fail", `answer has ${words} words, max ${Number(expectations.maxWords)}`);
+  }
+
+  if (Array.isArray(expectations.requiredAnswerTerms)) {
+    const missingTerms = expectations.requiredAnswerTerms.filter((term) => !normalized.includes(normalize(term)));
+    if (missingTerms.length > 0) {
+      push("incomplete_answer", "fail", `missing answer terms: ${missingTerms.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(expectations.forbiddenAnswerTerms)) {
+    const forbiddenTerms = includesForbiddenAny(content, expectations.forbiddenAnswerTerms);
+    if (forbiddenTerms.length > 0) {
+      push("template_answer", "fail", `forbidden answer terms: ${forbiddenTerms.join(",")}`);
+    }
+  }
+
+  if (expectations.forbidCaution === true) {
+    const cautionTerms = includesForbiddenAny(content, [
+      "Dikkat edilmesi gereken",
+      "Dikkat:",
+      "Riskler:",
+      "Kaynakta özel alarm",
+      "yatırım tavsiyesi",
+      "risk koşulu",
+    ]);
+    if (cautionTerms.length > 0) {
+      push("unnecessary_warning", "fail", `unnecessary caution terms: ${cautionTerms.join(",")}`);
+    }
+  }
+
+  if (expectations.noRawTableDump === true) {
+    const rawTableSignals = [
+      /\|[^|\n]{1,80}\|[^|\n]{1,80}\|/u,
+      /(?:\d[\d.,-]*\s+){5,}/u,
+      /\b(?:SPK'?ya Göre|Yasal Kayıtlara Göre).{80,}/iu,
+    ];
+    if (rawTableSignals.some((pattern) => pattern.test(content))) {
+      push("raw_table_dump", "fail", "answer looks like a raw table row dump");
+    }
+  }
+
+  if (expectations.format === "bullets") {
+    const bulletLines = content.split(/\r?\n/).filter((line) => /^\s*(?:[-*]|\d+[.)])\s+/u.test(line));
+    if (bulletLines.length === 0) {
+      push("wrong_output_format", "fail", "expected bullet/list formatted answer");
+    }
+  }
+
+  if (Array.isArray(expectations.forbiddenBuckets)) {
+    for (const bucket of expectations.forbiddenBuckets) {
+      const matched = findings.find((finding) => finding.bucket === bucket);
+      if (matched) matched.severity = "fail";
+    }
+  }
+
+  return findings;
+}
+
 const CONCEPT_SYNONYMS = new Map([
   ["muayene", ["muayene", "değerlendirme", "degerlendirme", "kontrol", "doktor"]],
   ["kontrol", ["kontrol", "takip", "değerlendirme", "degerlendirme", "doktor"]],
@@ -703,6 +771,12 @@ function scoreCase(testCase, response) {
     }
   }
 
+  const answerQualityFindings = detectAnswerQualityFindings(testCase, content);
+  const blockingAnswerQualityFindings = answerQualityFindings.filter((finding) => finding.severity === "fail");
+  if (blockingAnswerQualityFindings.length > 0) {
+    failures.push(`answer_quality:${blockingAnswerQualityFindings.map((finding) => finding.bucket).join(",")}`);
+  }
+
   if (Array.isArray(testCase.requiredEvidenceTerms) && testCase.requiredEvidenceTerms.length > 0) {
     const evidenceText = readEvidenceText(evidence, ["usableFacts", "supportingFacts", "directFacts", "redFlags"]);
     const missingEvidenceTerms = testCase.requiredEvidenceTerms.filter((term) => !normalize(evidenceText).includes(normalize(term)));
@@ -767,6 +841,15 @@ function scoreCase(testCase, response) {
         : null,
     compiledEvidenceConfidence: compiledEvidence?.confidence ?? null,
     compiledEvidenceFactCount: compiledEvidence?.usableFactCount ?? null,
+    compiledEvidenceStructuredFactCount: compiledEvidence?.structuredFactCount ?? null,
+    compiledEvidenceStructuredFacts: Array.isArray(compiledEvidence?.structuredFacts)
+      ? compiledEvidence.structuredFacts.map((fact) => ({
+          field: fact.field ?? null,
+          value: fact.value ?? null,
+          sourceId: fact.sourceId ?? null,
+          extractor: fact.provenance?.extractor ?? null,
+        }))
+      : [],
     compiledEvidenceRiskCount: compiledEvidence?.riskFactCount ?? null,
     compiledEvidenceUnknownCount: compiledEvidence?.unknownCount ?? null,
     compiledEvidenceContradictionCount: compiledEvidence?.contradictionCount ?? null,
@@ -857,6 +940,7 @@ function scoreCase(testCase, response) {
       : null,
     latencyMs: response?._latencyMs ?? null,
     answerPathName: chatTrace?.answerPath?.name ?? null,
+    answerPlan: response?.answer_plan ?? null,
     traceTotalDurationMs: Number.isFinite(Number(chatTrace?.totalDurationMs)) ? Number(chatTrace.totalDurationMs) : null,
     traceStageDurations: Array.isArray(chatTrace?.stages)
       ? chatTrace.stages.map((stage) => ({
@@ -868,6 +952,7 @@ function scoreCase(testCase, response) {
         }))
       : [],
     content,
+    answerQualityFindings,
   };
 }
 

@@ -112,4 +112,18 @@ describe("queryUnderstanding", () => {
     expect(understanding.warnings).toContain("profile_concept_expansion_used");
     expect(understanding.quality.clarityScore).toBeGreaterThanOrEqual(55);
   });
+
+  it("detects requested finance table fields and output constraints", () => {
+    const understanding = buildQueryUnderstanding(
+      "EREGL kar payında dağıtılması öngörülen diğer kaynaklar ve olağanüstü yedekler nedir? Sadece rakamları kısa maddelerle yaz, risk yorumu ekleme.",
+    );
+
+    expect(understanding.mode).toBe("knowledge");
+    expect(understanding.requestedFieldDetection.requestedFields.map((field) => field.id)).toEqual(
+      expect.arrayContaining(["diger_kaynaklar", "olaganustu_yedekler"]),
+    );
+    expect(understanding.requestedFieldDetection.constraints.forbidCaution).toBe(true);
+    expect(understanding.requestedFieldDetection.constraints.noRawTableDump).toBe(true);
+    expect(understanding.requestedFieldDetection.constraints.format).toBe("bullets");
+  });
 });

@@ -3,6 +3,8 @@ import type { AnswerIntent } from "./answerSchema.js";
 import { expandConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { getDecisionConfig } from "./decisionConfig.js";
 import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
+import type { StructuredFact } from "./structuredFact.js";
+import { extractTableNumericFacts } from "./tableNumericFactExtractor.js";
 
 export type SkillName =
   | "intent-router"
@@ -64,6 +66,7 @@ export interface EvidenceExtractorOutput {
   redFlags: string[];
   sourceIds: string[];
   missingInfo: string[];
+  structuredFacts?: StructuredFact[];
 }
 
 export interface EvidenceExtractorBudget {
@@ -1311,6 +1314,11 @@ export function buildDeterministicEvidenceExtraction(
 
   const rankedUsableFacts = rankEvidenceFacts(input.userQuery, usableFacts);
   const rankedDirectFacts = rankEvidenceFacts(input.userQuery, directAnswerFacts);
+  const structuredFacts = extractTableNumericFacts({
+    query: input.userQuery,
+    facts: unique([...rankedDirectFacts, ...rankedUsableFacts, ...supportingContext]),
+    sourceIds,
+  });
 
   return {
     answerIntent: intentResolution.intent,
@@ -1324,6 +1332,7 @@ export function buildDeterministicEvidenceExtraction(
     redFlags: unique(redFlags).slice(0, budget.riskFactLimit + 1),
     sourceIds: unique(sourceIds).slice(0, budget.sourceIdLimit),
     missingInfo,
+    structuredFacts,
   };
 }
 

@@ -3,6 +3,7 @@ import type { CompiledEvidence } from "./compiledEvidence.js";
 import { getDecisionConfig } from "./decisionConfig.js";
 import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import type { StructuredFact } from "./structuredFact.js";
 
 export interface AnswerSpec {
   answerDomain: AnswerDomain;
@@ -18,6 +19,7 @@ export interface AnswerSpec {
   unknowns: string[];
   sourceIds: string[];
   facts: string[];
+  structuredFacts?: StructuredFact[];
 }
 
 function stripSourcePrefix(value: string): string {
@@ -441,6 +443,7 @@ export function buildAnswerSpec(opts: {
     unknowns: unknowns.slice(0, 4),
     sourceIds: opts.compiledEvidence?.sourceIds ?? opts.evidence?.sourceIds ?? [],
     facts: cleanValues([queryContextFact ?? "", ...facts]).slice(0, 6),
+    structuredFacts: opts.compiledEvidence?.structuredFacts ?? opts.evidence?.structuredFacts ?? [],
   };
 }
 

@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ChatSourceCitation } from "@r3mes/shared-types";
 import { getConfiguredChatRuntime, normalizeAdapterPath } from "../lib/adapterRuntimeSelect.js";
 import { parseGroundedMedicalAnswer } from "../lib/answerParse.js";
+import { buildAnswerPlan } from "../lib/answerPlan.js";
 import { hasLowLanguageQuality, polishAnswerText } from "../lib/answerQuality.js";
 import { EMPTY_GROUNDED_MEDICAL_ANSWER, type GroundedMedicalAnswer } from "../lib/answerSchema.js";
 import { buildAnswerSpec } from "../lib/answerSpec.js";
@@ -820,6 +821,7 @@ function applyRenderedAnswer(
     evidence: retrievalDebug?.evidence ?? null,
     compiledEvidence: retrievalDebug?.compiledEvidence ?? null,
   });
+  const answerPlan = buildAnswerPlan(answerSpec);
   const useSafeTemplate =
     opts.useFallbackTemplate === true ||
     shouldUseSafeRenderedTemplate(enrichedAnswer, retrievalWasUsed);
@@ -861,6 +863,15 @@ function applyRenderedAnswer(
     hiddenSourceCount: sources.length - exposedSources.length,
     fallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
     lowLanguageQualityDetected: answerQuality.lowLanguageQualityDetected,
+    answerPlan: {
+      taskType: answerPlan.taskType,
+      coverage: answerPlan.coverage,
+      requestedFieldCount: answerPlan.diagnostics.requestedFieldCount,
+      selectedFactCount: answerPlan.diagnostics.selectedFactCount,
+      missingFieldIds: answerPlan.diagnostics.missingFieldIds,
+      requiresModelSynthesis: answerPlan.requiresModelSynthesis,
+    },
+    structuredFactCount: answerSpec.structuredFacts?.length ?? 0,
   });
   const finalContent = shouldHideCitations
     ? (safetyGate.safeFallback ?? finalRendered)
@@ -885,6 +896,7 @@ function applyRenderedAnswer(
   next.sources = exposedSources;
   if (opts.exposeDebug === true) {
     next.grounded_answer = exposedAnswer;
+    next.answer_plan = answerPlan;
     next.safety_gate = safetyGate;
     next.answer_quality = answerQuality;
     if (retrievalDebug) next.retrieval_debug = retrievalDebug;

@@ -117,4 +117,38 @@ describe("compileEvidence", () => {
       }
     }
   });
+
+  it("carries structured facts without breaking legacy string facts", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        usableFacts: ["Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083 olarak geçiyor."],
+        sourceIds: ["kap-doc"],
+        structuredFacts: [
+          {
+            id: "fact-1",
+            kind: "table_cell",
+            sourceId: "kap-doc",
+            field: "Dağıtılması Öngörülen Diğer Kaynaklar",
+            value: "3.352.908.083",
+            confidence: "high",
+            table: {
+              rowLabel: "Dağıtılması Öngörülen Diğer Kaynaklar",
+              columnLabel: "SPK'ya Göre",
+              rawRow: "Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083",
+            },
+            provenance: {
+              quote: "Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083",
+              extractor: "test",
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(compiled.facts).toEqual(["Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083 olarak geçiyor."]);
+    expect(compiled.structuredFactCount).toBe(1);
+    expect(compiled.structuredFacts?.[0]?.field).toBe("Dağıtılması Öngörülen Diğer Kaynaklar");
+    expect(compiled.structuredFacts?.[0]?.value).toBe("3.352.908.083");
+  });
 });

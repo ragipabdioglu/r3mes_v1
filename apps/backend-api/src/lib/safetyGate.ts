@@ -5,6 +5,7 @@ import type { AnswerSpec } from "./answerSpec.js";
 import { hasLowLanguageQuality } from "./answerQuality.js";
 import { composeAnswerSpec } from "./domainEvidenceComposer.js";
 import { getDomainSafetyPolicy, getRiskyCertaintyPatterns } from "./domainSafetyPolicy.js";
+import { detectRequestedFields } from "./requestedFieldDetector.js";
 import {
   getSafetyRailDefinition,
   type SafetyFallbackMode,
@@ -90,6 +91,11 @@ function queryExplicitlySuppressesRiskComment(query: string): boolean {
     /\b(risk|alarm|uyar[ıi]|yorum|tavsiye)\s+(?:yorumu\s+)?(?:ekleme|katma|yazma|verme)\b/iu.test(normalized) ||
     /\bsadece\s+(?:sorulan|rakam|rakamlar[ıi]|say[ıi]|say[ıi]lar[ıi]|de[ğg]er|de[ğg]erleri)\b/iu.test(normalized)
   );
+}
+
+function isFinanceFieldExtractionQuery(query: string, domain: GroundedMedicalAnswer["answer_domain"]): boolean {
+  if (domain !== "finance") return false;
+  return detectRequestedFields(query).requestedFields.some((field) => field.outputHint === "number");
 }
 
 function addUnique(values: string[], value: string): void {
@@ -287,14 +293,16 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
     !sourceSuggestionWithoutGrounding &&
     (
       (includesAny(query, policy.redFlagTerms) && !queryExplicitlySuppressesRiskComment(query)) ||
-      (evidenceRedFlagCount > 0 && evidence?.answerIntent === "triage")
+      (evidenceRedFlagCount > 0 &&
+        evidence?.answerIntent === "triage" &&
+        !isFinanceFieldExtractionQuery(query, opts.answer.answer_domain))
     ) &&
     !includesAny(answerText, policy.requiredGuidanceTerms)
   ) {
     addRail("RED_FLAG_WITHOUT_URGENT_GUIDANCE");
   }
 
-  if (answerText.length < 40 && opts.retrievalWasUsed) {
+  if (answerText.length < 40 && opts.retrievalWasUsed && !isFinanceFieldExtractionQuery(query, opts.answer.answer_domain)) {
     addRail("ANSWER_TOO_THIN");
   }
 
