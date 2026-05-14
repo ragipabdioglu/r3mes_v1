@@ -49,6 +49,25 @@ export interface EvidenceScoringConfig {
   rejectedExtraordinaryReservePenalty: number;
   unrequestedNetDistributablePenalty: number;
   headerPenalty: number;
+  answerFactOverlapWeight: number;
+  factDirectActionBonus: number;
+  factCompleteSentenceBonus: number;
+  factLengthBonus: number;
+  factShortLengthPenalty: number;
+  factIncompleteLongPenalty: number;
+  factScaffoldPenalty: number;
+  factTruncationPenalty: number;
+  factGenericPenalty: number;
+  fragmentActionBonus: number;
+  fragmentCompleteSentenceBonus: number;
+  fragmentLengthBonus: number;
+  fragmentShortLengthPenalty: number;
+  fragmentIncompleteLongPenalty: number;
+  fragmentScaffoldPenalty: number;
+  fragmentTruncationPenalty: number;
+  fragmentMinScore: number;
+  answerFactMinScore: number;
+  answerFirstUsefulFactMinScore: number;
 }
 
 export interface EvidenceBudgetConfig {
@@ -166,6 +185,25 @@ const DEFAULT_EVIDENCE_SCORING: EvidenceScoringConfig = {
   rejectedExtraordinaryReservePenalty: 60,
   unrequestedNetDistributablePenalty: 50,
   headerPenalty: 6,
+  answerFactOverlapWeight: 6,
+  factDirectActionBonus: 4,
+  factCompleteSentenceBonus: 1,
+  factLengthBonus: 2,
+  factShortLengthPenalty: 4,
+  factIncompleteLongPenalty: 10,
+  factScaffoldPenalty: 6,
+  factTruncationPenalty: 5,
+  factGenericPenalty: 3,
+  fragmentActionBonus: 5,
+  fragmentCompleteSentenceBonus: 3,
+  fragmentLengthBonus: 2,
+  fragmentShortLengthPenalty: 4,
+  fragmentIncompleteLongPenalty: 10,
+  fragmentScaffoldPenalty: 8,
+  fragmentTruncationPenalty: 6,
+  fragmentMinScore: -8,
+  answerFactMinScore: -20,
+  answerFirstUsefulFactMinScore: 1,
 };
 
 const ROUTER_WEIGHT_ENV_KEYS: Record<keyof RouterWeights, string> = {
@@ -208,6 +246,25 @@ const EVIDENCE_ENV_KEYS: Record<keyof EvidenceScoringConfig, string> = {
   rejectedExtraordinaryReservePenalty: "R3MES_EVIDENCE_SCORE_REJECTED_EXTRAORDINARY_RESERVE_PENALTY",
   unrequestedNetDistributablePenalty: "R3MES_EVIDENCE_SCORE_UNREQUESTED_NET_DISTRIBUTABLE_PENALTY",
   headerPenalty: "R3MES_EVIDENCE_SCORE_HEADER_PENALTY",
+  answerFactOverlapWeight: "R3MES_EVIDENCE_SCORE_ANSWER_FACT_OVERLAP_WEIGHT",
+  factDirectActionBonus: "R3MES_EVIDENCE_SCORE_FACT_DIRECT_ACTION_BONUS",
+  factCompleteSentenceBonus: "R3MES_EVIDENCE_SCORE_FACT_COMPLETE_SENTENCE_BONUS",
+  factLengthBonus: "R3MES_EVIDENCE_SCORE_FACT_LENGTH_BONUS",
+  factShortLengthPenalty: "R3MES_EVIDENCE_SCORE_FACT_SHORT_LENGTH_PENALTY",
+  factIncompleteLongPenalty: "R3MES_EVIDENCE_SCORE_FACT_INCOMPLETE_LONG_PENALTY",
+  factScaffoldPenalty: "R3MES_EVIDENCE_SCORE_FACT_SCAFFOLD_PENALTY",
+  factTruncationPenalty: "R3MES_EVIDENCE_SCORE_FACT_TRUNCATION_PENALTY",
+  factGenericPenalty: "R3MES_EVIDENCE_SCORE_FACT_GENERIC_PENALTY",
+  fragmentActionBonus: "R3MES_EVIDENCE_SCORE_FRAGMENT_ACTION_BONUS",
+  fragmentCompleteSentenceBonus: "R3MES_EVIDENCE_SCORE_FRAGMENT_COMPLETE_SENTENCE_BONUS",
+  fragmentLengthBonus: "R3MES_EVIDENCE_SCORE_FRAGMENT_LENGTH_BONUS",
+  fragmentShortLengthPenalty: "R3MES_EVIDENCE_SCORE_FRAGMENT_SHORT_LENGTH_PENALTY",
+  fragmentIncompleteLongPenalty: "R3MES_EVIDENCE_SCORE_FRAGMENT_INCOMPLETE_LONG_PENALTY",
+  fragmentScaffoldPenalty: "R3MES_EVIDENCE_SCORE_FRAGMENT_SCAFFOLD_PENALTY",
+  fragmentTruncationPenalty: "R3MES_EVIDENCE_SCORE_FRAGMENT_TRUNCATION_PENALTY",
+  fragmentMinScore: "R3MES_EVIDENCE_SCORE_FRAGMENT_MIN_SCORE",
+  answerFactMinScore: "R3MES_EVIDENCE_SCORE_ANSWER_FACT_MIN_SCORE",
+  answerFirstUsefulFactMinScore: "R3MES_EVIDENCE_SCORE_ANSWER_FIRST_USEFUL_FACT_MIN_SCORE",
 };
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {

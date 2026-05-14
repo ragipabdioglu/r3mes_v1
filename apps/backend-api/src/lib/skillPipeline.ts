@@ -313,17 +313,22 @@ function normalizeDocumentScaffoldFragment(value: string): string {
 }
 
 function fragmentQualityScore(value: string): number {
+  const scoring = getDecisionConfig().evidenceScoring;
   const normalized = value.trim();
   if (!normalized) return -100;
   const tokenCount = normalizeConceptText(normalized).split(/\s+/).filter((token) => token.length >= 3).length;
   const actionBonus = /(göndermeyiniz|göndermeyin|bilgilendir|başvur|kontrol|hazır|sakla|denenmel|planlan|yapılmal|edilmel|olmalıdır|olmalidir)/iu.test(normalized)
-    ? 5
+    ? scoring.fragmentActionBonus
     : 0;
-  const completeBonus = /[.!?]$/u.test(normalized) ? 3 : 0;
-  const incompleteLongPenalty = !/[.!?]$/u.test(normalized) && normalized.length >= 60 ? 10 : 0;
-  const lengthBonus = normalized.length >= 35 && normalized.length <= 260 ? 2 : normalized.length < 20 ? -4 : 0;
-  const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(normalized) ? 8 : 0;
-  const truncationPenalty = /[…]|\.{3}$/u.test(normalized) ? 6 : 0;
+  const completeBonus = /[.!?]$/u.test(normalized) ? scoring.fragmentCompleteSentenceBonus : 0;
+  const incompleteLongPenalty = !/[.!?]$/u.test(normalized) && normalized.length >= 60 ? scoring.fragmentIncompleteLongPenalty : 0;
+  const lengthBonus = normalized.length >= 35 && normalized.length <= 260
+    ? scoring.fragmentLengthBonus
+    : normalized.length < 20
+      ? -scoring.fragmentShortLengthPenalty
+      : 0;
+  const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(normalized) ? scoring.fragmentScaffoldPenalty : 0;
+  const truncationPenalty = /[…]|\.{3}$/u.test(normalized) ? scoring.fragmentTruncationPenalty : 0;
   return tokenCount + actionBonus + completeBonus + lengthBonus - scaffoldPenalty - truncationPenalty - incompleteLongPenalty;
 }
 
@@ -343,7 +348,7 @@ function sentenceFragments(text: string, limit = 2): string[] {
     .filter(Boolean);
   return fragments
     .map((fragment, index) => ({ fragment, index, score: fragmentQualityScore(fragment) }))
-    .filter(({ score }) => score > -8)
+    .filter(({ score }) => score > getDecisionConfig().evidenceScoring.fragmentMinScore)
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, limit)
     .map(({ fragment }) => fragment);

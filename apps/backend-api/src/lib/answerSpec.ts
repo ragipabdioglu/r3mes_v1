@@ -239,7 +239,7 @@ function factQualityScore(value: string, userQuery: string): number {
       ? scoring.languageEvidenceBonus
       : 0;
   const directActionBonus = /(göndermeyiniz|göndermeyin|bilgilendir|başvur|kontrol|hazırla|sakla|denenmel|planlan|yapılmal|edilmel)/iu.test(value)
-    ? 4
+    ? scoring.factDirectActionBonus
     : 0;
   const numericTableBonus = hasNumericTableValue(value) ? scoring.tableRowBonus : 0;
   const shareGroupTableBonus =
@@ -290,15 +290,19 @@ function factQualityScore(value: string, userQuery: string): number {
     withholdingGroupRateBonus === 0
       ? scoring.unrequestedNetDistributablePenalty
       : 0;
-  const sentenceBonus = /[.!?]$/u.test(value.trim()) ? 1 : 0;
-  const incompleteLongPenalty = !/[.!?]$/u.test(value.trim()) && value.trim().length >= 60 && !hasNumericTableValue(value) ? 10 : 0;
-  const lengthBonus = value.length >= 45 && value.length <= 260 ? 2 : value.length < 24 ? -4 : 0;
-  const truncationPenalty = /[…]|\.{3}$/u.test(value) ? 5 : 0;
-  const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(value) ? 6 : 0;
+  const completeSentenceBonus = /[.!?]$/u.test(value.trim()) ? scoring.factCompleteSentenceBonus : 0;
+  const incompleteLongPenalty = !/[.!?]$/u.test(value.trim()) && value.trim().length >= 60 && !hasNumericTableValue(value) ? scoring.factIncompleteLongPenalty : 0;
+  const lengthBonus = value.length >= 45 && value.length <= 260
+    ? scoring.factLengthBonus
+    : value.length < 24
+      ? -scoring.factShortLengthPenalty
+      : 0;
+  const truncationPenalty = /[…]|\.{3}$/u.test(value) ? scoring.factTruncationPenalty : 0;
+  const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(value) ? scoring.factScaffoldPenalty : 0;
   const genericPenalty = /(doğru ve güvenilir kaynaklardan bilgi edin|kaynakta özel alarm|kaynakta açık dayanak yoksa)/iu.test(value)
-    ? 3
+    ? scoring.factGenericPenalty
     : 0;
-  return overlap * 6 +
+  return overlap * scoring.answerFactOverlapWeight +
     directActionBonus +
     numericTableBonus +
     shareGroupTableBonus +
@@ -308,7 +312,7 @@ function factQualityScore(value: string, userQuery: string): number {
     plainPeriodProfitBonus +
     sourceTitleBonus +
     sourceLanguageBonus +
-    sentenceBonus +
+    completeSentenceBonus +
     lengthBonus -
     truncationPenalty -
     scaffoldPenalty -
@@ -318,16 +322,18 @@ function factQualityScore(value: string, userQuery: string): number {
 }
 
 function prioritizeFacts(values: string[], userQuery: string): string[] {
+  const minScore = getDecisionConfig().evidenceScoring.answerFactMinScore;
   return values
     .map((value, index) => ({ value, index, score: factQualityScore(value, userQuery) }))
-    .filter(({ score }) => score > -20)
+    .filter(({ score }) => score > minScore)
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map(({ value }) => value);
 }
 
 function firstUsefulFact(values: string[], userQuery: string, exclude: string[] = []): string | undefined {
   const excluded = new Set(exclude.map((value) => normalizeForFactMatch(value)));
-  return values.find((value) => !excluded.has(normalizeForFactMatch(value)) && factQualityScore(value, userQuery) >= 1);
+  const minScore = getDecisionConfig().evidenceScoring.answerFirstUsefulFactMinScore;
+  return values.find((value) => !excluded.has(normalizeForFactMatch(value)) && factQualityScore(value, userQuery) >= minScore);
 }
 
 function fallbackAction(domain: AnswerDomain): string {

@@ -16,6 +16,8 @@ describe("decision config registry", () => {
     expect(config.evidenceBudget.usableFactLimit).toBe(5);
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(1);
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBeGreaterThan(0);
+    expect(config.evidenceScoring.answerFactOverlapWeight).toBe(6);
+    expect(config.evidenceScoring.fragmentMinScore).toBe(-8);
     expect(config.feedbackRuntime.mode).toBe("shadow");
     expect(config.feedbackRuntime.promotionMaxAbsDelta).toBe(0.35);
     expect(config.feedbackProposal.minSignals).toBe(2);
@@ -36,6 +38,8 @@ describe("decision config registry", () => {
       R3MES_EVIDENCE_COMPILER_MIN_FACTS_HIGH: "3",
       R3MES_EVIDENCE_COMPILER_REQUIRE_SOURCE_HIGH: "1",
       R3MES_EVIDENCE_SCORE_SHARE_GROUP_DENSE_TABLE_BONUS: "44",
+      R3MES_EVIDENCE_SCORE_ANSWER_FACT_OVERLAP_WEIGHT: "7",
+      R3MES_EVIDENCE_SCORE_FRAGMENT_MIN_SCORE: "0",
       R3MES_FEEDBACK_RUNTIME_MODE: "active",
       R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA: "0.2",
       R3MES_FEEDBACK_PROPOSAL_MIN_SIGNALS: "3",
@@ -54,6 +58,8 @@ describe("decision config registry", () => {
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(3);
     expect(config.evidenceCompiler.requireSourceForHigh).toBe(true);
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBe(44);
+    expect(config.evidenceScoring.answerFactOverlapWeight).toBe(7);
+    expect(config.evidenceScoring.fragmentMinScore).toBe(0);
     expect(config.feedbackRuntime.mode).toBe("active");
     expect(config.feedbackRuntime.promotionMaxAbsDelta).toBe(0.2);
     expect(config.feedbackProposal.minSignals).toBe(3);
