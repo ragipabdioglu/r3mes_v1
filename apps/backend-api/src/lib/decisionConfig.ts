@@ -81,6 +81,16 @@ export interface EvidenceLexiconConfig {
   distributableTerms: string[];
 }
 
+export type EvidencePlannerExpectedType = "symptom_card" | "guideline" | "user_record" | "unknown";
+
+export interface EvidencePlannerHintConfig {
+  id: string;
+  expectedEvidenceType: EvidencePlannerExpectedType;
+  matchTerms: string[];
+  searchQueries: string[];
+  mustIncludeTerms: string[];
+}
+
 export interface EvidenceBudgetConfig {
   directFactLimit: number;
   supportingFactLimit: number;
@@ -137,6 +147,7 @@ export interface DecisionConfig {
   evidenceCompiler: EvidenceCompilerConfig;
   evidenceScoring: EvidenceScoringConfig;
   evidenceLexicon: EvidenceLexiconConfig;
+  evidencePlannerHints: EvidencePlannerHintConfig[];
   feedbackRuntime: FeedbackRuntimeConfig;
   feedbackProposal: FeedbackProposalConfig;
 }
@@ -228,6 +239,95 @@ const DEFAULT_EVIDENCE_LEXICON: EvidenceLexiconConfig = {
   periodProfitTerms: ["donem kari", "donem kâri"],
   distributableTerms: ["dagitilabilir"],
 };
+
+const DEFAULT_EVIDENCE_PLANNER_HINTS: EvidencePlannerHintConfig[] = [
+  {
+    id: "medical_abdominal_pain",
+    expectedEvidenceType: "symptom_card",
+    matchTerms: ["karn", "karın", "karin", "mide", "göbek", "gobek"],
+    searchQueries: [
+      "karın ağrısı genel triyaj",
+      "karın ağrısı ateş kusma kanama acil belirtiler",
+      "kasık ağrısı alt karın ağrısı kadın doğum",
+    ],
+    mustIncludeTerms: ["karın", "ağrı", "ateş", "kusma", "kanama", "acil"],
+  },
+  {
+    id: "medical_pelvic_pain",
+    expectedEvidenceType: "symptom_card",
+    matchTerms: ["kasık", "kasik", "pelvik", "alt karın", "alt karin"],
+    searchQueries: [
+      "kasık ağrısı genel triyaj",
+      "pelvik ağrı kadın doğum acil belirtiler",
+      "kasık ağrısı ateş kanama akıntı gebelik şüphesi",
+    ],
+    mustIncludeTerms: ["kasık", "pelvik", "ağrı", "kanama", "akıntı", "gebelik"],
+  },
+  {
+    id: "medical_abnormal_bleeding",
+    expectedEvidenceType: "symptom_card",
+    matchTerms: ["kanama", "lekelenme", "adet dışı", "adet disi", "menopoz"],
+    searchQueries: [
+      "anormal vajinal kanama triyaj",
+      "adet dışı kanama lekelenme kadın doğum",
+      "menopoz sonrası kanama değerlendirme",
+    ],
+    mustIncludeTerms: ["kanama", "lekelenme", "adet", "menopoz"],
+  },
+  {
+    id: "medical_discharge",
+    expectedEvidenceType: "symptom_card",
+    matchTerms: ["akıntı", "akinti", "koku", "kaşıntı", "kasinti", "yanma"],
+    searchQueries: [
+      "vajinal akıntı triyaj",
+      "akıntı kötü koku kaşıntı kasık ağrısı",
+      "vajinal akıntı ateş kanama acil belirtiler",
+    ],
+    mustIncludeTerms: ["akıntı", "koku", "kaşıntı", "yanma", "ağrı"],
+  },
+  {
+    id: "legal_general",
+    expectedEvidenceType: "guideline",
+    matchTerms: ["hukuk", "dava", "avukat", "sözleşme", "sozlesme", "kira", "tüketici", "tuketici", "ayıplı", "ayipli", "bozuk ürün", "bozuk urun", "fatura", "satıcı", "satici", "iade", "trafik cezası", "itiraz"],
+    searchQueries: ["{query} hukuki bilgi", "{query} süre belge başvuru", "{query} avukat yetkili kurum"],
+    mustIncludeTerms: ["hukuk", "süre", "belge", "başvuru", "avukat", "sözleşme", "fatura", "iade"],
+  },
+  {
+    id: "finance_general",
+    expectedEvidenceType: "guideline",
+    matchTerms: ["yatırım", "yatirim", "hisse", "borsa", "kripto", "faiz", "kredi", "portföy", "portfoy", "finans"],
+    searchQueries: ["{query} risk vade maliyet", "{query} yatırım danışmanı çeşitlendirme", "{query} getiri garantisi risk"],
+    mustIncludeTerms: ["yatırım", "risk", "vade", "maliyet", "danışman", "garanti"],
+  },
+  {
+    id: "technical_migration",
+    expectedEvidenceType: "guideline",
+    matchTerms: ["migration", "veritabanı", "veritabani", "deploy", "rollback", "staging", "sunucu", "log", "yedek"],
+    searchQueries: ["{query} yedek rollback staging", "{query} log kontrol riskli işlem", "{query} üretim ortamı güvenli migration"],
+    mustIncludeTerms: ["migration", "yedek", "rollback", "staging", "log", "üretim"],
+  },
+  {
+    id: "medical_user_record",
+    expectedEvidenceType: "user_record",
+    matchTerms: ["smear", "hpv", "biyopsi", "patoloji", "kist", "yumurtalık", "yumurtalik"],
+    searchQueries: ["{query} kadın hastalıkları takip", "{query} güvenli değerlendirme"],
+    mustIncludeTerms: [],
+  },
+  {
+    id: "medical_biopsy_followup",
+    expectedEvidenceType: "user_record",
+    matchTerms: ["biyopsi", "parça", "parca"],
+    searchQueries: ["biyopsi temiz sonuç takip", "rahimden parça alındı temiz çıktı kanama", "biyopsi sonrası lekelenme kontrol"],
+    mustIncludeTerms: ["biyopsi", "parça", "temiz", "kanama", "lekelenme", "kontrol"],
+  },
+  {
+    id: "medical_ascus_followup",
+    expectedEvidenceType: "user_record",
+    matchTerms: ["asc-us", "ascus", "asc us"],
+    searchQueries: ["ASC-US smear sonucu takip", "ASC-US kanser anlamına gelir mi", "ASC-US HPV kontrol değerlendirme"],
+    mustIncludeTerms: ["ASC-US", "smear", "takip", "kontrol", "kanser"],
+  },
+];
 
 const ROUTER_WEIGHT_ENV_KEYS: Record<keyof RouterWeights, string> = {
   profileEmbedding: "R3MES_ROUTER_WEIGHT_PROFILE_EMBEDDING",
@@ -428,6 +528,42 @@ function readEvidenceLexiconConfig(env: NodeJS.ProcessEnv): EvidenceLexiconConfi
   return merged;
 }
 
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter(Boolean)
+    : [];
+}
+
+function readEvidencePlannerHints(env: NodeJS.ProcessEnv): EvidencePlannerHintConfig[] {
+  const raw = env.R3MES_EVIDENCE_PLANNER_HINTS_JSON;
+  if (!raw?.trim()) return DEFAULT_EVIDENCE_PLANNER_HINTS;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return DEFAULT_EVIDENCE_PLANNER_HINTS;
+    const hints = parsed
+      .map((item): EvidencePlannerHintConfig | null => {
+        if (!item || typeof item !== "object") return null;
+        const record = item as Record<string, unknown>;
+        const id = String(record.id ?? "").trim();
+        const expectedEvidenceType = String(record.expectedEvidenceType ?? "unknown") as EvidencePlannerExpectedType;
+        if (!id || !["symptom_card", "guideline", "user_record", "unknown"].includes(expectedEvidenceType)) return null;
+        const matchTerms = readStringArray(record.matchTerms);
+        if (matchTerms.length === 0) return null;
+        return {
+          id,
+          expectedEvidenceType,
+          matchTerms,
+          searchQueries: readStringArray(record.searchQueries),
+          mustIncludeTerms: readStringArray(record.mustIncludeTerms),
+        };
+      })
+      .filter((item): item is EvidencePlannerHintConfig => Boolean(item));
+    return hints.length > 0 ? hints : DEFAULT_EVIDENCE_PLANNER_HINTS;
+  } catch {
+    return DEFAULT_EVIDENCE_PLANNER_HINTS;
+  }
+}
+
 export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): DecisionConfig {
   return {
     version: env.R3MES_DECISION_CONFIG_VERSION?.trim() || DECISION_CONFIG_VERSION,
@@ -479,6 +615,7 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
     },
     evidenceScoring: readEvidenceScoringConfig(env),
     evidenceLexicon: readEvidenceLexiconConfig(env),
+    evidencePlannerHints: readEvidencePlannerHints(env),
     feedbackRuntime: {
       mode: (env.R3MES_FEEDBACK_RUNTIME_MODE ?? "shadow").trim().toLowerCase() === "active" ? "active" : "shadow",
       promotionMaxAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA, 0.35),

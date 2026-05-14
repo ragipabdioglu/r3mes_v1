@@ -1135,6 +1135,10 @@ function cardHasQueryScopedExclusion(card: EvidenceExtractorCardInput, queryToke
   );
 }
 
+function renderPlannerHintQuery(template: string, userQuery: string): string {
+  return template.replace(/\{query\}/gu, userQuery);
+}
+
 export function buildDeterministicQueryPlan(input: QueryPlannerInput): QueryPlannerOutput {
   const userQuery = input.userQuery.trim();
   const routePlan = routeQuery(userQuery);
@@ -1143,99 +1147,11 @@ export function buildDeterministicQueryPlan(input: QueryPlannerInput): QueryPlan
   const mustExcludeTerms: string[] = [...routePlan.mustExcludeTerms];
   let expectedEvidenceType: QueryPlannerOutput["expectedEvidenceType"] = "unknown";
 
-  if (hasAny(userQuery, ["karn", "karın", "karin", "mide", "göbek", "gobek"])) {
-    expectedEvidenceType = "symptom_card";
-    searchQueries.push(
-      "karın ağrısı genel triyaj",
-      "karın ağrısı ateş kusma kanama acil belirtiler",
-      "kasık ağrısı alt karın ağrısı kadın doğum",
-    );
-    mustIncludeTerms.push("karın", "ağrı", "ateş", "kusma", "kanama", "acil");
-  }
-
-  if (hasAny(userQuery, ["kasık", "kasik", "pelvik", "alt karın", "alt karin"])) {
-    expectedEvidenceType = "symptom_card";
-    searchQueries.push(
-      "kasık ağrısı genel triyaj",
-      "pelvik ağrı kadın doğum acil belirtiler",
-      "kasık ağrısı ateş kanama akıntı gebelik şüphesi",
-    );
-    mustIncludeTerms.push("kasık", "pelvik", "ağrı", "kanama", "akıntı", "gebelik");
-  }
-
-  if (hasAny(userQuery, ["kanama", "lekelenme", "adet dışı", "adet disi", "menopoz"])) {
-    expectedEvidenceType = "symptom_card";
-    searchQueries.push(
-      "anormal vajinal kanama triyaj",
-      "adet dışı kanama lekelenme kadın doğum",
-      "menopoz sonrası kanama değerlendirme",
-    );
-    mustIncludeTerms.push("kanama", "lekelenme", "adet", "menopoz");
-  }
-
-  if (hasAny(userQuery, ["akıntı", "akinti", "koku", "kaşıntı", "kasinti", "yanma"])) {
-    expectedEvidenceType = "symptom_card";
-    searchQueries.push(
-      "vajinal akıntı triyaj",
-      "akıntı kötü koku kaşıntı kasık ağrısı",
-      "vajinal akıntı ateş kanama acil belirtiler",
-    );
-    mustIncludeTerms.push("akıntı", "koku", "kaşıntı", "yanma", "ağrı");
-  }
-
-  if (hasAny(userQuery, ["hukuk", "dava", "avukat", "sözleşme", "sozlesme", "kira", "tüketici", "tuketici", "ayıplı", "ayipli", "bozuk ürün", "bozuk urun", "fatura", "satıcı", "satici", "iade", "trafik cezası", "itiraz"])) {
-    expectedEvidenceType = "guideline";
-    searchQueries.push(
-      `${userQuery} hukuki bilgi`,
-      `${userQuery} süre belge başvuru`,
-      `${userQuery} avukat yetkili kurum`,
-    );
-    mustIncludeTerms.push("hukuk", "süre", "belge", "başvuru", "avukat", "sözleşme", "fatura", "iade");
-  }
-
-  if (hasAny(userQuery, ["yatırım", "yatirim", "hisse", "borsa", "kripto", "faiz", "kredi", "portföy", "portfoy", "finans"])) {
-    expectedEvidenceType = "guideline";
-    searchQueries.push(
-      `${userQuery} risk vade maliyet`,
-      `${userQuery} yatırım danışmanı çeşitlendirme`,
-      `${userQuery} getiri garantisi risk`,
-    );
-    mustIncludeTerms.push("yatırım", "risk", "vade", "maliyet", "danışman", "garanti");
-  }
-
-  if (hasAny(userQuery, ["migration", "veritabanı", "veritabani", "deploy", "rollback", "staging", "sunucu", "log", "yedek"])) {
-    expectedEvidenceType = "guideline";
-    searchQueries.push(
-      `${userQuery} yedek rollback staging`,
-      `${userQuery} log kontrol riskli işlem`,
-      `${userQuery} üretim ortamı güvenli migration`,
-    );
-    mustIncludeTerms.push("migration", "yedek", "rollback", "staging", "log", "üretim");
-  }
-
-  if (hasAny(userQuery, ["smear", "hpv", "biyopsi", "patoloji", "kist", "yumurtalık", "yumurtalik"])) {
-    expectedEvidenceType = "user_record";
-    searchQueries.push(`${userQuery} kadın hastalıkları takip`, `${userQuery} güvenli değerlendirme`);
-  }
-
-  if (hasAny(userQuery, ["biyopsi", "parça", "parca"])) {
-    expectedEvidenceType = "user_record";
-    searchQueries.push(
-      "biyopsi temiz sonuç takip",
-      "rahimden parça alındı temiz çıktı kanama",
-      "biyopsi sonrası lekelenme kontrol",
-    );
-    mustIncludeTerms.push("biyopsi", "parça", "temiz", "kanama", "lekelenme", "kontrol");
-  }
-
-  if (hasAny(userQuery, ["asc-us", "ascus", "asc us"])) {
-    expectedEvidenceType = "user_record";
-    searchQueries.push(
-      "ASC-US smear sonucu takip",
-      "ASC-US kanser anlamına gelir mi",
-      "ASC-US HPV kontrol değerlendirme",
-    );
-    mustIncludeTerms.push("ASC-US", "smear", "takip", "kontrol", "kanser");
+  for (const hint of getDecisionConfig().evidencePlannerHints) {
+    if (!hasAny(userQuery, hint.matchTerms)) continue;
+    expectedEvidenceType = hint.expectedEvidenceType;
+    searchQueries.push(...hint.searchQueries.map((query) => renderPlannerHintQuery(query, userQuery)));
+    mustIncludeTerms.push(...hint.mustIncludeTerms);
   }
 
   searchQueries.push(...routePlan.retrievalHints);
