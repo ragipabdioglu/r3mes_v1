@@ -17,7 +17,7 @@ describe("decision config registry", () => {
     expect(config.reranker.normalCandidateLimit).toBe(4);
     expect(config.reranker.deepCandidateLimit).toBe(8);
     expect(config.reranker.lowConfidenceCandidateLimit).toBe(4);
-    expect(config.reranker.scopedCandidateLimit).toBe(5);
+    expect(config.reranker.scopedCandidateLimit).toBe(3);
     expect(config.evidenceBudget.usableFactLimit).toBe(5);
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(1);
     expect(config.evidencePruning.fastMaxChars).toBe(1200);

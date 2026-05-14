@@ -691,7 +691,7 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
       normalCandidateLimit: readPositiveInt(env.R3MES_RERANKER_NORMAL_CANDIDATE_LIMIT, 4),
       deepCandidateLimit: readPositiveInt(env.R3MES_RERANKER_DEEP_CANDIDATE_LIMIT, 8),
       lowConfidenceCandidateLimit: readPositiveInt(env.R3MES_RERANKER_LOW_CONFIDENCE_CANDIDATE_LIMIT, 4),
-      scopedCandidateLimit: readPositiveInt(env.R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT, 5),
+      scopedCandidateLimit: readPositiveInt(env.R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT, 3),
       cacheTtlMs: readPositiveInt(env.R3MES_RERANKER_CACHE_TTL_MS, 10 * 60_000),
       cacheMaxEntries: readPositiveInt(env.R3MES_RERANKER_CACHE_MAX_ENTRIES, 256),
       requireRealProvider: env.R3MES_REQUIRE_REAL_RERANKER === "1" || env.NODE_ENV === "production",
