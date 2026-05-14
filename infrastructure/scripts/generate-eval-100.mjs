@@ -433,6 +433,10 @@ async function main() {
     process.exitCode = 1;
     console.error(`missing eval buckets: ${manifest.missingBuckets.join(", ")}`);
   }
+  if (manifest.underTargetBuckets.length > 0) {
+    process.exitCode = 1;
+    console.error(`under-target eval buckets: ${manifest.underTargetBuckets.join(", ")}`);
+  }
 }
 
 main().catch((error) => {
