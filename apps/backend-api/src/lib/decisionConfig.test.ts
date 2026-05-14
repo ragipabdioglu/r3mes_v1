@@ -21,6 +21,8 @@ describe("decision config registry", () => {
     expect(config.evidenceLexicon.withholdingTerms).toContain("stopaj");
     expect(config.evidenceLexicon.cashRateTerms).toContain("cash");
     expect(config.evidencePlannerHints.some((hint) => hint.id === "medical_pelvic_pain")).toBe(true);
+    expect(config.ingestionQuality.thinParseScore).toBe(48);
+    expect(config.ingestionQuality.tableHighScore).toBe(65);
     expect(config.feedbackRuntime.mode).toBe("shadow");
     expect(config.feedbackRuntime.promotionMaxAbsDelta).toBe(0.35);
     expect(config.feedbackProposal.minSignals).toBe(2);
@@ -54,6 +56,8 @@ describe("decision config registry", () => {
           mustIncludeTerms: ["özel"],
         },
       ]),
+      R3MES_INGESTION_QUALITY_JSON: JSON.stringify({ thinParseScore: 55, tableHighScore: 75 }),
+      R3MES_INGESTION_OCR_HIGH_SCORE: "40",
       R3MES_FEEDBACK_RUNTIME_MODE: "active",
       R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA: "0.2",
       R3MES_FEEDBACK_PROPOSAL_MIN_SIGNALS: "3",
@@ -85,6 +89,9 @@ describe("decision config registry", () => {
         mustIncludeTerms: ["özel"],
       },
     ]);
+    expect(config.ingestionQuality.thinParseScore).toBe(55);
+    expect(config.ingestionQuality.tableHighScore).toBe(75);
+    expect(config.ingestionQuality.ocrHighScore).toBe(40);
     expect(config.feedbackRuntime.mode).toBe("active");
     expect(config.feedbackRuntime.promotionMaxAbsDelta).toBe(0.2);
     expect(config.feedbackProposal.minSignals).toBe(3);

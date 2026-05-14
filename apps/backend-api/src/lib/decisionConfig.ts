@@ -91,6 +91,18 @@ export interface EvidencePlannerHintConfig {
   mustIncludeTerms: string[];
 }
 
+export interface IngestionQualityConfig {
+  tableMediumScore: number;
+  tableHighScore: number;
+  tableMultiSignalScore: number;
+  tableSingleSignalScore: number;
+  tableDenseNumericScore: number;
+  tableDenseNumericThreshold: number;
+  ocrMediumScore: number;
+  ocrHighScore: number;
+  thinParseScore: number;
+}
+
 export interface EvidenceBudgetConfig {
   directFactLimit: number;
   supportingFactLimit: number;
@@ -148,6 +160,7 @@ export interface DecisionConfig {
   evidenceScoring: EvidenceScoringConfig;
   evidenceLexicon: EvidenceLexiconConfig;
   evidencePlannerHints: EvidencePlannerHintConfig[];
+  ingestionQuality: IngestionQualityConfig;
   feedbackRuntime: FeedbackRuntimeConfig;
   feedbackProposal: FeedbackProposalConfig;
 }
@@ -329,6 +342,18 @@ const DEFAULT_EVIDENCE_PLANNER_HINTS: EvidencePlannerHintConfig[] = [
   },
 ];
 
+const DEFAULT_INGESTION_QUALITY: IngestionQualityConfig = {
+  tableMediumScore: 35,
+  tableHighScore: 65,
+  tableMultiSignalScore: 70,
+  tableSingleSignalScore: 38,
+  tableDenseNumericScore: 52,
+  tableDenseNumericThreshold: 0.18,
+  ocrMediumScore: 12,
+  ocrHighScore: 35,
+  thinParseScore: 48,
+};
+
 const ROUTER_WEIGHT_ENV_KEYS: Record<keyof RouterWeights, string> = {
   profileEmbedding: "R3MES_ROUTER_WEIGHT_PROFILE_EMBEDDING",
   lexicalKeyword: "R3MES_ROUTER_WEIGHT_LEXICAL_KEYWORD",
@@ -399,6 +424,18 @@ const EVIDENCE_LEXICON_ENV_KEYS: Record<keyof EvidenceLexiconConfig, string> = {
   netPeriodTerms: "R3MES_EVIDENCE_LEXICON_NET_PERIOD_TERMS",
   periodProfitTerms: "R3MES_EVIDENCE_LEXICON_PERIOD_PROFIT_TERMS",
   distributableTerms: "R3MES_EVIDENCE_LEXICON_DISTRIBUTABLE_TERMS",
+};
+
+const INGESTION_QUALITY_ENV_KEYS: Record<keyof IngestionQualityConfig, string> = {
+  tableMediumScore: "R3MES_INGESTION_TABLE_MEDIUM_SCORE",
+  tableHighScore: "R3MES_INGESTION_TABLE_HIGH_SCORE",
+  tableMultiSignalScore: "R3MES_INGESTION_TABLE_MULTI_SIGNAL_SCORE",
+  tableSingleSignalScore: "R3MES_INGESTION_TABLE_SINGLE_SIGNAL_SCORE",
+  tableDenseNumericScore: "R3MES_INGESTION_TABLE_DENSE_NUMERIC_SCORE",
+  tableDenseNumericThreshold: "R3MES_INGESTION_TABLE_DENSE_NUMERIC_THRESHOLD",
+  ocrMediumScore: "R3MES_INGESTION_OCR_MEDIUM_SCORE",
+  ocrHighScore: "R3MES_INGESTION_OCR_HIGH_SCORE",
+  thinParseScore: "R3MES_INGESTION_THIN_PARSE_SCORE",
 };
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -564,6 +601,18 @@ function readEvidencePlannerHints(env: NodeJS.ProcessEnv): EvidencePlannerHintCo
   }
 }
 
+function readIngestionQualityConfig(env: NodeJS.ProcessEnv): IngestionQualityConfig {
+  const parsed = readJsonObject<Partial<Record<keyof IngestionQualityConfig, unknown>>>(env.R3MES_INGESTION_QUALITY_JSON);
+  const merged: IngestionQualityConfig = { ...DEFAULT_INGESTION_QUALITY };
+  for (const key of Object.keys(DEFAULT_INGESTION_QUALITY) as Array<keyof IngestionQualityConfig>) {
+    const jsonValue = readNonNegative(parsed[key]);
+    if (jsonValue !== null) merged[key] = jsonValue;
+    const envValue = readNonNegative(env[INGESTION_QUALITY_ENV_KEYS[key]]);
+    if (envValue !== null) merged[key] = envValue;
+  }
+  return merged;
+}
+
 export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): DecisionConfig {
   return {
     version: env.R3MES_DECISION_CONFIG_VERSION?.trim() || DECISION_CONFIG_VERSION,
@@ -616,6 +665,7 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
     evidenceScoring: readEvidenceScoringConfig(env),
     evidenceLexicon: readEvidenceLexiconConfig(env),
     evidencePlannerHints: readEvidencePlannerHints(env),
+    ingestionQuality: readIngestionQualityConfig(env),
     feedbackRuntime: {
       mode: (env.R3MES_FEEDBACK_RUNTIME_MODE ?? "shadow").trim().toLowerCase() === "active" ? "active" : "shadow",
       promotionMaxAbsDelta: readPositiveFloat(env.R3MES_FEEDBACK_PROMOTION_MAX_ABS_DELTA, 0.35),

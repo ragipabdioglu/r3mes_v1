@@ -6,6 +6,7 @@ import type { KnowledgeChunkDraft } from "./knowledgeText.js";
 import { routeQuery } from "./queryRouter.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import type { KnowledgeParseQuality } from "./knowledgeParseQuality.js";
+import { getDecisionConfig } from "./decisionConfig.js";
 
 export type KnowledgeRiskLevel = "low" | "medium" | "high";
 
@@ -180,22 +181,23 @@ export function buildIngestionQualityReport(opts: {
   parseQuality: KnowledgeParseQuality;
   sourceQuality: KnowledgeAutoMetadata["sourceQuality"];
 }): IngestionQualityReport {
+  const config = getDecisionConfig().ingestionQuality;
   const tableSignals = opts.parseQuality.signals.tableSignalCount ?? 0;
   const numericDensity = opts.parseQuality.signals.numericDensity ?? 0;
   const tableRiskScore =
     tableSignals >= 2
-      ? 70
+      ? config.tableMultiSignalScore
       : tableSignals === 1
-        ? 38
-        : numericDensity > 0.18
-          ? 52
+        ? config.tableSingleSignalScore
+        : numericDensity > config.tableDenseNumericThreshold
+          ? config.tableDenseNumericScore
           : 0;
-  const ocrRisk = riskLevelFromScore(opts.parseQuality.signals.ocrRiskScore ?? 0, 12, 35);
-  const tableRisk = riskLevelFromScore(tableRiskScore, 35, 65);
+  const ocrRisk = riskLevelFromScore(opts.parseQuality.signals.ocrRiskScore ?? 0, config.ocrMediumScore, config.ocrHighScore);
+  const tableRisk = riskLevelFromScore(tableRiskScore, config.tableMediumScore, config.tableHighScore);
   const thinSource =
     opts.sourceQuality === "thin" ||
     opts.parseQuality.level === "noisy" ||
-    opts.parseQuality.score < 48 ||
+    opts.parseQuality.score < config.thinParseScore ||
     opts.parseQuality.warnings.includes("very_short_text") ||
     opts.parseQuality.warnings.includes("fragmented_lines");
   const warnings = unique(
