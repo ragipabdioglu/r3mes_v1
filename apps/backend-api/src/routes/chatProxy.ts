@@ -450,18 +450,82 @@ function shouldExposeChatDebug(req: FastifyRequest): boolean {
   return shouldExposeChatDebugFromHeaders(req.headers);
 }
 
-function extractRetrievalQuery(body: Record<string, unknown>): string {
+type ExtractedRetrievalQuery = {
+  query: string;
+  lastUserQuery: string;
+  contextualized: boolean;
+  contextUserMessageCount: number;
+};
+
+function extractUserMessageContents(body: Record<string, unknown>): string[] {
   const messages = Array.isArray(body.messages) ? body.messages : [];
-  const lastUser = [...messages]
-    .reverse()
-    .find(
+  return messages
+    .filter(
       (item) =>
         item &&
         typeof item === "object" &&
         (item as Record<string, unknown>).role === "user" &&
         typeof (item as Record<string, unknown>).content === "string",
-    ) as { content?: string } | undefined;
-  return lastUser?.content?.trim() ?? "";
+    )
+    .map((item) => String((item as Record<string, unknown>).content).trim())
+    .filter(Boolean);
+}
+
+function isContextDependentFollowUp(query: string): boolean {
+  const normalized = query
+    .toLocaleLowerCase("tr-TR")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return false;
+  if (normalized.length > 180) return false;
+  const nonScopeUppercaseTokens = new Set(["SPK", "CMB", "KAP", "TL", "TRY", "PDF", "VUK"]);
+  const uppercaseScopeTokens = [...query.matchAll(/\b[A-ZÇĞİÖŞÜ]{3,6}\b/gu)]
+    .map((match) => match[0])
+    .filter((token) => !nonScopeUppercaseTokens.has(token));
+  if (uppercaseScopeTokens.length > 0 || /\b\d{5,}\b/u.test(query)) return false;
+  return [
+    "peki",
+    "bu ",
+    "bunun",
+    "bundaki",
+    "aynı",
+    "ayni",
+    "o zaman",
+    "orada",
+    "ondaki",
+    "belgedeki",
+    "kaynakta",
+    "tablodaki",
+    "şunu",
+    "sunu",
+    "bir de",
+    "bide",
+  ].some((prefix) => normalized.startsWith(prefix));
+}
+
+function extractRetrievalQuery(body: Record<string, unknown>): ExtractedRetrievalQuery {
+  const userMessages = extractUserMessageContents(body);
+  const lastUserQuery = userMessages.at(-1) ?? "";
+  if (!lastUserQuery) {
+    return { query: "", lastUserQuery: "", contextualized: false, contextUserMessageCount: 0 };
+  }
+
+  const contextMessages = userMessages.slice(0, -1).slice(-2);
+  if (contextMessages.length === 0 || !isContextDependentFollowUp(lastUserQuery)) {
+    return {
+      query: lastUserQuery,
+      lastUserQuery,
+      contextualized: false,
+      contextUserMessageCount: 0,
+    };
+  }
+
+  return {
+    query: [...contextMessages, lastUserQuery].join("\n"),
+    lastUserQuery,
+    contextualized: true,
+    contextUserMessageCount: contextMessages.length,
+  };
 }
 
 function injectRetrievedContextIntoMessages(
@@ -1465,7 +1529,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       >;
       const includePublic = rawBody.includePublic === true;
       const requestedCollectionIds = normalizeStringArray(rawBody.collectionIds);
-      const retrievalQuery = extractRetrievalQuery(rawBody);
+      const extractedRetrievalQuery = extractRetrievalQuery(rawBody);
+      const retrievalQuery = extractedRetrievalQuery.query;
       const chatTrace = createChatTrace({
         query: retrievalQuery,
         stream,
@@ -1475,6 +1540,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       chatTrace.recordNow("request", "ok", {
         hasQuery: retrievalQuery.trim().length > 0,
         messageCount: Array.isArray(rawBody.messages) ? rawBody.messages.length : 0,
+        retrievalQueryContextualized: extractedRetrievalQuery.contextualized,
+        contextUserMessageCount: extractedRetrievalQuery.contextUserMessageCount,
       });
       const queryUnderstanding = buildQueryUnderstanding(retrievalQuery);
       chatTrace.recordNow("query_understanding", "ok", {

@@ -1651,7 +1651,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     criticalEvidenceTermGroups(evidenceQuery).length > 0
     ? Math.max(limit, scopedRerankerCandidateLimit)
     : Math.max(limit, 3);
-  const rerankRun = await rerankKnowledgeCardsWithDiagnostics(query, rerankInput, rerankReturnLimit, {
+  const rerankRun = await rerankKnowledgeCardsWithDiagnostics(evidenceQuery, rerankInput, rerankReturnLimit, {
     candidateLimit: scopedRerankerCandidateLimit,
   });
   const reranked = rerankRun.candidates;

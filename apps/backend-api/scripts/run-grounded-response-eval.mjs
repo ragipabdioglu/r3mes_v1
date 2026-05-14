@@ -1382,9 +1382,25 @@ function buildEvalGuardrails(opts) {
   };
 }
 
+function normalizeEvalMessages(testCase) {
+  if (Array.isArray(testCase.messages) && testCase.messages.length > 0) {
+    return testCase.messages
+      .map((message) => ({
+        role: String(message?.role ?? "").trim(),
+        content: String(message?.content ?? "").trim(),
+      }))
+      .filter((message) =>
+        ["system", "user", "assistant"].includes(message.role) &&
+        message.content.length > 0,
+      );
+  }
+  return [{ role: "user", content: testCase.query }];
+}
+
 async function runCase(opts, testCase) {
+  const messages = normalizeEvalMessages(testCase);
   const body = {
-    messages: [{ role: "user", content: testCase.query }],
+    messages,
     collectionIds: testCase.collectionIds,
     includePublic: testCase.includePublic === true,
     stream: false,
