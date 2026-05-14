@@ -15,6 +15,8 @@ describe("decision config registry", () => {
     expect(config.reranker.mode).toBe("model");
     expect(config.evidenceBudget.usableFactLimit).toBe(5);
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(1);
+    expect(config.evidencePruning.fastMaxChars).toBe(1200);
+    expect(config.evidencePruning.maxFactSentences).toBe(6);
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBeGreaterThan(0);
     expect(config.evidenceScoring.answerFactOverlapWeight).toBe(6);
     expect(config.evidenceScoring.fragmentMinScore).toBe(-8);
@@ -42,6 +44,8 @@ describe("decision config registry", () => {
       R3MES_RERANKER_CANDIDATE_LIMIT: "9",
       R3MES_EVIDENCE_COMPILER_MIN_FACTS_HIGH: "3",
       R3MES_EVIDENCE_COMPILER_REQUIRE_SOURCE_HIGH: "1",
+      R3MES_EVIDENCE_PRUNING_JSON: JSON.stringify({ normalMaxChars: 1900, maxFactSentences: 8 }),
+      R3MES_EVIDENCE_DEEP_MAX_CHARS: "2600",
       R3MES_EVIDENCE_SCORE_SHARE_GROUP_DENSE_TABLE_BONUS: "44",
       R3MES_EVIDENCE_SCORE_ANSWER_FACT_OVERLAP_WEIGHT: "7",
       R3MES_EVIDENCE_SCORE_FRAGMENT_MIN_SCORE: "0",
@@ -75,6 +79,9 @@ describe("decision config registry", () => {
     expect(config.reranker.candidateLimit).toBe(9);
     expect(config.evidenceCompiler.minUsableFactsForHigh).toBe(3);
     expect(config.evidenceCompiler.requireSourceForHigh).toBe(true);
+    expect(config.evidencePruning.normalMaxChars).toBe(1900);
+    expect(config.evidencePruning.deepMaxChars).toBe(2600);
+    expect(config.evidencePruning.maxFactSentences).toBe(8);
     expect(config.evidenceScoring.shareGroupDenseTableBonus).toBe(44);
     expect(config.evidenceScoring.answerFactOverlapWeight).toBe(7);
     expect(config.evidenceScoring.fragmentMinScore).toBe(0);

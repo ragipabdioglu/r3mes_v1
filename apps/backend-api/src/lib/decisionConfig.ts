@@ -120,6 +120,13 @@ export interface EvidenceCompilerConfig {
   contradictionDowngradesToLow: boolean;
 }
 
+export interface EvidencePruningConfig {
+  fastMaxChars: number;
+  normalMaxChars: number;
+  deepMaxChars: number;
+  maxFactSentences: number;
+}
+
 export interface FeedbackRuntimeConfig {
   mode: "shadow" | "active";
   promotionMaxAbsDelta: number;
@@ -157,6 +164,7 @@ export interface DecisionConfig {
   reranker: RerankerDecisionConfig;
   evidenceBudget: EvidenceBudgetConfig;
   evidenceCompiler: EvidenceCompilerConfig;
+  evidencePruning: EvidencePruningConfig;
   evidenceScoring: EvidenceScoringConfig;
   evidenceLexicon: EvidenceLexiconConfig;
   evidencePlannerHints: EvidencePlannerHintConfig[];
@@ -354,6 +362,13 @@ const DEFAULT_INGESTION_QUALITY: IngestionQualityConfig = {
   thinParseScore: 48,
 };
 
+const DEFAULT_EVIDENCE_PRUNING: EvidencePruningConfig = {
+  fastMaxChars: 1200,
+  normalMaxChars: 1600,
+  deepMaxChars: 2200,
+  maxFactSentences: 6,
+};
+
 const ROUTER_WEIGHT_ENV_KEYS: Record<keyof RouterWeights, string> = {
   profileEmbedding: "R3MES_ROUTER_WEIGHT_PROFILE_EMBEDDING",
   lexicalKeyword: "R3MES_ROUTER_WEIGHT_LEXICAL_KEYWORD",
@@ -436,6 +451,13 @@ const INGESTION_QUALITY_ENV_KEYS: Record<keyof IngestionQualityConfig, string> =
   ocrMediumScore: "R3MES_INGESTION_OCR_MEDIUM_SCORE",
   ocrHighScore: "R3MES_INGESTION_OCR_HIGH_SCORE",
   thinParseScore: "R3MES_INGESTION_THIN_PARSE_SCORE",
+};
+
+const EVIDENCE_PRUNING_ENV_KEYS: Record<keyof EvidencePruningConfig, string> = {
+  fastMaxChars: "R3MES_EVIDENCE_FAST_MAX_CHARS",
+  normalMaxChars: "R3MES_EVIDENCE_NORMAL_MAX_CHARS",
+  deepMaxChars: "R3MES_EVIDENCE_DEEP_MAX_CHARS",
+  maxFactSentences: "R3MES_EVIDENCE_MAX_FACT_SENTENCES",
 };
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -613,6 +635,23 @@ function readIngestionQualityConfig(env: NodeJS.ProcessEnv): IngestionQualityCon
   return merged;
 }
 
+function readEvidencePruningConfig(env: NodeJS.ProcessEnv): EvidencePruningConfig {
+  const parsed = readJsonObject<Partial<Record<keyof EvidencePruningConfig, unknown>>>(env.R3MES_EVIDENCE_PRUNING_JSON);
+  const merged: EvidencePruningConfig = { ...DEFAULT_EVIDENCE_PRUNING };
+  for (const key of Object.keys(DEFAULT_EVIDENCE_PRUNING) as Array<keyof EvidencePruningConfig>) {
+    const jsonValue = readNonNegative(parsed[key]);
+    if (jsonValue !== null) merged[key] = jsonValue;
+    const envValue = readNonNegative(env[EVIDENCE_PRUNING_ENV_KEYS[key]]);
+    if (envValue !== null) merged[key] = envValue;
+  }
+  return {
+    fastMaxChars: Math.max(1, Math.round(merged.fastMaxChars)),
+    normalMaxChars: Math.max(1, Math.round(merged.normalMaxChars)),
+    deepMaxChars: Math.max(1, Math.round(merged.deepMaxChars)),
+    maxFactSentences: Math.max(1, Math.round(merged.maxFactSentences)),
+  };
+}
+
 export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): DecisionConfig {
   return {
     version: env.R3MES_DECISION_CONFIG_VERSION?.trim() || DECISION_CONFIG_VERSION,
@@ -662,6 +701,7 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
       requireSourceForHigh: readBoolean(env.R3MES_EVIDENCE_COMPILER_REQUIRE_SOURCE_HIGH, false),
       contradictionDowngradesToLow: readBoolean(env.R3MES_EVIDENCE_COMPILER_CONTRADICTION_LOW, true),
     },
+    evidencePruning: readEvidencePruningConfig(env),
     evidenceScoring: readEvidenceScoringConfig(env),
     evidenceLexicon: readEvidenceLexiconConfig(env),
     evidencePlannerHints: readEvidencePlannerHints(env),

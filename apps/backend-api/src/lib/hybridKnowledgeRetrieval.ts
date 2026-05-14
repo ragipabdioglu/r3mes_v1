@@ -3,6 +3,7 @@ import type { ChatSourceCitation } from "@r3mes/shared-types";
 import { getAlignmentConfig } from "./alignmentConfig.js";
 import type { GroundingConfidence } from "./answerSchema.js";
 import { compileEvidence, hasCompiledUsableGrounding, type CompiledEvidence } from "./compiledEvidence.js";
+import { getDecisionConfig } from "./decisionConfig.js";
 import { buildCompiledEvidenceBrief, buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
@@ -1239,9 +1240,10 @@ function renderDetailedEvidenceBrief(
 }
 
 function evidenceInputMaxChars(budgetMode: RetrievalBudgetMode): number {
-  if (budgetMode === "fast_grounded") return parsePositiveInt(process.env.R3MES_EVIDENCE_FAST_MAX_CHARS, 1200);
-  if (budgetMode === "deep_rag") return parsePositiveInt(process.env.R3MES_EVIDENCE_DEEP_MAX_CHARS, 2200);
-  return parsePositiveInt(process.env.R3MES_EVIDENCE_NORMAL_MAX_CHARS, 1600);
+  const pruning = getDecisionConfig().evidencePruning;
+  if (budgetMode === "fast_grounded") return pruning.fastMaxChars;
+  if (budgetMode === "deep_rag") return pruning.deepMaxChars;
+  return pruning.normalMaxChars;
 }
 
 function sentenceParts(value: string): string[] {
@@ -1302,7 +1304,7 @@ function financeLineItemScore(query: string, sentence: string): number {
 }
 
 function evidenceMaxFactSentences(): number {
-  return parsePositiveInt(process.env.R3MES_EVIDENCE_MAX_FACT_SENTENCES, 6);
+  return getDecisionConfig().evidencePruning.maxFactSentences;
 }
 
 function isStructuredEvidenceSentence(sentence: string): boolean {
