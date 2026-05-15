@@ -112,8 +112,14 @@ function shouldOmitOptionalCaution(spec: AnswerSpec): boolean {
 }
 
 function shouldIncludeOptionalCaution(spec: AnswerSpec, answerPlan?: AnswerPlan): boolean {
+  if (answerPlan?.constraints.forbidCaution || answerPlan?.forbiddenAdditions.includes("optional_caution")) return false;
   if (shouldOmitOptionalCaution(spec)) return false;
   if (lowGroundingLead(spec)) return true;
+  if (
+    answerPlan &&
+    ["definition", "list_items", "compare_concepts", "summarize_opinions", "source_grounded_explain"].includes(answerPlan.taskType) &&
+    spec.answerIntent !== "triage"
+  ) return false;
   if (asksForDefinitionAnswer(spec.userQuery)) return false;
   if (spec.answerDomain === "medical" || spec.answerDomain === "finance") return true;
   if (spec.answerIntent === "triage") return true;
@@ -436,6 +442,61 @@ function composeBulletAnswer(spec: AnswerSpec, answerPlan: AnswerPlan, opts: {
     .join("\n");
 }
 
+function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan, opts: {
+  assessment: string;
+  action: string;
+  caution: string;
+  summary: string;
+  relevantFact: string | null;
+}): string | null {
+  if (lowGroundingLead(spec)) return null;
+  if (answerPlan.taskType === "list_items") {
+    const candidates = uniqueSentences(
+      [
+        ...spec.facts,
+        opts.assessment,
+        opts.action,
+        opts.summary,
+        ...(opts.relevantFact ? [opts.relevantFact] : []),
+      ].filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
+      6,
+    );
+    if (candidates.length === 0) return null;
+    return candidates.map((item) => `- ${item}`).join("\n");
+  }
+
+  if (answerPlan.taskType === "definition" || answerPlan.taskType === "source_grounded_explain") {
+    return composeNaturalBrief(spec, {
+      answerPlan,
+      assessment: opts.assessment,
+      action: opts.action,
+      caution: opts.caution,
+      summary: opts.summary,
+      relevantFact: opts.relevantFact,
+    });
+  }
+
+  if (answerPlan.taskType === "compare_concepts") {
+    const lines = uniqueSentences(
+      [opts.assessment, opts.summary, opts.action, ...(opts.relevantFact ? [opts.relevantFact] : [])]
+        .filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
+      4,
+    );
+    return lines.length > 0 ? lines.join("\n") : null;
+  }
+
+  if (answerPlan.taskType === "summarize_opinions") {
+    const lines = uniqueSentences(
+      [opts.assessment, opts.action, opts.summary, ...(opts.relevantFact ? [opts.relevantFact] : [])]
+        .filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
+      4,
+    );
+    return lines.length > 0 ? lines.join("\n") : null;
+  }
+
+  return null;
+}
+
 export function composeAnswerSpec(spec: AnswerSpec): string {
   const policy = getDomainPolicy(spec.answerDomain);
   const answerPlan = buildAnswerPlan(spec);
@@ -452,6 +513,8 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
   const caution = joinItems(spec.caution, "Kaynakta açık dayanak yoksa kesin sonuç veya garanti ifade edilmemelidir.");
   const summary = clean(spec.summary || assessment, "Kaynaklara bağlı kalarak temkinli ilerlemek gerekir.");
   const relevantFact = queryRelevantFact(spec, [assessment, action, caution, summary].join(" "));
+  const plannedAnswer = composePlannedKnowledgeAnswer(spec, answerPlan, { assessment, action, caution, summary, relevantFact });
+  if (plannedAnswer) return plannedAnswer;
 
   const lead = lowGroundingLead(spec);
   const lines: string[] = [];

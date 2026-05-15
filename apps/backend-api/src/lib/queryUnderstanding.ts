@@ -5,7 +5,8 @@ import {
   normalizeTurkishQuery,
   type TurkishQueryNormalization,
 } from "./turkishQueryNormalizer.js";
-import { detectRequestedFields, type RequestedFieldDetection } from "./requestedFieldDetector.js";
+import { detectAnswerTask, type AnswerTaskDetection } from "./answerTaskDetector.js";
+import type { RequestedFieldDetection } from "./requestedFieldDetector.js";
 
 export type QueryUnderstandingMode = "conversation" | "knowledge";
 export type QueryRetrievalIntent = "conversation" | "knowledge_lookup" | "source_selection" | "unclear";
@@ -45,10 +46,13 @@ export interface QueryUnderstanding {
   mode: QueryUnderstandingMode;
   retrievalIntent: QueryRetrievalIntent;
   conversationalIntent: ConversationalIntentDecision | null;
+  answerTask: AnswerTaskDetection;
   requestedFieldDetection: RequestedFieldDetection;
   confidence: "low" | "medium" | "high";
   warnings: string[];
 }
+
+export type QueryUnderstandingV3 = QueryUnderstanding;
 
 const MIN_KNOWLEDGE_TOKEN_COUNT = 2;
 
@@ -275,7 +279,8 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
     16,
   );
   const conversationalIntent = detectConversationalIntent(query);
-  const requestedFieldDetection = detectRequestedFields(query);
+  const answerTask = detectAnswerTask(query);
+  const requestedFieldDetection = answerTask.requestedFieldDetection;
   const mode: QueryUnderstandingMode = conversationalIntent ? "conversation" : "knowledge";
   const quality = inferQueryQuality({
     normalized,
@@ -316,6 +321,7 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
     mode,
     retrievalIntent,
     conversationalIntent,
+    answerTask,
     requestedFieldDetection,
     confidence,
     warnings,
@@ -339,6 +345,14 @@ export function summarizeQueryUnderstandingForTrace(
     concepts: understanding.concepts.slice(0, 8),
     profileConcepts: understanding.profileConcepts.slice(0, 8),
     retrievalIntent: understanding.retrievalIntent,
+    answerTask: {
+      taskType: understanding.answerTask.taskType,
+      answerIntent: understanding.answerTask.answerIntent,
+      confidence: understanding.answerTask.confidence,
+      targetDocumentHints: understanding.answerTask.targetDocumentHints,
+      forbiddenAdditions: understanding.answerTask.forbiddenAdditions,
+      taskReasons: understanding.answerTask.diagnostics.taskReasons,
+    },
     requestedFieldCount: understanding.requestedFieldDetection.requestedFields.length,
     requestedFields: understanding.requestedFieldDetection.requestedFields.slice(0, 8).map((field) => ({
       id: field.id,
@@ -346,7 +360,7 @@ export function summarizeQueryUnderstandingForTrace(
       outputHint: field.outputHint,
       confidence: field.confidence,
     })),
-    outputConstraints: understanding.requestedFieldDetection.constraints,
+    outputConstraints: understanding.answerTask.outputConstraints,
     language: understanding.signals.language,
     intent: understanding.signals.intent,
     routeDomain: understanding.signals.routeHints.domain,

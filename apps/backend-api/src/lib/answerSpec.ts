@@ -2,6 +2,7 @@ import type { AnswerDomain, AnswerIntent, GroundedMedicalAnswer, GroundingConfid
 import type { CompiledEvidence } from "./compiledEvidence.js";
 import { getDecisionConfig } from "./decisionConfig.js";
 import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
+import { detectAnswerTask } from "./answerTaskDetector.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 import type { StructuredFact } from "./structuredFact.js";
 
@@ -426,7 +427,11 @@ export function buildAnswerSpec(opts: {
     ...(riskFacts.length > 0 ? riskFacts : [fallbackCaution(opts.answerDomain)]),
   ]).slice(0, 3);
   const summary = directFacts[0] ?? usableFacts[0] ?? assessment;
-  const answerIntent = opts.evidence?.answerIntent ?? "unknown";
+  const taskDetection = detectAnswerTask(opts.userQuery);
+  const answerIntent =
+    taskDetection.answerIntent !== "unknown"
+      ? taskDetection.answerIntent
+      : opts.evidence?.answerIntent ?? "unknown";
   const tone = groundingConfidence === "low" ? "cautious" : answerIntent === "reassure" ? "calm" : "direct";
 
   return {

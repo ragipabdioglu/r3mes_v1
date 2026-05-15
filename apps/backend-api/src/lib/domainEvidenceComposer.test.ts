@@ -301,4 +301,59 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("Kısa plan:");
     expect(rendered).not.toContain("1.");
   });
+
+  it("uses task-aware list composition for newly ingested lesson notes without medical labels", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "general",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Büyük verinin 5V özelliğini sadece madde madde yaz. Her madde en fazla 1 cümle olsun.",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment: "Büyük veri için 5V kuralı hacim, hız, çeşitlilik, doğruluk ve değer başlıklarıyla açıklanır.",
+      action: "Volume veri miktarını, Velocity veri üretim hızını, Variety veri türlerini, Veracity veri güvenilirliğini, Value ise elde edilen faydayı ifade eder.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "5V, büyük veriyi tanımlamak için kullanılan temel özelliklerdir.",
+      unknowns: [],
+      sourceIds: ["lesson-big-data"],
+      facts: [
+        "Volume veri miktarını ifade eder.",
+        "Velocity verinin üretilme ve işlenme hızını ifade eder.",
+        "Variety farklı veri türlerini ifade eder.",
+        "Veracity verinin doğruluğu ve güvenilirliğiyle ilgilidir.",
+        "Value veriden elde edilen faydayı ifade eder.",
+      ],
+    });
+
+    expect(rendered).toContain("- Volume");
+    expect(rendered).toContain("- Velocity");
+    expect(rendered).not.toContain("Ne zaman doktora");
+    expect(rendered).not.toContain("Dikkat");
+  });
+
+  it("uses source-grounded compare composition without adding unrelated caution", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "general",
+      answerIntent: "compare",
+      groundingConfidence: "high",
+      userQuery: "IoT cihazı ile akıllı cihaz aynı şey mi? Kaynağa göre farkını açıkla.",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment: "Kaynağa göre her IoT cihazı akıllıdır ama her akıllı cihaz IoT değildir.",
+      action: "İnternete bağlı ve uzaktan veri alışverişi yapıyorsa IoT cihazı sayılır; yalnız önceden programlı çalışıyorsa sadece akıllı cihaz olabilir.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Temel fark internet bağlantısı ve veri alışverişi yapabilmesidir.",
+      unknowns: [],
+      sourceIds: ["lesson-iot"],
+      facts: [
+        "Her IoT cihazı akıllıdır ama her akıllı cihaz IoT değildir.",
+        "Telefondan kontrol ediliyorsa ve internete bağlıysa IoT cihazıdır.",
+      ],
+    });
+
+    expect(rendered).toContain("her IoT cihazı");
+    expect(rendered).toContain("internet bağlantısı");
+    expect(rendered).not.toContain("Ne zaman doktora");
+    expect(rendered).not.toContain("risk koşulu");
+  });
 });

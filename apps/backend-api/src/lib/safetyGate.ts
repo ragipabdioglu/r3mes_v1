@@ -3,9 +3,9 @@ import type { ChatSourceCitation } from "@r3mes/shared-types";
 import type { GroundedMedicalAnswer } from "./answerSchema.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import { hasLowLanguageQuality } from "./answerQuality.js";
+import { detectAnswerTask } from "./answerTaskDetector.js";
 import { composeAnswerSpec } from "./domainEvidenceComposer.js";
 import { getDomainSafetyPolicy, getRiskyCertaintyPatterns } from "./domainSafetyPolicy.js";
-import { detectRequestedFields } from "./requestedFieldDetector.js";
 import {
   getSafetyRailDefinition,
   type SafetyFallbackMode,
@@ -95,7 +95,7 @@ function queryExplicitlySuppressesRiskComment(query: string): boolean {
 
 function isFinanceFieldExtractionQuery(query: string, domain: GroundedMedicalAnswer["answer_domain"]): boolean {
   if (domain !== "finance") return false;
-  return detectRequestedFields(query).requestedFields.some((field) => field.outputHint === "number");
+  return detectAnswerTask(query).requestedFields.some((field) => field.outputHint === "number");
 }
 
 function addUnique(values: string[], value: string): void {

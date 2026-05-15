@@ -1,7 +1,8 @@
 import type { AnswerDomain, AnswerIntent } from "./answerSchema.js";
 import type { AnswerSpec } from "./answerSpec.js";
+import { detectAnswerTask, type AnswerTaskType } from "./answerTaskDetector.js";
 import { normalizeConceptText } from "./conceptNormalizer.js";
-import { detectRequestedFields, type RequestedField } from "./requestedFieldDetector.js";
+import type { RequestedField } from "./requestedFieldDetector.js";
 import type { StructuredFact } from "./structuredFact.js";
 
 export type AnswerPlanCoverage = "complete" | "partial" | "none";
@@ -10,14 +11,16 @@ export type AnswerPlanFormat = "bullets" | "short" | "table" | "freeform";
 export interface AnswerPlan {
   domain: AnswerDomain;
   intent: AnswerIntent;
-  taskType: "field_extraction" | "grounded_summary" | "conversation";
+  taskType: AnswerTaskType | "grounded_summary";
   outputFormat: AnswerPlanFormat;
   requestedFields: RequestedField[];
   selectedFacts: StructuredFact[];
   constraints: {
     maxWords?: number;
+    maxSentencesPerBullet?: number;
     forbidCaution: boolean;
     noRawTableDump: boolean;
+    sourceGroundedOnly: boolean;
     format: AnswerPlanFormat;
   };
   coverage: AnswerPlanCoverage;
@@ -82,26 +85,29 @@ function coverageFor(fields: RequestedField[], selectedFacts: StructuredFact[]):
 }
 
 export function buildAnswerPlan(spec: AnswerSpec): AnswerPlan {
-  const detection = detectRequestedFields(spec.userQuery);
+  const taskDetection = detectAnswerTask(spec.userQuery);
+  const detection = taskDetection.requestedFieldDetection;
   const selectedFacts = selectFactsForFields(spec.structuredFacts ?? [], detection.requestedFields);
   const missingFieldIds = detection.requestedFields
     .filter((field) => !selectedFacts.some((fact) => factMatchesField(fact, field)))
     .map((field) => field.id);
-  const taskType = detection.requestedFields.length > 0 ? "field_extraction" : "grounded_summary";
+  const taskType =
+    detection.requestedFields.length > 0 ? "field_extraction" :
+      taskDetection.taskType === "unknown" ? "grounded_summary" :
+        taskDetection.taskType;
   const coverage = coverageFor(detection.requestedFields, selectedFacts);
 
   return {
     domain: spec.answerDomain,
     intent: spec.answerIntent,
     taskType,
-    outputFormat: detection.constraints.format,
+    outputFormat: taskDetection.outputConstraints.format,
     requestedFields: detection.requestedFields,
     selectedFacts,
-    constraints: detection.constraints,
+    constraints: taskDetection.outputConstraints,
     coverage,
     forbiddenAdditions: [
-      ...(detection.constraints.forbidCaution ? ["optional_caution", "risk_commentary"] : []),
-      ...(detection.constraints.noRawTableDump ? ["raw_table_dump"] : []),
+      ...taskDetection.forbiddenAdditions,
     ],
     requiresModelSynthesis: taskType !== "field_extraction" || coverage !== "complete",
     diagnostics: {

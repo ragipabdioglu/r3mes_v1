@@ -126,4 +126,14 @@ describe("queryUnderstanding", () => {
     expect(understanding.requestedFieldDetection.constraints.noRawTableDump).toBe(true);
     expect(understanding.requestedFieldDetection.constraints.format).toBe("bullets");
   });
+
+  it("detects generic answer tasks for newly uploaded education or technical documents", () => {
+    const list = buildQueryUnderstanding("Büyük verinin 5V özelliğini sadece madde madde yaz.");
+    expect(list.answerTask.taskType).toBe("list_items");
+    expect(list.answerTask.outputConstraints.format).toBe("bullets");
+
+    const compare = buildQueryUnderstanding("Web1, Web2 ve Web3 arasındaki temel fark nedir? Kaynağa göre açıkla.");
+    expect(compare.answerTask.taskType).toBe("compare_concepts");
+    expect(compare.answerTask.outputConstraints.sourceGroundedOnly).toBe(true);
+  });
 });

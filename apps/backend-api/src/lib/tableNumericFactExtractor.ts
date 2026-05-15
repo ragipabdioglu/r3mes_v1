@@ -1,4 +1,5 @@
-import { detectRequestedFields, type RequestedField } from "./requestedFieldDetector.js";
+import { detectAnswerTask } from "./answerTaskDetector.js";
+import type { RequestedField } from "./requestedFieldDetector.js";
 import type { StructuredFact } from "./structuredFact.js";
 import { normalizeConceptText } from "./conceptNormalizer.js";
 
@@ -179,7 +180,7 @@ function extractShareGroupFacts(opts: {
 }
 
 export function extractTableNumericFacts(input: TableNumericFactExtractionInput): StructuredFact[] {
-  const detection = detectRequestedFields(input.query);
+  const detection = detectAnswerTask(input.query);
   const requestedFields = detection.requestedFields.filter((field) => field.outputHint === "number");
   if (requestedFields.length === 0 || input.facts.length === 0) return [];
 
