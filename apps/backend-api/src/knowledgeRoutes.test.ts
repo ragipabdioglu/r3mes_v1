@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseKnowledgeDetailResponse, parseKnowledgeListResponse } from "@r3mes/shared-types";
+import {
+  parseKnowledgeDetailResponse,
+  parseKnowledgeIngestionJobStatusResponse,
+  parseKnowledgeListResponse,
+} from "@r3mes/shared-types";
 
 vi.mock("./lib/prisma.js", () => ({
   prisma: {
@@ -18,6 +22,12 @@ vi.mock("./lib/prisma.js", () => ({
     },
     knowledgeDocument: {
       create: vi.fn(),
+      update: vi.fn(),
+    },
+    ingestionJob: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
     },
     knowledgeChunk: {
       create: vi.fn(),
@@ -171,6 +181,76 @@ describe("knowledge routes access control", () => {
     const allowed = await app.inject({ method: "GET", url: "/v1/knowledge/kc_public" });
     expect(allowed.statusCode).toBe(200);
     parseKnowledgeDetailResponse(JSON.parse(allowed.body));
+    await app.close();
+  });
+
+  it("GET /v1/knowledge/jobs/:id enforces collection access and exposes partial indexing status", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    const baseJob = {
+      jobId: "job_1",
+      documentId: "doc_1",
+      stage: "VECTOR_INDEX",
+      status: "PARTIAL_READY",
+      attempts: 1,
+      errorCode: "QDRANT_DUAL_WRITE_FAILED",
+      errorMessage: "Qdrant upsert failed",
+      startedAt: new Date("2026-05-15T10:00:00.000Z"),
+      completedAt: new Date("2026-05-15T10:01:00.000Z"),
+      createdAt: new Date("2026-05-15T10:00:00.000Z"),
+      updatedAt: new Date("2026-05-15T10:01:00.000Z"),
+      document: {
+        id: "doc_1",
+        parseStatus: "READY",
+        chunkStatus: "READY",
+        embeddingStatus: "READY",
+        vectorIndexStatus: "FAILED",
+        qualityStatus: "READY",
+        readinessStatus: "PARTIAL_READY",
+        _count: { chunks: 2 },
+        collection: {
+          id: "kc_private",
+          visibility: "PRIVATE",
+          owner: { walletAddress: "0x9999999999999999999999999999999999999999999999999999999999999999" },
+        },
+      },
+    };
+    vi.mocked(prisma.ingestionJob.findUnique)
+      .mockResolvedValueOnce(baseJob as never)
+      .mockResolvedValueOnce({
+        ...baseJob,
+        document: {
+          ...baseJob.document,
+          collection: {
+            ...baseJob.document.collection,
+            id: "kc_public",
+            visibility: "PUBLIC",
+          },
+        },
+      } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+
+    const forbidden = await app.inject({ method: "GET", url: "/v1/knowledge/jobs/job_1" });
+    expect(forbidden.statusCode).toBe(403);
+
+    const allowed = await app.inject({ method: "GET", url: "/v1/knowledge/jobs/job_1" });
+    expect(allowed.statusCode).toBe(200);
+    const parsed = parseKnowledgeIngestionJobStatusResponse(JSON.parse(allowed.body));
+    expect(parsed).toMatchObject({
+      jobId: "job_1",
+      status: "PARTIAL_READY",
+      readiness: "PARTIAL_READY",
+      indexStatus: "FAILED",
+      stage: "VECTOR_INDEX",
+      jobStatus: "PARTIAL_READY",
+      errorCode: "QDRANT_DUAL_WRITE_FAILED",
+    });
+    expect(parsed.indexing).toMatchObject({
+      status: "FAILED",
+      vectorIndexStatus: "FAILED",
+      indexedChunkCount: null,
+    });
     await app.close();
   });
 });

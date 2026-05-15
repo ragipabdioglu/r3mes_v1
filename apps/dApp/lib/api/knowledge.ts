@@ -2,10 +2,13 @@ import { getBackendUrl } from "@/lib/env";
 import type { R3mesWalletAuthHeaders } from "@/lib/api/wallet-auth-types";
 import {
   isKnowledgeCollectionDetail,
+  isKnowledgeIngestionJobStatusResponse,
   isKnowledgeCollectionListResponse,
   isKnowledgeParserCapabilitiesResponse,
+  isKnowledgeUploadAcceptedResponse,
   type KnowledgeCollectionDetail,
   type KnowledgeCollectionListItem,
+  type KnowledgeIngestionJobStatusResponse,
   type KnowledgeParserCapabilityItem,
   type KnowledgeUploadAcceptedResponse,
   type KnowledgeVisibilityMutationResponse,
@@ -88,6 +91,34 @@ export async function postKnowledgeMultipart(
     headers: authHeaders(auth),
     body: formData,
   });
+}
+
+export function parseKnowledgeUploadAcceptedJson(
+  json: unknown,
+): KnowledgeUploadAcceptedResponse | null {
+  return isKnowledgeUploadAcceptedResponse(json) ? json : null;
+}
+
+export async function fetchKnowledgeIngestionJob(
+  jobIdOrStatusUrl: string,
+  auth: R3mesWalletAuthHeaders,
+): Promise<KnowledgeIngestionJobStatusResponse | null> {
+  const url = jobIdOrStatusUrl.startsWith("http")
+    ? jobIdOrStatusUrl
+    : jobIdOrStatusUrl.startsWith("/")
+      ? new URL(jobIdOrStatusUrl, getBackendUrl()).toString()
+      : `${getBackendUrl()}/v1/knowledge/jobs/${encodeURIComponent(jobIdOrStatusUrl)}`;
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: authHeaders(auth),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Knowledge ingestion job ${res.status}`);
+  }
+
+  const json: unknown = await res.json();
+  return isKnowledgeIngestionJobStatusResponse(json) ? json : null;
 }
 
 export async function publishKnowledgeCollection(

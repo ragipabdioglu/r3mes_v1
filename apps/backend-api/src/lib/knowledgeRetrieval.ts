@@ -1,4 +1,5 @@
 import type { ChatSourceCitation } from "@r3mes/shared-types";
+import type { KnowledgeIngestionStepStatus, Prisma } from "@prisma/client";
 import type { GroundingConfidence } from "./answerSchema.js";
 import { buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
@@ -18,6 +19,8 @@ export interface RetrievedKnowledgeContext {
 }
 
 export { buildLexicalCorpusStats, scoreLexicalMatch, type LexicalCorpusStats } from "./lexicalRetrieval.js";
+
+const READY_READINESS_STATUSES: KnowledgeIngestionStepStatus[] = ["READY", "PARTIAL_READY"];
 
 function fallbackContext(content: string): string {
   return content.slice(0, 360).trim();
@@ -133,8 +136,11 @@ export async function retrieveKnowledgeContext(opts: {
     document: {
       collectionId: { in: accessibleCollectionIds },
       parseStatus: "READY" as const,
+      chunkStatus: "READY" as const,
+      embeddingStatus: "READY" as const,
+      readinessStatus: { in: READY_READINESS_STATUSES },
     },
-  };
+  } satisfies Prisma.KnowledgeChunkWhereInput;
   const include = {
     document: {
       include: {
@@ -146,7 +152,7 @@ export async function retrieveKnowledgeContext(opts: {
       },
     },
     embedding: true,
-  };
+  } as const satisfies Prisma.KnowledgeChunkInclude;
 
   let chunks = await prisma.knowledgeChunk.findMany({
     where:

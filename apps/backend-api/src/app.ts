@@ -7,6 +7,7 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { registerInternalQaRoutes } from "./routes/internalQa.js";
 import { registerKnowledgeRoutes } from "./routes/knowledge.js";
 import { registerUserRoutes } from "./routes/user.js";
+import { processPendingKnowledgeIngestionJobs } from "./lib/knowledgeIngestionQueue.js";
 
 /**
  * Üretimde kimlik ve ücret korumalarının env ile kapatılmasını engeller.
@@ -107,6 +108,14 @@ export async function buildApp() {
   await registerKnowledgeRoutes(app);
   await registerInternalQaRoutes(app);
   await registerUserRoutes(app);
+
+  if (process.env.NODE_ENV !== "test" && process.env.R3MES_KNOWLEDGE_INGESTION_RECOVER_ON_START !== "0") {
+    queueMicrotask(() => {
+      processPendingKnowledgeIngestionJobs().catch((error) => {
+        app.log.error({ err: error }, "Knowledge ingestion recovery failed");
+      });
+    });
+  }
 
   return app;
 }

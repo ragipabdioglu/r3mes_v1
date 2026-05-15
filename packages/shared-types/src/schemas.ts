@@ -38,6 +38,7 @@ import type {
   KnowledgeFeedbackProposalReviewResponse,
   KnowledgeFeedbackSummaryResponse,
   KnowledgeDocumentListItem,
+  KnowledgeIngestionJobStatusResponse,
   KnowledgeListResponse,
   KnowledgeParserCapabilitiesResponse,
   KnowledgeParserCapabilityItem,
@@ -88,6 +89,10 @@ export const AdapterListResponseSchema: z.ZodType<AdapterListResponse> = z.objec
 });
 
 export const KnowledgeVisibilitySchema = z.enum(["PRIVATE", "PUBLIC"]);
+export const KnowledgeIngestionReadinessStatusSchema = z.enum(["PENDING", "PROCESSING", "READY", "PARTIAL_READY", "FAILED"]);
+export const KnowledgeIndexingStatusSchema = z.enum(["PENDING", "INDEXING", "READY", "PARTIAL_READY", "FAILED", "SKIPPED"]);
+export const KnowledgeIngestionJobStageSchema = z.enum(["RECEIVED", "STORAGE", "PARSE", "CHUNK", "EMBEDDING", "VECTOR_INDEX", "QUALITY", "READY"]);
+export const KnowledgeIngestionJobPersistenceStatusSchema = z.enum(["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "PARTIAL_READY"]);
 export const KnowledgeParseQualityLevelSchema = z.enum(["clean", "usable", "noisy"]);
 export const KnowledgeIngestionRiskLevelSchema = z.enum(["none", "low", "medium", "high"]);
 export const KnowledgeIngestionQualityReportSchema = z.object({
@@ -97,6 +102,13 @@ export const KnowledgeIngestionQualityReportSchema = z.object({
   thinSource: z.boolean(),
   strictRouteEligible: z.boolean(),
   warnings: z.array(z.string()),
+});
+export const KnowledgeIndexingStateSchema = z.object({
+  status: KnowledgeIndexingStatusSchema,
+  vectorIndexStatus: KnowledgeIndexingStatusSchema,
+  indexedChunkCount: z.number().int().nonnegative().nullable().optional(),
+  errorCode: z.string().nullable().optional(),
+  errorMessage: z.string().nullable().optional(),
 });
 
 export const KnowledgeCollectionListItemSchema: z.ZodType<KnowledgeCollectionListItem> = z.object({
@@ -129,9 +141,24 @@ export const KnowledgeDocumentListItemSchema: z.ZodType<KnowledgeDocumentListIte
   id: z.string().min(1),
   title: z.string().min(1),
   sourceType: z.string().min(1),
+  sourceMime: z.string().nullable().optional(),
+  sourceExtension: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  storagePath: z.string().nullable().optional(),
+  parserId: z.string().nullable().optional(),
+  parserVersion: z.number().int().nonnegative().nullable().optional(),
+  scanStatus: z.string().nullable().optional(),
+  storageStatus: z.string().nullable().optional(),
+  documentVersionId: z.string().nullable().optional(),
   parseStatus: z.string().min(1),
   storageCid: z.string().nullable(),
   chunkCount: z.number().int().nonnegative(),
+  artifactCount: z.number().int().nonnegative().nullable().optional(),
+  chunkStatus: z.string().nullable().optional(),
+  embeddingStatus: z.string().nullable().optional(),
+  vectorIndexStatus: z.string().nullable().optional(),
+  qualityStatus: z.string().nullable().optional(),
+  readinessStatus: z.string().nullable().optional(),
   parseQualityScore: z.number().min(0).max(100).nullable().optional(),
   parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
   parseQualityWarnings: z.array(z.string()).optional(),
@@ -156,14 +183,70 @@ export const KnowledgeDetailResponseSchema: z.ZodType<KnowledgeDetailResponse> =
 export const KnowledgeUploadAcceptedResponseSchema: z.ZodType<KnowledgeUploadAcceptedResponse> = z.object({
   collectionId: z.string().min(1),
   documentId: z.string().min(1),
+  jobId: z.string().min(1).nullable().optional(),
+  statusUrl: z.string().min(1).nullable().optional(),
+  status: z.enum(["ACCEPTED", "PROCESSING", "READY", "PARTIAL_READY", "FAILED"]).nullable().optional(),
+  readiness: KnowledgeIngestionReadinessStatusSchema.nullable().optional(),
   visibility: KnowledgeVisibilitySchema,
   parseStatus: z.string().min(1),
+  sourceMime: z.string().nullable().optional(),
+  sourceExtension: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  storagePath: z.string().nullable().optional(),
+  parserId: z.string().nullable().optional(),
+  parserVersion: z.number().int().nonnegative().nullable().optional(),
+  scanStatus: z.string().nullable().optional(),
+  storageStatus: z.string().nullable().optional(),
+  documentVersionId: z.string().nullable().optional(),
+  artifactCount: z.number().int().nonnegative().nullable().optional(),
+  indexStatus: KnowledgeIndexingStatusSchema.nullable().optional(),
+  indexing: KnowledgeIndexingStateSchema.nullable().optional(),
+  indexedChunkCount: z.number().int().nonnegative().nullable().optional(),
+  indexingError: z.string().nullable().optional(),
   storageCid: z.string().nullable(),
   chunkCount: z.number().int().nonnegative(),
   parseQualityScore: z.number().min(0).max(100).nullable().optional(),
   parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
   parseQualityWarnings: z.array(z.string()).optional(),
   ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
+});
+
+export const KnowledgeIngestionJobStatusResponseSchema: z.ZodType<KnowledgeIngestionJobStatusResponse> = z.object({
+  jobId: z.string().min(1),
+  collectionId: z.string().min(1),
+  documentId: z.string().min(1),
+  status: z.enum(["ACCEPTED", "PROCESSING", "READY", "PARTIAL_READY", "FAILED"]),
+  stage: KnowledgeIngestionJobStageSchema.nullable().optional(),
+  jobStatus: KnowledgeIngestionJobPersistenceStatusSchema.nullable().optional(),
+  attempts: z.number().int().nonnegative().nullable().optional(),
+  readiness: KnowledgeIngestionReadinessStatusSchema,
+  parseStatus: z.string().min(1),
+  sourceMime: z.string().nullable().optional(),
+  sourceExtension: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  storagePath: z.string().nullable().optional(),
+  parserId: z.string().nullable().optional(),
+  parserVersion: z.number().int().nonnegative().nullable().optional(),
+  scanStatus: z.string().nullable().optional(),
+  storageStatus: z.string().nullable().optional(),
+  documentVersionId: z.string().nullable().optional(),
+  artifactCount: z.number().int().nonnegative().nullable().optional(),
+  indexStatus: KnowledgeIndexingStatusSchema,
+  chunkStatus: z.string().nullable().optional(),
+  embeddingStatus: z.string().nullable().optional(),
+  vectorIndexStatus: z.string().nullable().optional(),
+  qualityStatus: z.string().nullable().optional(),
+  readinessStatus: z.string().nullable().optional(),
+  indexing: KnowledgeIndexingStateSchema.nullable().optional(),
+  chunkCount: z.number().int().nonnegative(),
+  indexedChunkCount: z.number().int().nonnegative().nullable().optional(),
+  errorCode: z.string().nullable().optional(),
+  errorMessage: z.string().nullable().optional(),
+  indexingError: z.string().nullable().optional(),
+  startedAt: z.string().nullable().optional(),
+  completedAt: z.string().nullable().optional(),
+  createdAt: z.string().nullable().optional(),
+  updatedAt: z.string().nullable().optional(),
 });
 
 export const KnowledgeParserCapabilityItemSchema: z.ZodType<KnowledgeParserCapabilityItem> = z.object({
@@ -174,6 +257,7 @@ export const KnowledgeParserCapabilityItemSchema: z.ZodType<KnowledgeParserCapab
   inputMode: z.enum(["utf8", "binary"]),
   available: z.boolean(),
   kind: z.enum(["built_in", "external"]),
+  health: z.enum(["ready", "unavailable"]),
   profile: z.enum(["docling", "marker", "external"]).nullable().optional(),
   reason: z.string().nullable().optional(),
 });
@@ -599,6 +683,16 @@ export function safeParseKnowledgeUploadAcceptedResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeUploadAcceptedResponse> {
   return KnowledgeUploadAcceptedResponseSchema.safeParse(input);
+}
+
+export function parseKnowledgeIngestionJobStatusResponse(input: unknown): KnowledgeIngestionJobStatusResponse {
+  return KnowledgeIngestionJobStatusResponseSchema.parse(input);
+}
+
+export function safeParseKnowledgeIngestionJobStatusResponse(
+  input: unknown,
+): z.SafeParseReturnType<unknown, KnowledgeIngestionJobStatusResponse> {
+  return KnowledgeIngestionJobStatusResponseSchema.safeParse(input);
 }
 
 export function safeParseKnowledgeParserCapabilitiesResponse(

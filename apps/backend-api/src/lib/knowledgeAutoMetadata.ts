@@ -33,7 +33,10 @@ export interface KnowledgeAutoMetadata {
     };
   };
   sourceType?: KnowledgeSourceType;
+  artifactId?: string;
   artifactKind?: DocumentArtifactKind;
+  artifactMetadata?: Record<string, unknown>;
+  artifactSplitIndex?: number;
   sectionTitle?: string | null;
   pageNumber?: number | null;
   isScaffold?: boolean;
@@ -682,6 +685,23 @@ export function mergeKnowledgeAutoMetadata(
   return {
     ...mergedBase,
     profile: buildKnowledgeCollectionProfile(items, { now: opts.now, previousProfile }) ?? undefined,
+  };
+}
+
+export function attachKnowledgeChunkArtifactMetadata(
+  autoMetadata: KnowledgeAutoMetadata,
+  chunk: KnowledgeChunkDraft,
+): KnowledgeAutoMetadata {
+  return {
+    ...autoMetadata,
+    artifactId: chunk.artifactId,
+    artifactKind: chunk.artifactKind,
+    artifactMetadata: chunk.artifactMetadata,
+    artifactSplitIndex: chunk.artifactSplitIndex,
+    sectionTitle: chunk.sectionTitle ?? null,
+    pageNumber: chunk.pageNumber ?? null,
+    isScaffold: chunk.isScaffold ?? false,
+    answerabilityScore: chunk.answerabilityScore,
   };
 }
 

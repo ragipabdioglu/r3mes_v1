@@ -78,13 +78,16 @@ describe("knowledge parser adapters", () => {
       available: false,
       extensions: [".pdf", ".docx", ".pptx", ".html", ".htm"],
       kind: "external",
+      health: "unavailable",
     });
+    expect(withoutExternal.find((parser) => parser.id === "external-document-parser-v1")?.reason).not.toContain(process.execPath);
 
     process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
     const withExternal = listKnowledgeParserCapabilities();
 
     expect(withExternal.find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
       available: true,
+      health: "ready",
       reason: null,
     });
   });
@@ -135,6 +138,26 @@ describe("knowledge parser adapters", () => {
     expect(parsed.text).toContain("# Parsed document");
     expect(parsed.artifacts.length).toBeGreaterThan(0);
     expect(parsed.diagnostics.originalBytes).toBeGreaterThan(0);
+  });
+
+  it("keeps external parser artifact ids stable and passes artifact metadata into chunks", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(JSON.stringify({sourceType:'PDF',text:'Revenue table\\nNet income 42',artifacts:[{kind:'table',text:'Revenue table\\nNet income 42',page:3,title:'Financials',metadata:{bbox:[1,2,3,4],parserBlockId:'b-7'}}]}))\" {input}";
+
+    const first = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+    const second = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+    const chunks = chunkParsedKnowledgeDocument(first, 400);
+
+    expect(first.artifacts[0]?.id).toBe(second.artifacts[0]?.id);
+    expect(first.artifacts[0]?.id).toMatch(/^artifact-[a-f0-9]{16}$/u);
+    expect(chunks[0]).toMatchObject({
+      artifactId: first.artifacts[0]?.id,
+      artifactKind: "table",
+      artifactMetadata: { bbox: [1, 2, 3, 4], parserBlockId: "b-7" },
+      artifactSplitIndex: 0,
+      pageNumber: 3,
+      sectionTitle: "Financials",
+    });
   });
 
   it("parses text and includes parser diagnostics", () => {

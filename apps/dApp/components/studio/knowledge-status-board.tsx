@@ -206,6 +206,15 @@ function statusTone(status: KnowledgeDocumentDetail["parseStatus"]): string {
   return "text-amber-100 bg-amber-500/10 ring-amber-500/30";
 }
 
+function ingestionStepTone(status: string | null | undefined): string {
+  if (status === "READY") return "text-emerald-200 bg-emerald-500/10 ring-emerald-500/30";
+  if (status === "PARTIAL_READY") return "text-cyan-100 bg-cyan-500/10 ring-cyan-500/30";
+  if (status === "FAILED") return "text-red-200 bg-red-500/10 ring-red-500/30";
+  if (status === "RUNNING" || status === "PENDING") return "text-amber-100 bg-amber-500/10 ring-amber-500/30";
+  if (status === "SKIPPED") return "text-zinc-300 bg-zinc-800/60 ring-zinc-700";
+  return "text-zinc-300 bg-zinc-800/60 ring-zinc-700";
+}
+
 function parseQualityTone(level: KnowledgeDocumentDetail["parseQualityLevel"]): string {
   if (level === "clean") return "text-emerald-100 bg-emerald-500/10 ring-emerald-500/30";
   if (level === "usable") return "text-cyan-100 bg-cyan-500/10 ring-cyan-500/30";
@@ -631,6 +640,11 @@ export function KnowledgeStatusBoard() {
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${statusTone(doc.parseStatus)}`}>
                               {doc.parseStatus}
                             </span>
+                            {doc.readinessStatus ? (
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${ingestionStepTone(doc.readinessStatus)}`}>
+                                Ready {doc.readinessStatus}
+                              </span>
+                            ) : null}
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${parseQualityTone(doc.parseQualityLevel)}`}>
                               {parseQualityLabel(doc)}
                             </span>
@@ -648,14 +662,26 @@ export function KnowledgeStatusBoard() {
                               </>
                             ) : null}
                           </div>
-                          <dl className="mt-2 grid gap-2 text-[11px] text-zinc-500 sm:grid-cols-3">
+                          <dl className="mt-2 grid gap-2 text-[11px] text-zinc-500 sm:grid-cols-3 lg:grid-cols-6">
                             <div>
                               <dt>Tip</dt>
-                              <dd className="mt-0.5 text-zinc-300">{doc.sourceType}</dd>
+                              <dd className="mt-0.5 text-zinc-300">{doc.sourceExtension ?? doc.sourceType}</dd>
                             </div>
                             <div>
                               <dt>Chunk</dt>
-                              <dd className="mt-0.5 text-zinc-300">{doc.chunkCount}</dd>
+                              <dd className="mt-0.5 text-zinc-300">{doc.chunkCount} / artifact {doc.artifactCount ?? 0}</dd>
+                            </div>
+                            <div>
+                              <dt>Storage / scan</dt>
+                              <dd className="mt-0.5 text-zinc-300">{doc.storageStatus ?? "—"} / {doc.scanStatus ?? "—"}</dd>
+                            </div>
+                            <div>
+                              <dt>Vector</dt>
+                              <dd className="mt-0.5 text-zinc-300">{doc.vectorIndexStatus ?? "—"}</dd>
+                            </div>
+                            <div>
+                              <dt>Parser</dt>
+                              <dd className="mt-0.5 truncate text-zinc-300">{doc.parserId ?? "—"}</dd>
                             </div>
                             <div>
                               <dt>Güncelleme</dt>

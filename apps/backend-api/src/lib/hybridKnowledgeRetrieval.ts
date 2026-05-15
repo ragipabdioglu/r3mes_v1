@@ -1,4 +1,5 @@
 import type { ChatSourceCitation } from "@r3mes/shared-types";
+import type { KnowledgeIngestionStepStatus, Prisma } from "@prisma/client";
 
 import { getAlignmentConfig } from "./alignmentConfig.js";
 import type { GroundingConfidence } from "./answerSchema.js";
@@ -22,6 +23,8 @@ import type { DomainRoutePlan } from "./queryRouter.js";
 import { getEvidenceExtractorBudget, runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 import type { RetrievalBudgetMode } from "./retrievalBudget.js";
+
+const READY_READINESS_STATUSES: KnowledgeIngestionStepStatus[] = ["READY", "PARTIAL_READY"];
 
 export interface HybridKnowledgeChunk {
   id: string;
@@ -432,7 +435,13 @@ async function explicitIdentifierPreflight(
   const targetIndexes = targetDisclosureIndexes(query);
   const primarySymbol = primaryQuerySymbol(query);
   const documents = await prisma.knowledgeDocument.findMany({
-    where: { collectionId: { in: accessibleCollectionIds } },
+    where: {
+      collectionId: { in: accessibleCollectionIds },
+      parseStatus: "READY",
+      chunkStatus: "READY",
+      embeddingStatus: "READY",
+      readinessStatus: { in: ["READY", "PARTIAL_READY"] },
+    },
     select: { title: true },
     take: 500,
   });
@@ -925,12 +934,15 @@ async function collectPrismaCandidates(opts: {
     document: {
       collectionId: { in: opts.accessibleCollectionIds },
       parseStatus: "READY" as const,
+      chunkStatus: "READY" as const,
+      embeddingStatus: "READY" as const,
+      readinessStatus: { in: READY_READINESS_STATUSES },
     },
-  };
+  } satisfies Prisma.KnowledgeChunkWhereInput;
   const include = {
     document: true,
     embedding: true,
-  };
+  } as const satisfies Prisma.KnowledgeChunkInclude;
   const chunks = await prisma.knowledgeChunk.findMany({
     where:
       queryTokens.length > 0
@@ -991,6 +1003,9 @@ async function collectCriticalEvidenceCandidates(opts: {
       document: {
         collectionId: { in: opts.accessibleCollectionIds },
         parseStatus: "READY",
+        chunkStatus: "READY",
+        embeddingStatus: "READY",
+        readinessStatus: { in: ["READY", "PARTIAL_READY"] },
       },
       ...(titleScopes.length > 0 ? { AND: titleScopes } : {}),
     },

@@ -1,11 +1,27 @@
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON" | "PDF" | "DOCX" | "PPTX" | "HTML";
-export type KnowledgeParserInputMode = "utf8" | "binary";
-export type KnowledgeExternalParserProfile = "docling" | "marker" | "external";
+import {
+  createKnowledgeParserRegistry,
+  type KnowledgeExternalParserProfile,
+  type KnowledgeParserAdapter,
+  type KnowledgeParserCapability,
+  type KnowledgeParserRegistryEntry,
+  type KnowledgeSourceType,
+} from "./parserRegistry.js";
+
+export type {
+  KnowledgeExternalParserProfile,
+  KnowledgeParserAdapter,
+  KnowledgeParserCapability,
+  KnowledgeParserHealth,
+  KnowledgeParserInputMode,
+  KnowledgeSourceType,
+} from "./parserRegistry.js";
+
 export type DocumentArtifactKind =
   | "title"
   | "heading"
@@ -46,35 +62,13 @@ export interface ParsedKnowledgeDocument {
   };
 }
 
-export interface KnowledgeParserAdapter {
-  id: string;
-  version: number;
-  sourceType: KnowledgeSourceType;
-  sourceTypeForFilename?: (filename: string) => KnowledgeSourceType;
-  extensions: string[];
-  inputMode: KnowledgeParserInputMode;
-  parse(opts: { filename: string; buffer: Buffer; raw: string }): ParsedKnowledgeDocument;
-}
-
-export interface KnowledgeParserCapability {
-  id: string;
-  version: number;
-  sourceType: KnowledgeSourceType;
-  extensions: string[];
-  inputMode: KnowledgeParserInputMode;
-  available: boolean;
-  kind: "built_in" | "external";
-  profile?: KnowledgeExternalParserProfile | null;
-  reason?: string | null;
-}
-
 export function getKnowledgeExtension(filename: string): string {
   const idx = filename.lastIndexOf(".");
   return idx >= 0 ? filename.slice(idx).toLowerCase() : "";
 }
 
 function parsedDocument(opts: {
-  adapter: KnowledgeParserAdapter;
+  adapter: KnowledgeParserAdapter<ParsedKnowledgeDocument>;
   text: string;
   originalBytes: number;
   sourceType?: KnowledgeSourceType;
@@ -102,16 +96,46 @@ function parsedDocument(opts: {
   };
 }
 
-const STRUCTURAL_LINE_PATTERN =
-  /^(?:#{1,6}\s+\S|[-*]\s+\S|\d+[.)]\s+\S|(?:Topic|Tags|Source Summary|Key Takeaway|Patient Summary|Clinical Takeaway|Safe Guidance|Red Flags|Do Not Infer|Başlık|Etiketler|Temel Bilgi|Triage|Uyarı Bulguları|Çıkarım Yapma|Soru|Cevap|Kaynak|Özet|Ozet)\s*:)/iu;
+const INGESTION_GENERIC_STRUCTURE_LABELS = [
+  "Topic",
+  "Tags",
+  "Source Summary",
+  "Key Takeaway",
+  "Başlık",
+  "Etiketler",
+  "Temel Bilgi",
+  "Soru",
+  "Cevap",
+  "Kaynak",
+  "Özet",
+  "Ozet",
+];
+const LEGACY_DOMAIN_CARD_STRUCTURE_LABELS = [
+  "Patient Summary",
+  "Clinical Takeaway",
+  "Safe Guidance",
+  "Red Flags",
+  "Do Not Infer",
+  "Triage",
+  "Uyarı Bulguları",
+  "Çıkarım Yapma",
+];
 const MARKDOWN_TABLE_LINE_PATTERN = /^\s*\|.*\|\s*$/u;
 const MARKDOWN_TABLE_SEPARATOR_PATTERN = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/u;
+
+function hasKnownStructureLabel(line: string): boolean {
+  const labels = [...INGESTION_GENERIC_STRUCTURE_LABELS, ...LEGACY_DOMAIN_CARD_STRUCTURE_LABELS];
+  return labels.some((label) => line.toLocaleLowerCase("tr-TR").startsWith(`${label.toLocaleLowerCase("tr-TR")}:`));
+}
 
 function isStructuralLine(line: string): boolean {
   const trimmed = line.trim();
   return (
     !trimmed ||
-    STRUCTURAL_LINE_PATTERN.test(trimmed) ||
+    /^#{1,6}\s+\S/u.test(trimmed) ||
+    /^[-*]\s+\S/u.test(trimmed) ||
+    /^\d+[.)]\s+\S/u.test(trimmed) ||
+    hasKnownStructureLabel(trimmed) ||
     MARKDOWN_TABLE_LINE_PATTERN.test(trimmed) ||
     MARKDOWN_TABLE_SEPARATOR_PATTERN.test(trimmed)
   );
@@ -200,6 +224,26 @@ function normalizeArtifactKind(value: unknown): DocumentArtifactKind {
   return "paragraph";
 }
 
+function normalizeArtifactMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return { ...(value as Record<string, unknown>) };
+}
+
+function stableDocumentArtifactId(artifact: DocumentArtifact): string {
+  const provided = artifact.id.trim();
+  if (provided) return provided;
+  const basis = JSON.stringify({
+    kind: normalizeArtifactKind(artifact.kind),
+    text: String(artifact.text ?? "").trim(),
+    title: artifact.title ?? null,
+    page: artifact.page ?? null,
+    level: artifact.level ?? null,
+    items: artifact.items ?? [],
+    metadata: normalizeArtifactMetadata(artifact.metadata) ?? null,
+  });
+  return `artifact-${createHash("sha256").update(basis, "utf8").digest("hex").slice(0, 16)}`;
+}
+
 function artifactAnswerabilityScore(kind: DocumentArtifactKind, text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;
@@ -230,22 +274,26 @@ function normalizeDocumentArtifacts(
   const shouldReclassifyScaffold =
     sourceType === "PDF" || sourceType === "DOCX" || sourceType === "PPTX" || sourceType === "HTML";
   const out: DocumentArtifact[] = [];
-  for (const [index, artifact] of source.entries()) {
+  const usedIds = new Map<string, number>();
+  for (const artifact of source) {
     const text = cleanArtifactText(String(artifact.text ?? ""));
     if (!text) continue;
     const rawKind = normalizeArtifactKind(artifact.kind);
     const kind = shouldReclassifyScaffold && rawKind === "paragraph" && isLikelyStandaloneHeading(text)
       ? "heading"
       : rawKind;
+    const baseId = stableDocumentArtifactId({ ...artifact, kind, text });
+    const idUseCount = usedIds.get(baseId) ?? 0;
+    usedIds.set(baseId, idUseCount + 1);
     out.push({
-      id: artifact.id || `artifact-${index}`,
+      id: idUseCount === 0 ? baseId : `${baseId}-${idUseCount + 1}`,
       kind,
       text,
       title: artifact.title ?? null,
       page: typeof artifact.page === "number" ? artifact.page : null,
       level: typeof artifact.level === "number" ? artifact.level : null,
       items: Array.isArray(artifact.items) ? artifact.items.map((item) => cleanArtifactText(String(item))).filter(Boolean) : undefined,
-      metadata: artifact.metadata && typeof artifact.metadata === "object" ? artifact.metadata : undefined,
+      metadata: normalizeArtifactMetadata(artifact.metadata),
       answerabilityScore: Math.max(0, Math.min(100, Math.round(
         typeof artifact.answerabilityScore === "number"
           ? artifact.answerabilityScore
@@ -256,7 +304,7 @@ function normalizeDocumentArtifacts(
   return out;
 }
 
-const TEXT_PARSER: KnowledgeParserAdapter = {
+const TEXT_PARSER: KnowledgeParserAdapter<ParsedKnowledgeDocument> = {
   id: "plain-text-v1",
   version: 1,
   sourceType: "TEXT",
@@ -270,7 +318,7 @@ const TEXT_PARSER: KnowledgeParserAdapter = {
     }),
 };
 
-const MARKDOWN_PARSER: KnowledgeParserAdapter = {
+const MARKDOWN_PARSER: KnowledgeParserAdapter<ParsedKnowledgeDocument> = {
   id: "markdown-v1",
   version: 1,
   sourceType: "MARKDOWN",
@@ -284,7 +332,7 @@ const MARKDOWN_PARSER: KnowledgeParserAdapter = {
     }),
 };
 
-const JSON_PARSER: KnowledgeParserAdapter = {
+const JSON_PARSER: KnowledgeParserAdapter<ParsedKnowledgeDocument> = {
   id: "json-normalized-v1",
   version: 1,
   sourceType: "JSON",
@@ -298,7 +346,7 @@ const JSON_PARSER: KnowledgeParserAdapter = {
     }),
 };
 
-const BUILT_IN_KNOWLEDGE_PARSERS: KnowledgeParserAdapter[] = [
+const BUILT_IN_KNOWLEDGE_PARSERS: KnowledgeParserAdapter<ParsedKnowledgeDocument>[] = [
   TEXT_PARSER,
   MARKDOWN_PARSER,
   JSON_PARSER,
@@ -517,12 +565,12 @@ function externalParserProfile(): KnowledgeExternalParserProfile {
 
 function missingExternalParserReason(profile: KnowledgeExternalParserProfile): string {
   if (profile === "docling") {
-    return "R3MES_DOCUMENT_PARSER_COMMAND not configured; recommended profile is docling for PDF/DOCX structured markdown";
+    return "External document parser is not configured; docling profile expects a local parser bridge for structured PDF/DOCX/PPTX/HTML output";
   }
   if (profile === "marker") {
-    return "R3MES_DOCUMENT_PARSER_COMMAND not configured; recommended profile is marker for PDF/DOCX structured markdown";
+    return "External document parser is not configured; marker profile expects a local parser bridge for structured PDF/DOCX/PPTX/HTML output";
   }
-  return "R3MES_DOCUMENT_PARSER_COMMAND not configured";
+  return "External document parser is not configured for PDF/DOCX/PPTX/HTML";
 }
 
 function externalParserArgs(inputPath: string): string[] {
@@ -530,10 +578,10 @@ function externalParserArgs(inputPath: string): string[] {
   return splitCommandLineArgs(template).map((arg) => arg.replaceAll("{input}", inputPath));
 }
 
-function externalDocumentParser(): KnowledgeParserAdapter | null {
+function externalDocumentParser(): KnowledgeParserAdapter<ParsedKnowledgeDocument> | null {
   const command = process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim();
   if (!command) return null;
-  return {
+  const adapter: KnowledgeParserAdapter<ParsedKnowledgeDocument> = {
     id: "external-document-parser-v1",
     version: 1,
     sourceType: "PDF",
@@ -553,20 +601,20 @@ function externalDocumentParser(): KnowledgeParserAdapter | null {
           maxBuffer: 16 * 1024 * 1024,
         });
         if (result.error) {
-          throw result.error;
+          throw new Error("External document parser could not be executed; check parser configuration");
         }
         if (result.status !== 0) {
-          throw new Error(`External document parser failed with exit code ${result.status ?? "unknown"}: ${String(result.stderr ?? "").slice(0, 500)}`);
+          throw new Error(`External document parser failed with exit code ${result.status ?? "unknown"}; check parser logs`);
         }
         const parsedOutput = parseExternalParserOutput(String(result.stdout ?? ""), filename);
         return parsedDocument({
-          adapter: externalDocumentParser() ?? TEXT_PARSER,
+          adapter,
           sourceType: parsedOutput.sourceType,
           text: parsedOutput.text,
           artifacts: parsedOutput.artifacts,
           originalBytes: buffer.length,
           warnings: String(result.stderr ?? "").trim()
-            ? [`external_parser_stderr:${String(result.stderr).trim().slice(0, 240)}`]
+            ? ["external_parser_stderr"]
             : [],
         });
       } finally {
@@ -574,6 +622,7 @@ function externalDocumentParser(): KnowledgeParserAdapter | null {
       }
     },
   };
+  return adapter;
 }
 
 function parseExternalParserOutput(stdout: string, filename: string): {
@@ -595,20 +644,20 @@ function parseExternalParserOutput(stdout: string, filename: string): {
       const text = String(parsed.text ?? parsed.markdown ?? "").trim();
       const rawArtifacts = Array.isArray(parsed.artifacts) ? parsed.artifacts : [];
       const artifacts: DocumentArtifact[] = [];
-      for (const [index, item] of rawArtifacts.entries()) {
+      for (const item of rawArtifacts) {
           if (!item || typeof item !== "object") continue;
           const record = item as Record<string, unknown>;
           const textValue = String(record.text ?? "").trim();
           if (!textValue) continue;
           artifacts.push({
-            id: String(record.id ?? `artifact-${index}`),
+            id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : "",
             kind: normalizeArtifactKind(record.kind),
             text: textValue,
             title: typeof record.title === "string" ? record.title : null,
             page: typeof record.page === "number" ? record.page : null,
             level: typeof record.level === "number" ? record.level : null,
             items: Array.isArray(record.items) ? record.items.map((value) => String(value)) : undefined,
-            metadata: record.metadata && typeof record.metadata === "object" ? record.metadata as Record<string, unknown> : undefined,
+            metadata: normalizeArtifactMetadata(record.metadata),
             answerabilityScore: typeof record.answerabilityScore === "number"
               ? record.answerabilityScore
               : artifactAnswerabilityScore(normalizeArtifactKind(record.kind), textValue),
@@ -632,25 +681,10 @@ function parseExternalParserOutput(stdout: string, filename: string): {
   };
 }
 
-function knowledgeParsers(): KnowledgeParserAdapter[] {
-  const external = externalDocumentParser();
-  return external ? [...BUILT_IN_KNOWLEDGE_PARSERS, external] : BUILT_IN_KNOWLEDGE_PARSERS;
-}
-
-export function listKnowledgeParserAdapters(): Array<Pick<KnowledgeParserAdapter, "id" | "version" | "sourceType" | "extensions">> {
-  return knowledgeParsers().map((parser) => ({
-    id: parser.id,
-    version: parser.version,
-    sourceType: parser.sourceType,
-    extensions: [...parser.extensions],
-  }));
-}
-
-export function listKnowledgeParserCapabilities(): KnowledgeParserCapability[] {
-  const externalConfigured = Boolean(process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim());
-  const profile = externalParserProfile();
-  return [
-    ...BUILT_IN_KNOWLEDGE_PARSERS.map((parser) => ({
+function builtInParserEntries(): KnowledgeParserRegistryEntry<ParsedKnowledgeDocument>[] {
+  return BUILT_IN_KNOWLEDGE_PARSERS.map((parser) => ({
+    adapter: parser,
+    capability: {
       id: parser.id,
       version: parser.version,
       sourceType: parser.sourceType,
@@ -658,30 +692,56 @@ export function listKnowledgeParserCapabilities(): KnowledgeParserCapability[] {
       inputMode: parser.inputMode,
       available: true,
       kind: "built_in" as const,
+      health: "ready" as const,
       reason: null,
-    })),
-    {
-      id: "external-document-parser-v1",
-      version: 1,
-      sourceType: "PDF",
-      extensions: [".pdf", ".docx", ".pptx", ".html", ".htm"],
-      inputMode: "binary",
-      available: externalConfigured,
-      kind: "external",
-      profile,
-      reason: externalConfigured ? null : missingExternalParserReason(profile),
     },
-  ];
+  }));
 }
 
-export function getKnowledgeParserForFilename(filename: string): KnowledgeParserAdapter | null {
+function externalParserCapability(): KnowledgeParserCapability {
+  const externalConfigured = Boolean(process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim());
+  const profile = externalParserProfile();
+  return {
+    id: "external-document-parser-v1",
+    version: 1,
+    sourceType: "PDF",
+    extensions: [".pdf", ".docx", ".pptx", ".html", ".htm"],
+    inputMode: "binary",
+    available: externalConfigured,
+    kind: "external",
+    profile,
+    reason: externalConfigured ? null : missingExternalParserReason(profile),
+    health: externalConfigured ? "ready" : "unavailable",
+  };
+}
+
+function knowledgeParserRegistry() {
+  const external = externalDocumentParser();
+  return createKnowledgeParserRegistry<ParsedKnowledgeDocument>([
+    ...builtInParserEntries(),
+    {
+      adapter: external,
+      capability: externalParserCapability(),
+    },
+  ]);
+}
+
+export function listKnowledgeParserAdapters(): Array<Pick<KnowledgeParserAdapter<ParsedKnowledgeDocument>, "id" | "version" | "sourceType" | "extensions">> {
+  return knowledgeParserRegistry().listAdapters();
+}
+
+export function listKnowledgeParserCapabilities(): KnowledgeParserCapability[] {
+  return knowledgeParserRegistry().listCapabilities();
+}
+
+export function getKnowledgeParserForFilename(filename: string): KnowledgeParserAdapter<ParsedKnowledgeDocument> | null {
   const ext = getKnowledgeExtension(filename);
-  return knowledgeParsers().find((parser) => parser.extensions.includes(ext)) ?? null;
+  return knowledgeParserRegistry().getForExtension(ext);
 }
 
 export function isSupportedKnowledgeFilename(filename: string): boolean {
   const ext = getKnowledgeExtension(filename);
-  return knowledgeParsers().some((parser) => parser.extensions.includes(ext));
+  return knowledgeParserRegistry().supportsExtension(ext);
 }
 
 export function parseKnowledgeBuffer(filename: string, buffer: Buffer): ParsedKnowledgeDocument {
@@ -700,7 +760,10 @@ export interface KnowledgeChunkDraft {
   chunkIndex: number;
   content: string;
   tokenCount: number;
+  artifactId?: string;
   artifactKind?: DocumentArtifactKind;
+  artifactMetadata?: Record<string, unknown>;
+  artifactSplitIndex?: number;
   sectionTitle?: string | null;
   pageNumber?: number | null;
   isScaffold?: boolean;
@@ -726,14 +789,17 @@ function createChunkDrafts(contents: string[]): KnowledgeChunkDraft[] {
 
 function createArtifactChunkDrafts(artifacts: DocumentArtifact[], maxChars: number): KnowledgeChunkDraft[] {
   const chunks: KnowledgeChunkDraft[] = [];
-  const addChunk = (content: string, artifact: DocumentArtifact) => {
+  const addChunk = (content: string, artifact: DocumentArtifact, artifactSplitIndex: number) => {
     const trimmed = content.trim();
     if (!trimmed) return;
     chunks.push({
       chunkIndex: chunks.length,
       content: trimmed,
       tokenCount: approximateTokenCount(trimmed),
+      artifactId: artifact.id,
       artifactKind: artifact.kind,
+      artifactMetadata: normalizeArtifactMetadata(artifact.metadata),
+      artifactSplitIndex,
       sectionTitle: artifact.title ?? null,
       pageNumber: artifact.page ?? null,
       isScaffold: artifact.kind === "title" || artifact.kind === "heading" || artifact.kind === "footer" || artifact.kind === "page_marker" || artifact.kind === "url",
@@ -747,7 +813,7 @@ function createArtifactChunkDrafts(artifacts: DocumentArtifact[], maxChars: numb
     }
     const content = artifact.text;
     const pieces = content.length > maxChars ? splitOversizedText(content, maxChars) : [content];
-    for (const piece of pieces) addChunk(piece, artifact);
+    pieces.forEach((piece, pieceIndex) => addChunk(piece, artifact, pieceIndex));
   }
 
   return chunks;

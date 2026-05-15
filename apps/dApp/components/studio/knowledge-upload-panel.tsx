@@ -5,9 +5,19 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fetchKnowledgeParserCapabilities, postKnowledgeMultipart } from "@/lib/api/knowledge";
+import {
+  fetchKnowledgeIngestionJob,
+  fetchKnowledgeParserCapabilities,
+  parseKnowledgeUploadAcceptedJson,
+  postKnowledgeMultipart,
+} from "@/lib/api/knowledge";
 import type { R3mesWalletAuthHeaders } from "@/lib/api/wallet-auth-types";
 import { useR3mesWalletAuth } from "@/lib/hooks/use-r3mes-wallet-auth";
+import type {
+  KnowledgeIngestionJobStatusResponse,
+  KnowledgeParserCapabilityItem,
+  KnowledgeUploadAcceptedResponse,
+} from "@/lib/types/knowledge";
 import { userFacingMutationFailure } from "@/lib/ui/http-messages";
 import {
   knowledgeStudio,
@@ -19,12 +29,84 @@ import { userFacingWalletAuthError } from "@/lib/ui/wallet-auth-user-message";
 type UploadState =
   | { kind: "idle" }
   | { kind: "uploading" }
-  | { kind: "ok"; summary: string }
+  | { kind: "ok"; response: KnowledgeUploadAcceptedResponse | null; fallback: string }
   | { kind: "err"; message: string };
 
 const KNOWLEDGE_ACCEPT =
   ".txt,.md,.json,.pdf,.docx,.pptx,.html,.htm,application/json,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/html";
 const BUILT_IN_EXTENSIONS = [".txt", ".md", ".json"];
+const READINESS_LABELS: Record<string, string> = {
+  PENDING: "Beklemede",
+  PROCESSING: "İşleniyor",
+  READY: "Hazır",
+  PARTIAL_READY: "Kısmen hazır",
+  FAILED: "Başarısız",
+  ACCEPTED: "Kabul edildi",
+};
+
+function userFacingStatus(value: string | null | undefined): string {
+  if (!value) return "Bilinmiyor";
+  return READINESS_LABELS[value] ?? value;
+}
+
+function uploadSummary(response: KnowledgeUploadAcceptedResponse | null, fallback: string): string {
+  if (!response) return fallback;
+  const readiness = response.readiness ?? response.status ?? (response.parseStatus === "READY" ? "READY" : "PROCESSING");
+  return `Yükleme kabul edildi. Durum: ${userFacingStatus(readiness)}.`;
+}
+
+function uploadStatusRows(response: KnowledgeUploadAcceptedResponse): Array<[string, string]> {
+  const indexStatus = response.indexing?.status ?? response.indexStatus ?? (response.parseStatus === "READY" ? "READY" : "PENDING");
+  const indexedChunkCount = response.indexing?.indexedChunkCount ?? response.indexedChunkCount ?? response.chunkCount;
+  return [
+    ["Job", response.jobId ?? "Senkron işlem"],
+    ["Parse", userFacingStatus(response.parseStatus)],
+    ["Index", userFacingStatus(indexStatus)],
+    ["Chunk", `${indexedChunkCount}/${response.chunkCount}`],
+  ];
+}
+
+function indexingMessage(response: KnowledgeUploadAcceptedResponse): string | null {
+  return response.indexingError ?? response.indexing?.errorMessage ?? null;
+}
+
+function isTerminalUploadStatus(response: KnowledgeUploadAcceptedResponse): boolean {
+  const status = response.readiness ?? response.status;
+  return status === "READY" || status === "PARTIAL_READY" || status === "FAILED";
+}
+
+function mergeJobStatusIntoUploadResponse(
+  response: KnowledgeUploadAcceptedResponse,
+  job: KnowledgeIngestionJobStatusResponse,
+): KnowledgeUploadAcceptedResponse {
+  return {
+    ...response,
+    status: job.status,
+    readiness: job.readiness,
+    parseStatus: job.parseStatus,
+    sourceMime: job.sourceMime ?? response.sourceMime,
+    sourceExtension: job.sourceExtension ?? response.sourceExtension,
+    contentHash: job.contentHash ?? response.contentHash,
+    storagePath: job.storagePath ?? response.storagePath,
+    parserId: job.parserId ?? response.parserId,
+    parserVersion: job.parserVersion ?? response.parserVersion,
+    scanStatus: job.scanStatus ?? response.scanStatus,
+    storageStatus: job.storageStatus ?? response.storageStatus,
+    documentVersionId: job.documentVersionId ?? response.documentVersionId,
+    artifactCount: job.artifactCount ?? response.artifactCount,
+    indexStatus: job.indexStatus,
+    indexing: job.indexing ?? response.indexing,
+    indexedChunkCount: job.indexedChunkCount ?? response.indexedChunkCount,
+    indexingError: job.indexingError ?? response.indexingError,
+    chunkCount: job.chunkCount,
+  };
+}
+
+function unavailableCapabilityLabel(capability: KnowledgeParserCapabilityItem): string {
+  const extension = capability.extensions[0] ?? capability.sourceType;
+  const reason = capability.reason?.trim() || "parser hazır değil";
+  return `${extension}: ${reason}`;
+}
 
 export function KnowledgeUploadPanel() {
   const account = useCurrentAccount();
@@ -34,6 +116,7 @@ export function KnowledgeUploadPanel() {
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [availableExtensions, setAvailableExtensions] = useState<string[]>(BUILT_IN_EXTENSIONS);
+  const [unavailableCapabilities, setUnavailableCapabilities] = useState<string[]>([]);
   const [state, setState] = useState<UploadState>({ kind: "idle" });
 
   useEffect(() => {
@@ -41,6 +124,7 @@ export function KnowledgeUploadPanel() {
     async function loadParserCapabilities() {
       if (!account?.address) {
         setAvailableExtensions(BUILT_IN_EXTENSIONS);
+        setUnavailableCapabilities([]);
         return;
       }
       try {
@@ -52,8 +136,17 @@ export function KnowledgeUploadPanel() {
           .flatMap((capability) => capability.extensions)
           .filter((extension, index, arr) => extension.startsWith(".") && arr.indexOf(extension) === index);
         setAvailableExtensions(next.length > 0 ? next : BUILT_IN_EXTENSIONS);
+        setUnavailableCapabilities(
+          capabilities
+            .filter((capability) => !capability.available)
+            .map(unavailableCapabilityLabel)
+            .slice(0, 3),
+        );
       } catch {
-        if (!cancelled) setAvailableExtensions(BUILT_IN_EXTENSIONS);
+        if (!cancelled) {
+          setAvailableExtensions(BUILT_IN_EXTENSIONS);
+          setUnavailableCapabilities(["Geliştirilmiş parser listesi alınamadı"]);
+        }
       }
     }
     void loadParserCapabilities();
@@ -61,6 +154,45 @@ export function KnowledgeUploadPanel() {
       cancelled = true;
     };
   }, [account?.address, ensureAuthHeaders]);
+
+  const activeJobRef =
+    state.kind === "ok" && state.response && !isTerminalUploadStatus(state.response)
+      ? (state.response.statusUrl ?? state.response.jobId ?? null)
+      : null;
+
+  useEffect(() => {
+    if (!activeJobRef) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const poll = async () => {
+      try {
+        const auth = await ensureAuthHeaders();
+        const job = await fetchKnowledgeIngestionJob(activeJobRef, auth);
+        if (!job || cancelled) return;
+        setState((current) => {
+          if (current.kind !== "ok" || !current.response) return current;
+          return {
+            ...current,
+            response: mergeJobStatusIntoUploadResponse(current.response, job),
+          };
+        });
+        if (job.readiness === "READY" || job.readiness === "PARTIAL_READY" || job.readiness === "FAILED") {
+          window.dispatchEvent(new CustomEvent("r3mes-studio-knowledge-changed"));
+          if (timer) clearInterval(timer);
+        }
+      } catch {
+        // Polling is best-effort; the explicit status endpoint remains available in the response.
+      }
+    };
+
+    void poll();
+    timer = setInterval(() => void poll(), 2500);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [activeJobRef, ensureAuthHeaders]);
 
   const accept = useMemo(() => {
     const mimeHints = [
@@ -128,11 +260,18 @@ export function KnowledgeUploadPanel() {
         });
         return;
       }
+      let parsed: KnowledgeUploadAcceptedResponse | null = null;
+      if (raw.trim()) {
+        try {
+          parsed = parseKnowledgeUploadAcceptedJson(JSON.parse(raw));
+        } catch {
+          parsed = null;
+        }
+      }
       setState({
         kind: "ok",
-        summary:
-          raw.trim() ||
-          knowledgeStudio.uploadSuccessFallback.replace("{name}", collectionName.trim()),
+        response: parsed,
+        fallback: knowledgeStudio.uploadSuccessFallback.replace("{name}", collectionName.trim()),
       });
       setCollectionName("");
       setTitle("");
@@ -196,6 +335,11 @@ export function KnowledgeUploadPanel() {
         <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-zinc-600">
           Desteklenen: {availableExtensions.join(", ")}
         </p>
+        {unavailableCapabilities.length > 0 ? (
+          <p className="mx-auto mt-2 max-w-2xl text-xs leading-relaxed text-amber-200/80">
+            Kullanılamayan parser: {unavailableCapabilities.join("; ")}
+          </p>
+        ) : null}
         <label className="mt-6 inline-flex cursor-pointer rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500">
           {knowledgeStudio.fileSelectLabel}
           <input
@@ -247,7 +391,26 @@ export function KnowledgeUploadPanel() {
 
       {state.kind === "ok" ? (
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/25 p-3 text-sm text-emerald-100">
-          <p>{state.summary}</p>
+          <p>{uploadSummary(state.response, state.fallback)}</p>
+          {state.response ? (
+            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+              {uploadStatusRows(state.response).map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-lg border border-emerald-500/20 bg-emerald-950/20 px-3 py-2"
+                >
+                  <p className="uppercase tracking-wider text-emerald-300/70">{label}</p>
+                  <p className="mt-1 break-all font-mono text-emerald-50">{value}</p>
+                </div>
+              ))}
+              {indexingMessage(state.response) ? (
+                <div className="rounded-lg border border-amber-500/20 bg-amber-950/20 px-3 py-2 sm:col-span-2">
+                  <p className="uppercase tracking-wider text-amber-300/80">Index notu</p>
+                  <p className="mt-1 text-amber-50">{indexingMessage(state.response)}</p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"

@@ -1,6 +1,18 @@
 export type KnowledgeVisibility = "PRIVATE" | "PUBLIC";
 
 export type KnowledgeParseStatus = "PENDING" | "READY" | "FAILED";
+export type KnowledgeIngestionReadinessStatus = "PENDING" | "PROCESSING" | "READY" | "PARTIAL_READY" | "FAILED";
+export type KnowledgeIndexingStatus = "PENDING" | "INDEXING" | "READY" | "PARTIAL_READY" | "FAILED" | "SKIPPED";
+export type KnowledgeIngestionJobStage =
+  | "RECEIVED"
+  | "STORAGE"
+  | "PARSE"
+  | "CHUNK"
+  | "EMBEDDING"
+  | "VECTOR_INDEX"
+  | "QUALITY"
+  | "READY";
+export type KnowledgeIngestionJobPersistenceStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "PARTIAL_READY";
 export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON" | "PDF" | "DOCX" | "PPTX" | "HTML";
 export type KnowledgeParseQualityLevel = "clean" | "usable" | "noisy";
 export type KnowledgeIngestionRiskLevel = "none" | "low" | "medium" | "high";
@@ -11,6 +23,14 @@ export type KnowledgeIngestionQualityReport = {
   thinSource: boolean;
   strictRouteEligible: boolean;
   warnings: string[];
+};
+
+export type KnowledgeIndexingState = {
+  status: KnowledgeIndexingStatus;
+  vectorIndexStatus: KnowledgeIndexingStatus;
+  indexedChunkCount?: number | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
 };
 
 export type KnowledgeCollectionListItem = {
@@ -43,9 +63,24 @@ export type KnowledgeDocumentDetail = {
   id: string;
   title: string;
   sourceType: KnowledgeSourceType;
+  sourceMime?: string | null;
+  sourceExtension?: string | null;
+  contentHash?: string | null;
+  storagePath?: string | null;
+  parserId?: string | null;
+  parserVersion?: number | null;
+  scanStatus?: string | null;
+  storageStatus?: string | null;
+  documentVersionId?: string | null;
   parseStatus: KnowledgeParseStatus;
   storageCid: string | null;
   chunkCount: number;
+  artifactCount?: number | null;
+  chunkStatus?: string | null;
+  embeddingStatus?: string | null;
+  vectorIndexStatus?: string | null;
+  qualityStatus?: string | null;
+  readinessStatus?: string | null;
   parseQualityScore?: number | null;
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
@@ -70,14 +105,70 @@ export type KnowledgeCollectionDetail = {
 export type KnowledgeUploadAcceptedResponse = {
   collectionId: string;
   documentId: string;
+  jobId?: string | null;
+  statusUrl?: string | null;
+  status?: "ACCEPTED" | "PROCESSING" | "READY" | "PARTIAL_READY" | "FAILED" | null;
+  readiness?: KnowledgeIngestionReadinessStatus | null;
   visibility: KnowledgeVisibility;
   parseStatus: KnowledgeParseStatus;
+  sourceMime?: string | null;
+  sourceExtension?: string | null;
+  contentHash?: string | null;
+  storagePath?: string | null;
+  parserId?: string | null;
+  parserVersion?: number | null;
+  scanStatus?: string | null;
+  storageStatus?: string | null;
+  documentVersionId?: string | null;
+  artifactCount?: number | null;
+  indexStatus?: KnowledgeIndexingStatus | null;
+  indexing?: KnowledgeIndexingState | null;
+  indexedChunkCount?: number | null;
+  indexingError?: string | null;
   storageCid: string | null;
   chunkCount: number;
   parseQualityScore?: number | null;
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
   ingestionQuality?: KnowledgeIngestionQualityReport | null;
+};
+
+export type KnowledgeIngestionJobStatusResponse = {
+  jobId: string;
+  collectionId: string;
+  documentId: string;
+  status: "ACCEPTED" | "PROCESSING" | "READY" | "PARTIAL_READY" | "FAILED";
+  stage?: KnowledgeIngestionJobStage | null;
+  jobStatus?: KnowledgeIngestionJobPersistenceStatus | null;
+  attempts?: number | null;
+  readiness: KnowledgeIngestionReadinessStatus;
+  parseStatus: KnowledgeParseStatus;
+  sourceMime?: string | null;
+  sourceExtension?: string | null;
+  contentHash?: string | null;
+  storagePath?: string | null;
+  parserId?: string | null;
+  parserVersion?: number | null;
+  scanStatus?: string | null;
+  storageStatus?: string | null;
+  documentVersionId?: string | null;
+  artifactCount?: number | null;
+  indexStatus: KnowledgeIndexingStatus;
+  chunkStatus?: string | null;
+  embeddingStatus?: string | null;
+  vectorIndexStatus?: string | null;
+  qualityStatus?: string | null;
+  readinessStatus?: string | null;
+  indexing?: KnowledgeIndexingState | null;
+  chunkCount: number;
+  indexedChunkCount?: number | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  indexingError?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export type KnowledgeParserCapabilityItem = {
@@ -88,6 +179,7 @@ export type KnowledgeParserCapabilityItem = {
   inputMode: "utf8" | "binary";
   available: boolean;
   kind: "built_in" | "external";
+  health?: "ready" | "unavailable";
   profile?: "docling" | "marker" | "external" | null;
   reason?: string | null;
 };
@@ -245,4 +337,35 @@ export function isKnowledgeParserCapabilitiesResponse(
   if (!json || typeof json !== "object") return false;
   const o = json as Record<string, unknown>;
   return Array.isArray(o.data);
+}
+
+export function isKnowledgeUploadAcceptedResponse(
+  json: unknown,
+): json is KnowledgeUploadAcceptedResponse {
+  if (!json || typeof json !== "object") return false;
+  const o = json as Record<string, unknown>;
+  return (
+    typeof o.collectionId === "string" &&
+    typeof o.documentId === "string" &&
+    typeof o.visibility === "string" &&
+    typeof o.parseStatus === "string" &&
+    typeof o.chunkCount === "number"
+  );
+}
+
+export function isKnowledgeIngestionJobStatusResponse(
+  json: unknown,
+): json is KnowledgeIngestionJobStatusResponse {
+  if (!json || typeof json !== "object") return false;
+  const o = json as Record<string, unknown>;
+  return (
+    typeof o.jobId === "string" &&
+    typeof o.collectionId === "string" &&
+    typeof o.documentId === "string" &&
+    typeof o.status === "string" &&
+    typeof o.readiness === "string" &&
+    typeof o.parseStatus === "string" &&
+    typeof o.indexStatus === "string" &&
+    typeof o.chunkCount === "number"
+  );
 }

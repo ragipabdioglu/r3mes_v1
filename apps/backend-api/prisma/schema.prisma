@@ -59,6 +59,34 @@ enum KnowledgeParseStatus {
   FAILED
 }
 
+enum KnowledgeIngestionStepStatus {
+  PENDING
+  RUNNING
+  READY
+  FAILED
+  PARTIAL_READY
+  SKIPPED
+}
+
+enum KnowledgeIngestionJobStage {
+  RECEIVED
+  STORAGE
+  PARSE
+  CHUNK
+  EMBEDDING
+  VECTOR_INDEX
+  QUALITY
+  READY
+}
+
+enum KnowledgeIngestionJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  PARTIAL_READY
+}
+
 enum KnowledgeFeedbackKind {
   GOOD_SOURCE
   WRONG_SOURCE
@@ -288,18 +316,121 @@ model KnowledgeDocument {
   collection   KnowledgeCollection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   title        String
   sourceType   KnowledgeSourceType
+  sourceMime      String?
+  sourceExtension String?
+  contentHash     String?
+  parserId        String?
+  parserVersion   Int?
   storageCid   String?
   storagePath  String?
+  scanStatus    KnowledgeIngestionStepStatus @default(PENDING)
+  storageStatus KnowledgeIngestionStepStatus @default(PENDING)
   autoMetadata Json?
   parseStatus  KnowledgeParseStatus @default(PENDING)
+  chunkStatus       KnowledgeIngestionStepStatus @default(PENDING)
+  embeddingStatus   KnowledgeIngestionStepStatus @default(PENDING)
+  vectorIndexStatus KnowledgeIngestionStepStatus @default(PENDING)
+  qualityStatus     KnowledgeIngestionStepStatus @default(PENDING)
+  readinessStatus   KnowledgeIngestionStepStatus @default(PENDING)
   errorMessage String?              @db.Text
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
 
   chunks KnowledgeChunk[]
+  ingestionJob IngestionJob?
+  versions KnowledgeDocumentVersion[]
+  artifacts KnowledgeArtifact[]
 
   @@index([collectionId, createdAt(sort: Desc)])
+  @@index([contentHash])
   @@index([parseStatus, createdAt])
+  @@index([scanStatus, storageStatus])
+  @@index([readinessStatus, createdAt])
+  @@index([vectorIndexStatus, createdAt])
+}
+
+model KnowledgeDocumentVersion {
+  id              String              @id @default(cuid())
+  documentId      String
+  document        KnowledgeDocument   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version         Int
+  versionIndex    Int                 @default(1)
+  sourceType      KnowledgeSourceType
+  sourceMime      String?
+  sourceExtension String?
+  parserId        String
+  parserVersion   Int
+  contentHash     String?
+  storagePath     String?
+  storageCid      String?
+  readinessStatus KnowledgeIngestionStepStatus @default(PENDING)
+  textHash        String
+  originalBytes   Int?
+  normalizedChars Int
+  warnings        String[]            @default([])
+  metadata        Json?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  artifacts KnowledgeArtifact[]
+  chunks    KnowledgeChunk[]
+
+  @@unique([documentId, version])
+  @@unique([documentId, versionIndex])
+  @@unique([documentId, contentHash])
+  @@index([documentId, createdAt(sort: Desc)])
+  @@index([contentHash])
+  @@index([parserId, parserVersion])
+  @@index([readinessStatus, createdAt])
+  @@index([textHash])
+}
+
+model KnowledgeArtifact {
+  id                 String                    @id @default(cuid())
+  documentId         String
+  document           KnowledgeDocument         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  versionId          String?
+  version            KnowledgeDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  artifactId         String
+  artifactKey        String?
+  ordinal            Int
+  kind               String
+  page               Int?
+  pageNumber         Int?
+  title              String?
+  level              Int?
+  text               String                    @db.Text
+  metadata           Json?
+  answerabilityScore Int?
+  createdAt          DateTime                  @default(now())
+
+  chunks KnowledgeChunk[]
+
+  @@unique([artifactKey])
+  @@unique([documentId, versionId, artifactId])
+  @@index([documentId, artifactId])
+  @@index([versionId, kind])
+  @@index([kind])
+  @@index([page])
+}
+
+model IngestionJob {
+  jobId      String                      @id @default(cuid())
+  documentId String                      @unique
+  document   KnowledgeDocument           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  stage      KnowledgeIngestionJobStage  @default(RECEIVED)
+  status     KnowledgeIngestionJobStatus @default(QUEUED)
+  attempts   Int                         @default(0)
+  errorCode  String?
+  errorMessage String?                   @db.Text
+  startedAt  DateTime?
+  completedAt DateTime?
+  createdAt  DateTime                    @default(now())
+  updatedAt  DateTime                    @updatedAt
+
+  @@index([documentId])
+  @@index([status, createdAt])
+  @@index([stage, status])
 }
 
 model KnowledgeChunk {
@@ -310,12 +441,21 @@ model KnowledgeChunk {
   content    String            @db.Text
   tokenCount Int
   autoMetadata Json?
+  versionId  String?
+  version    KnowledgeDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  artifactRowId String?
+  artifact   KnowledgeArtifact? @relation(fields: [artifactRowId], references: [id], onDelete: SetNull)
+  artifactId String?
+  artifactSplitIndex Int?
   createdAt  DateTime          @default(now())
 
   embedding KnowledgeEmbedding?
 
   @@unique([documentId, chunkIndex])
   @@index([documentId])
+  @@index([versionId])
+  @@index([artifactRowId])
+  @@index([artifactId])
 }
 
 model KnowledgeEmbedding {
