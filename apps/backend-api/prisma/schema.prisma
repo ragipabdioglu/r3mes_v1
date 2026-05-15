@@ -47,6 +47,10 @@ enum KnowledgeSourceType {
   TEXT
   MARKDOWN
   JSON
+  PDF
+  DOCX
+  PPTX
+  HTML
 }
 
 enum KnowledgeParseStatus {

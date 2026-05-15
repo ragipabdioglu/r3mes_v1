@@ -1,6 +1,7 @@
 export type KnowledgeVisibility = "PRIVATE" | "PUBLIC";
 
 export type KnowledgeParseStatus = "PENDING" | "READY" | "FAILED";
+export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON" | "PDF" | "DOCX" | "PPTX" | "HTML";
 export type KnowledgeParseQualityLevel = "clean" | "usable" | "noisy";
 export type KnowledgeIngestionRiskLevel = "none" | "low" | "medium" | "high";
 export type KnowledgeIngestionQualityReport = {
@@ -41,7 +42,7 @@ export type KnowledgeCollectionListResponse = {
 export type KnowledgeDocumentDetail = {
   id: string;
   title: string;
-  sourceType: "TEXT" | "MARKDOWN" | "JSON";
+  sourceType: KnowledgeSourceType;
   parseStatus: KnowledgeParseStatus;
   storageCid: string | null;
   chunkCount: number;
@@ -82,7 +83,7 @@ export type KnowledgeUploadAcceptedResponse = {
 export type KnowledgeParserCapabilityItem = {
   id: string;
   version: number;
-  sourceType: "TEXT" | "MARKDOWN" | "JSON";
+  sourceType: KnowledgeSourceType;
   extensions: string[];
   inputMode: "utf8" | "binary";
   available: boolean;

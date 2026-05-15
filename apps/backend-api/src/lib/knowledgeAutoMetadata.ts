@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { embedKnowledgeText } from "./knowledgeEmbedding.js";
-import type { KnowledgeChunkDraft } from "./knowledgeText.js";
+import type { DocumentArtifactKind, KnowledgeChunkDraft, KnowledgeSourceType } from "./knowledgeText.js";
 import { routeQuery } from "./queryRouter.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import type { KnowledgeParseQuality } from "./knowledgeParseQuality.js";
@@ -32,6 +32,12 @@ export interface KnowledgeAutoMetadata {
       warnings: string[];
     };
   };
+  sourceType?: KnowledgeSourceType;
+  artifactKind?: DocumentArtifactKind;
+  sectionTitle?: string | null;
+  pageNumber?: number | null;
+  isScaffold?: boolean;
+  answerabilityScore?: number;
   profile?: KnowledgeCollectionProfile;
 }
 
@@ -577,6 +583,9 @@ export function inferKnowledgeAutoMetadata(opts: {
   const card = parseKnowledgeCard(opts.content);
   const routePlan = routeQuery(`${opts.title}\n${card.topic}\n${card.tags.join(" ")}\n${opts.content.slice(0, 1600)}`);
   const structured = Boolean(card.topic.trim() && card.tags.length > 0);
+  const routeIsStrong = routePlan.confidence === "high" && routePlan.subtopics.length > 0;
+  const inferredDomain = structured || routeIsStrong ? routePlan.domain : "general";
+  const inferredSubtopics = structured || routeIsStrong ? routePlan.subtopics : [];
   const genericPhrases = extractGenericProfilePhrases({
     title: opts.title,
     content: card.patientSummary || card.clinicalTakeaway || opts.content,
@@ -586,9 +595,9 @@ export function inferKnowledgeAutoMetadata(opts: {
       opts.title,
       card.topic,
       ...card.tags,
-      ...routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
-      ...routePlan.mustIncludeTerms,
-      ...routePlan.retrievalHints,
+      ...inferredSubtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+      ...(routeIsStrong ? routePlan.mustIncludeTerms : []),
+      ...(routeIsStrong ? routePlan.retrievalHints : []),
       ...genericPhrases,
     ],
     28,
@@ -597,11 +606,11 @@ export function inferKnowledgeAutoMetadata(opts: {
     [
       ...card.tags,
       structured ? card.topic : "",
-      ...routePlan.subtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
+      ...inferredSubtopics.map((subtopic) => subtopic.replace(/_/g, " ")),
       ...genericPhrases,
       ...normalizedProfileTerms,
-      ...routePlan.mustIncludeTerms,
-      ...routePlan.retrievalHints,
+      ...(routeIsStrong ? routePlan.mustIncludeTerms : []),
+      ...(routeIsStrong ? routePlan.retrievalHints : []),
     ],
     20,
   );
@@ -617,8 +626,8 @@ export function inferKnowledgeAutoMetadata(opts: {
   const hasGenericProfileSignal = genericPhrases.length >= 3;
 
   return {
-    domain: routePlan.domain,
-    subtopics: routePlan.subtopics,
+    domain: inferredDomain,
+    subtopics: inferredSubtopics,
     keywords,
     entities: unique(
       [
@@ -630,8 +639,8 @@ export function inferKnowledgeAutoMetadata(opts: {
       12,
     ),
     documentType: inferDocumentType(opts.title, opts.content),
-    audience: inferAudience(routePlan.domain, opts.content),
-    riskLevel: routePlan.riskLevel,
+    audience: inferAudience(inferredDomain, opts.content),
+    riskLevel: inferredDomain === "general" ? "low" : routePlan.riskLevel,
     summary,
     questionsAnswered,
     sourceQuality: structured ? "structured" : routePlan.confidence === "low" && !hasGenericProfileSignal ? "thin" : "inferred",
@@ -667,6 +676,7 @@ export function mergeKnowledgeAutoMetadata(
     questionsAnswered: unique(items.flatMap((item) => item.questionsAnswered), 10),
     sourceQuality: collectionSourceQualityForItems(items),
     parseQuality: aggregateParseQuality(items),
+    sourceType: items.find((item) => item.sourceType)?.sourceType,
   };
   mergedBase.ingestionQuality = aggregateIngestionQuality(items, mergedBase.parseQuality);
   return {

@@ -1,27 +1,29 @@
 # R3MES Ingestion 2.0 Document Parser POC
 
-R3MES'in ana ingestion yolu halen `.txt`, `.md` ve `.json` dosyalarıdır. PDF/DOCX desteği bilinçli olarak opsiyoneldir: bir external parser komutu tanımlanmadıkça backend PDF/DOCX kabul etmez. Bu, ağır parser bağımlılıklarının RAG hattını sessizce bozmasını engeller.
+R3MES'in ingestion yolu artık düz metni tek kaynak kabul etmez: `.txt`, `.md`, `.json`, `.pdf`, `.docx`, `.pptx` ve `.html` dosyaları ortak `ParsedKnowledgeDocument` sözleşmesine çevrilir. PDF/DOCX/PPTX/HTML desteği bilinçli olarak external parser komutuna bağlıdır; parser env'i tanımlı değilse bu formatlar açılmaz. Bu, ağır parser bağımlılıklarının RAG hattını sessizce bozmasını engeller.
 
 ## Hedef Mimari
 
 1. Kullanıcı dosya yükler.
 2. Backend dosya uzantısına göre parser adapter seçer.
-3. Built-in parser `.txt/.md/.json` dosyasını doğrudan metne çevirir.
-4. External parser adapter `.pdf/.docx` dosyasını geçici dosya olarak external komuta verir.
-5. External komut stdout'a temiz Markdown/text basar.
-6. Aynı chunking, parse quality, metadata, profile, embedding ve retrieval hattı çalışır.
+3. Built-in parser `.txt/.md/.json` dosyasını doğrudan normalize metne ve artifact listesine çevirir.
+4. External parser adapter `.pdf/.docx/.pptx/.html` dosyasını geçici dosya olarak external komuta verir.
+5. External komut tercihen stdout'a JSON envelope basar: `sourceType`, `text`, `artifacts[]`. Eski Markdown/text stdout hâlâ fallback olarak kabul edilir.
+6. Backend artifact-aware chunking yapar; kapak, footer, page marker, URL ve kısa heading gibi scaffold blokları retrieval chunk'ı olmaz.
+7. Chunk content içine `Topic`, `Tags`, `Source Summary` gibi metadata enjekte edilmez; artifact metadata ayrı `autoMetadata` alanlarında tutulur.
+8. Parse quality, ingestion quality, profile, embedding ve retrieval hattı aynı sözleşme üzerinden çalışır.
 
 ## Env Sözleşmesi
 
-`apps/backend-api/.env` içine parser komutu eklenirse PDF/DOCX açılır:
+`apps/backend-api/.env` içine parser komutu eklenirse PDF/DOCX/PPTX/HTML açılır:
 
 ```bash
 R3MES_DOCUMENT_PARSER_COMMAND="docling"
-R3MES_DOCUMENT_PARSER_ARGS="{input} --to md"
+R3MES_DOCUMENT_PARSER_ARGS="{input} --to json"
 R3MES_DOCUMENT_PARSER_TIMEOUT_MS=30000
 ```
 
-Alternatif olarak Marker veya başka bir CLI kullanılabilir. Tek zorunlu kural: komutun ilk temiz çıktısı stdout'ta Markdown/text olmalıdır.
+Alternatif olarak Marker, PyMuPDF4LLM bridge veya başka bir CLI kullanılabilir. Önerilen çıktı JSON envelope'dur; yalnız Markdown/text stdout eski parser uyumluluğu için fallback kalır.
 
 ## Hafif Yerel Bridge
 
@@ -40,7 +42,7 @@ R3MES_DOCUMENT_PARSER_ARGS="\"C:\path\to\R3MES\tools\document-parser-bridge.py\"
 R3MES_DOCUMENT_PARSER_TIMEOUT_MS=30000
 ```
 
-Bu bridge production parser değildir; amacı gerçek PDF/DOCX ingestion kalitesini hızlıca ölçmektir. PDF için `pypdf`, DOCX için `python-docx` kullanır. Tablo/OCR ihtiyacı yüksekse Docling/Marker gibi daha güçlü parser'lar aynı env sözleşmesine bağlanmalıdır.
+Bu bridge production parser değildir; amacı gerçek PDF/DOCX/PPTX/HTML ingestion kalitesini hızlıca ölçmektir. PDF için `pypdf`, DOCX için `python-docx` kullanır ve stdout'a artifact-aware JSON envelope basar. Tablo/OCR ihtiyacı yüksekse Docling/Marker gibi daha güçlü parser'lar aynı env sözleşmesine bağlanmalıdır.
 
 ## Smoke Test
 
@@ -65,9 +67,12 @@ pnpm run smoke:document-parser -- --file C:\path\to\sample.pdf --fail-on-noisy
 Başarılı çıktıda şunlara bakılır:
 
 - `parser.id` external parser için `external-document-parser-v1` olmalı.
+- `sourceType` gerçek dosya türünü göstermeli (`PDF`, `DOCX`, `PPTX`, `HTML`).
+- `artifactCount` sıfır olmamalı ve `artifactPreview` içinde page/footer/heading gibi scaffold bloklar ayrı görünmeli.
 - `parseQuality.level` tercihen `clean` veya `usable` olmalı.
 - `chunkCount` sıfır olmamalı.
-- `chunkPreview` metni tablo/kaynak gürültüsüyle dolu olmamalı.
+- `chunkPreview` kapak başlığı, sayfa numarası, footer veya URL gürültüsüyle başlamamalı.
+- `chunkPreview.content` içinde ingestion metadata enjeksiyonu (`Topic:`, `Tags:`, `Source Summary:`) olmamalı.
 - `warnings` içinde `mojibake_detected`, `replacement_char_detected`, `fragmented_lines` sık görünüyorsa parser üretim için hazır değildir.
 
 ## Kabul Kriteri

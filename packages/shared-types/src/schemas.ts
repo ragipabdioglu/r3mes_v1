@@ -169,7 +169,7 @@ export const KnowledgeUploadAcceptedResponseSchema: z.ZodType<KnowledgeUploadAcc
 export const KnowledgeParserCapabilityItemSchema: z.ZodType<KnowledgeParserCapabilityItem> = z.object({
   id: z.string().min(1),
   version: z.number().int().positive(),
-  sourceType: z.enum(["TEXT", "MARKDOWN", "JSON"]),
+  sourceType: z.enum(["TEXT", "MARKDOWN", "JSON", "PDF", "DOCX", "PPTX", "HTML"]),
   extensions: z.array(z.string().min(1)),
   inputMode: z.enum(["utf8", "binary"]),
   available: z.boolean(),

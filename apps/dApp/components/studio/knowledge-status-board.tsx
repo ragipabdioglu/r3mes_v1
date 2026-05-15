@@ -158,7 +158,7 @@ function productHealth(item: KnowledgeCollectionListItem): {
     return {
       title: "Veri bekliyor",
       summary: "Bu collection henüz chat için kullanılacak doküman içermiyor.",
-      nextAction: "Önce TXT/MD/JSON/PDF/DOCX kaynak yükleyin.",
+      nextAction: "Önce TXT/MD/JSON/PDF/DOCX/PPTX/HTML kaynak yükleyin.",
       className: "border-zinc-800 bg-zinc-950/45 text-zinc-400",
     };
   }

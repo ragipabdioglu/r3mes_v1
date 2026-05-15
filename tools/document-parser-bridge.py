@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
+import re
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
@@ -40,7 +42,96 @@ def normalize_text(value: str) -> str:
     return "\n".join(lines).strip()
 
 
-def parse_pdf(path: Path) -> str:
+def artifact(kind: str, text: str, *, title: str | None = None, page: int | None = None, level: int | None = None, items: list[str] | None = None, score: int | None = None) -> dict:
+    clean = normalize_text(text)
+    base_score = {
+        "definition": 92,
+        "table": 84,
+        "list": 82,
+        "qa": 80,
+        "paragraph": 68,
+        "heading": 30,
+        "title": 24,
+        "url": 1,
+        "footer": 3,
+        "page_marker": 2,
+    }.get(kind, 45)
+    return {
+        "kind": kind,
+        "text": clean,
+        "title": title,
+        "page": page,
+        "level": level,
+        "items": items,
+        "answerabilityScore": score if score is not None else base_score,
+    }
+
+
+def classify_block(text: str) -> str:
+    low = text.lower()
+    stripped = text.strip()
+    if stripped.startswith("http://") or stripped.startswith("https://"):
+        return "url"
+    if len(stripped) <= 90 and stripped.lower().startswith("hafta "):
+        return "footer"
+    if len(stripped) <= 140 and any(month in low for month in ["ocak", "şubat", "subat", "mart", "nisan", "mayıs", "mayis", "haziran", "temmuz", "ağustos", "agustos", "eylül", "eylul", "ekim", "kasım", "kasim", "aralık", "aralik"]) and any(ch.isdigit() for ch in stripped):
+        return "footer"
+    stripped_without_decimal_dots = re.sub(r"\d+\.\d+", "", stripped)
+    if (
+        len(stripped) <= 100
+        and "\n" not in stripped
+        and not any(mark in stripped_without_decimal_dots for mark in [".", "?", "!", ";", ":"])
+    ):
+        return "heading"
+    if "|" in stripped and "\n" in stripped:
+        return "table"
+    if any(marker in low for marker in [" nedir", " denir", " ifade eder", " tanımlanır", " tanimlanir", " bütünüdür", " butunudur"]):
+        return "definition"
+    if stripped.count("\n- ") >= 2 or stripped.count("\n• ") >= 2 or stripped.count("\n") >= 2:
+        return "list"
+    return "paragraph"
+
+
+def artifacts_from_markdown(markdown: str) -> list[dict]:
+    artifacts: list[dict] = []
+    current_title: str | None = None
+    current_page: int | None = None
+    block: list[str] = []
+
+    def flush() -> None:
+        nonlocal block
+        text = normalize_text("\n".join(block))
+        block = []
+        if not text:
+            return
+        artifacts.append(artifact(classify_block(text), text, title=current_title, page=current_page))
+
+    for raw in markdown.splitlines():
+        line = raw.strip()
+        if not line:
+            flush()
+            continue
+        if line.lower().startswith("## page "):
+            flush()
+            try:
+                current_page = int(line.split()[-1])
+            except Exception:
+                current_page = None
+            artifacts.append(artifact("page_marker", line.replace("## ", ""), title=current_title, page=current_page, score=2))
+            continue
+        if line.startswith("#"):
+            flush()
+            level = len(line) - len(line.lstrip("#"))
+            title = line.lstrip("#").strip()
+            current_title = title
+            artifacts.append(artifact("title" if level == 1 else "heading", title, title=title, page=current_page, level=level))
+            continue
+        block.append(line)
+    flush()
+    return [item for item in artifacts if item.get("text")]
+
+
+def parse_pdf(path: Path) -> tuple[str, list[dict]]:
     try:
         from pypdf import PdfReader  # type: ignore
     except Exception as exc:  # pragma: no cover - depends on optional env
@@ -56,7 +147,8 @@ def parse_pdf(path: Path) -> str:
         if not text:
             continue
         sections.append(f"## Page {index}\n\n{text}")
-    return "\n\n".join(sections)
+    markdown = "\n\n".join(sections)
+    return markdown, artifacts_from_markdown(markdown)
 
 
 def markdown_table(rows: list[list[str]]) -> str:
@@ -75,7 +167,7 @@ def markdown_table(rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def parse_docx(path: Path) -> str:
+def parse_docx(path: Path) -> tuple[str, list[dict]]:
     try:
         from docx import Document  # type: ignore
     except Exception:  # pragma: no cover - depends on optional env
@@ -101,7 +193,8 @@ def parse_docx(path: Path) -> str:
     if len(normalize_text(xml_fallback)) > len(normalize_text(parsed)) * 2:
         sections.append("## XML Text Fallback")
         sections.append(xml_fallback)
-    return "\n\n".join(sections)
+    markdown = "\n\n".join(sections)
+    return markdown, artifacts_from_markdown(markdown)
 
 
 def parse_docx_xml_text(path: Path) -> str:
@@ -141,16 +234,22 @@ def main() -> None:
         fail(f"Input file not found: {path}", 1)
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        output = parse_pdf(path)
+        output, artifacts = parse_pdf(path)
+        source_type = "PDF"
     elif suffix == ".docx":
-        output = parse_docx(path)
+        output, artifacts = parse_docx(path)
+        source_type = "DOCX"
     else:
         fail(f"Unsupported bridge file type: {suffix}. Expected .pdf or .docx", 1)
 
     output = normalize_text(output)
     if not output:
         fail("Parser produced empty output", 3)
-    print(output)
+    print(json.dumps({
+        "sourceType": source_type,
+        "text": output,
+        "artifacts": artifacts,
+    }, ensure_ascii=False))
 
 
 if __name__ == "__main__":

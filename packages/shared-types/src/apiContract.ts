@@ -112,7 +112,7 @@ export interface KnowledgeUploadAcceptedResponse {
 export interface KnowledgeParserCapabilityItem {
   id: string;
   version: number;
-  sourceType: "TEXT" | "MARKDOWN" | "JSON";
+  sourceType: "TEXT" | "MARKDOWN" | "JSON" | "PDF" | "DOCX" | "PPTX" | "HTML";
   extensions: string[];
   inputMode: "utf8" | "binary";
   available: boolean;

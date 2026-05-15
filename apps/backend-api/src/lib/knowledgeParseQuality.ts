@@ -1,4 +1,4 @@
-import type { KnowledgeChunkDraft } from "./knowledgeText.js";
+import type { KnowledgeChunkDraft, KnowledgeSourceType } from "./knowledgeText.js";
 
 export type KnowledgeParseQualityLevel = "clean" | "usable" | "noisy";
 
@@ -50,7 +50,7 @@ function countMatches(text: string, pattern: RegExp): number {
   return text.match(pattern)?.length ?? 0;
 }
 
-function structureSignalCount(text: string, sourceType: "TEXT" | "MARKDOWN" | "JSON"): number {
+function structureSignalCount(text: string, sourceType: KnowledgeSourceType): number {
   const base = STRUCTURE_PATTERNS.filter((pattern) => pattern.test(text)).length;
   return sourceType === "JSON" ? base + 1 : base;
 }
@@ -67,7 +67,7 @@ function qualityLevel(score: number): KnowledgeParseQualityLevel {
 
 export function scoreKnowledgeParseQuality(opts: {
   filename: string;
-  sourceType: "TEXT" | "MARKDOWN" | "JSON";
+  sourceType: KnowledgeSourceType;
   text: string;
   chunks: KnowledgeChunkDraft[];
 }): KnowledgeParseQuality {

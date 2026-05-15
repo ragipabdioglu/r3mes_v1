@@ -14,7 +14,6 @@ import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { sendApiError } from "../lib/apiErrors.js";
 import {
   buildIngestionQualityReport,
-  enrichKnowledgeChunkWithAutoMetadata,
   inferKnowledgeAutoMetadata,
   mergeKnowledgeAutoMetadata,
   type KnowledgeAutoMetadata,
@@ -25,7 +24,7 @@ import { scoreKnowledgeParseQuality, type KnowledgeParseQuality } from "../lib/k
 import { scoreKnowledgeProfileHealth } from "../lib/knowledgeProfileHealth.js";
 import { normalizeKnowledgeChunkContent } from "../lib/knowledgeNormalize.js";
 import {
-  chunkKnowledgeText,
+  chunkParsedKnowledgeDocument,
   isSupportedKnowledgeFilename,
   listKnowledgeParserCapabilities,
   parseKnowledgeBuffer,
@@ -191,6 +190,12 @@ function readKnowledgeAutoMetadata(value: unknown): KnowledgeAutoMetadata | null
     sourceQuality: record.sourceQuality === "structured" || record.sourceQuality === "inferred" || record.sourceQuality === "thin" ? record.sourceQuality : "thin",
     parseQuality: readKnowledgeParseQuality(record.parseQuality),
     parseAdapter: readKnowledgeParseAdapter(record.parseAdapter),
+    sourceType: typeof record.sourceType === "string" ? record.sourceType as KnowledgeAutoMetadata["sourceType"] : undefined,
+    artifactKind: typeof record.artifactKind === "string" ? record.artifactKind as KnowledgeAutoMetadata["artifactKind"] : undefined,
+    sectionTitle: typeof record.sectionTitle === "string" ? record.sectionTitle : null,
+    pageNumber: typeof record.pageNumber === "number" ? record.pageNumber : null,
+    isScaffold: typeof record.isScaffold === "boolean" ? record.isScaffold : undefined,
+    answerabilityScore: typeof record.answerabilityScore === "number" ? record.answerabilityScore : undefined,
     profile: profileRecord as KnowledgeAutoMetadata["profile"],
   };
 }
@@ -472,17 +477,11 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
     }
 
     const parsed = parseKnowledgeBuffer(fileName, fileBuf);
-    const rawChunks = chunkKnowledgeText(parsed.text);
+    const rawChunks = chunkParsedKnowledgeDocument(parsed);
     const documentTitle = title || fileName;
     const chunks = rawChunks.map((chunk) => ({
       ...chunk,
-      ...enrichKnowledgeChunkWithAutoMetadata(
-        {
-          ...chunk,
-          content: normalizeKnowledgeChunkContent(chunk.content, { title: documentTitle }),
-        },
-        { title: documentTitle },
-      ),
+      content: normalizeKnowledgeChunkContent(chunk.content, { title: documentTitle }),
     }));
     if (chunks.length === 0) {
       return sendApiError(reply, 400, "EMPTY_DOCUMENT", "Yüklenen knowledge dosyasında kullanılabilir içerik yok");
@@ -493,13 +492,22 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       text: parsed.text,
       chunks,
     });
-    const chunksWithMetadata = chunks.map((chunk) => ({
-      ...chunk,
-      autoMetadata: inferKnowledgeAutoMetadata({
+    const chunksWithMetadata = chunks.map((chunk) => {
+      const autoMetadata = inferKnowledgeAutoMetadata({
         title: documentTitle,
         content: chunk.content,
-      }),
-    }));
+      });
+      autoMetadata.sourceType = parsed.sourceType;
+      autoMetadata.artifactKind = chunk.artifactKind;
+      autoMetadata.sectionTitle = chunk.sectionTitle ?? null;
+      autoMetadata.pageNumber = chunk.pageNumber ?? null;
+      autoMetadata.isScaffold = chunk.isScaffold ?? false;
+      autoMetadata.answerabilityScore = chunk.answerabilityScore;
+      return {
+        ...chunk,
+        autoMetadata,
+      };
+    });
     const documentAutoMetadata = mergeKnowledgeAutoMetadata(chunksWithMetadata.map((chunk) => chunk.autoMetadata));
     if (!documentAutoMetadata) {
       return sendApiError(reply, 400, "EMPTY_DOCUMENT_METADATA", "Yüklenen knowledge dosyası için metadata üretilemedi");
@@ -514,6 +522,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       version: parsed.parser.version,
       diagnostics: parsed.diagnostics,
     };
+    documentAutoMetadata.sourceType = parsed.sourceType;
 
     const ipfsApi = process.env.IPFS_API_URL ?? "http://127.0.0.1:5001";
     const storageCid = await ipfsAddBuffer(ipfsApi, fileBuf, fileName);

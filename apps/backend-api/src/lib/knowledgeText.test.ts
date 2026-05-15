@@ -7,6 +7,7 @@ import {
   listKnowledgeParserCapabilities,
   normalizeParsedKnowledgeText,
   chunkKnowledgeText,
+  chunkParsedKnowledgeDocument,
   parseKnowledgeBuffer,
 } from "./knowledgeText.js";
 
@@ -129,9 +130,10 @@ describe("knowledge parser adapters", () => {
 
     const parsed = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
 
-    expect(parsed.sourceType).toBe("MARKDOWN");
+    expect(parsed.sourceType).toBe("PDF");
     expect(parsed.parser).toEqual({ id: "external-document-parser-v1", version: 1 });
     expect(parsed.text).toContain("# Parsed document");
+    expect(parsed.artifacts.length).toBeGreaterThan(0);
     expect(parsed.diagnostics.originalBytes).toBeGreaterThan(0);
   });
 
@@ -140,6 +142,7 @@ describe("knowledge parser adapters", () => {
 
     expect(parsed.sourceType).toBe("TEXT");
     expect(parsed.text).toBe("Merhaba bilgi notu");
+    expect(parsed.artifacts[0]).toMatchObject({ kind: "paragraph" });
     expect(parsed.parser).toEqual({ id: "plain-text-v1", version: 1 });
     expect(parsed.diagnostics.originalBytes).toBeGreaterThan(0);
     expect(parsed.diagnostics.normalizedChars).toBe(parsed.text.length);
@@ -224,5 +227,31 @@ describe("knowledge parser adapters", () => {
       expect(chunk.content).toContain("| Satır | Tutar |");
       expect(chunk.content).toContain("| --- | --- |");
     }
+  });
+
+  it("creates artifact-aware chunks without injecting route metadata into content", () => {
+    const parsed = parseKnowledgeBuffer(
+      "lesson.md",
+      Buffer.from(
+        [
+          "# Hafta 5",
+          "",
+          "## Büyük Verinin 5V Özellikleri",
+          "",
+          "- Volume",
+          "- Velocity",
+          "- Variety",
+          "- Veracity",
+          "- Value",
+        ].join("\n"),
+        "utf8",
+      ),
+    );
+
+    const chunks = chunkParsedKnowledgeDocument(parsed, 400);
+
+    expect(chunks.some((chunk) => chunk.artifactKind === "list" || chunk.content.includes("Volume"))).toBe(true);
+    expect(chunks.map((chunk) => chunk.content).join("\n")).not.toContain("Source Summary:");
+    expect(chunks.map((chunk) => chunk.content).join("\n")).not.toContain("Tags:");
   });
 });

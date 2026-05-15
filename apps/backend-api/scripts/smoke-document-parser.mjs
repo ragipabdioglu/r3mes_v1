@@ -27,7 +27,7 @@ function parseArgs() {
 async function main() {
   const opts = parseArgs();
   const [
-    { parseKnowledgeBuffer, chunkKnowledgeText, listKnowledgeParserAdapters },
+    { parseKnowledgeBuffer, chunkParsedKnowledgeDocument, listKnowledgeParserAdapters },
     { scoreKnowledgeParseQuality },
     { buildIngestionQualityReport },
   ] = await Promise.all([
@@ -37,7 +37,7 @@ async function main() {
   ]);
   const buffer = await readFile(opts.file);
   const parsed = parseKnowledgeBuffer(basename(opts.file), buffer);
-  const chunks = chunkKnowledgeText(parsed.text);
+  const chunks = chunkParsedKnowledgeDocument(parsed);
   const quality = scoreKnowledgeParseQuality({
     filename: basename(opts.file),
     sourceType: parsed.sourceType,
@@ -54,11 +54,23 @@ async function main() {
     parser: parsed.parser,
     sourceType: parsed.sourceType,
     diagnostics: parsed.diagnostics,
+    artifactCount: parsed.artifacts?.length ?? 0,
+    artifactPreview: (parsed.artifacts ?? []).slice(0, 5).map((artifact) => ({
+      kind: artifact.kind,
+      title: artifact.title,
+      page: artifact.page,
+      answerabilityScore: artifact.answerabilityScore,
+      excerpt: artifact.text.slice(0, 180),
+    })),
     parseQuality: quality,
     ingestionQuality,
     chunkCount: chunks.length,
     chunkPreview: chunks.slice(0, 3).map((chunk) => ({
       chunkIndex: chunk.chunkIndex,
+      artifactKind: chunk.artifactKind,
+      sectionTitle: chunk.sectionTitle,
+      pageNumber: chunk.pageNumber,
+      answerabilityScore: chunk.answerabilityScore,
       tokenCount: chunk.tokenCount,
       excerpt: chunk.content.slice(0, 360),
     })),

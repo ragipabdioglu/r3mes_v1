@@ -3,13 +3,38 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON";
+export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON" | "PDF" | "DOCX" | "PPTX" | "HTML";
 export type KnowledgeParserInputMode = "utf8" | "binary";
 export type KnowledgeExternalParserProfile = "docling" | "marker" | "external";
+export type DocumentArtifactKind =
+  | "title"
+  | "heading"
+  | "paragraph"
+  | "definition"
+  | "list"
+  | "table"
+  | "qa"
+  | "url"
+  | "footer"
+  | "page_marker"
+  | "image_caption";
+
+export interface DocumentArtifact {
+  id: string;
+  kind: DocumentArtifactKind;
+  text: string;
+  title?: string | null;
+  page?: number | null;
+  level?: number | null;
+  items?: string[];
+  metadata?: Record<string, unknown>;
+  answerabilityScore: number;
+}
 
 export interface ParsedKnowledgeDocument {
   sourceType: KnowledgeSourceType;
   text: string;
+  artifacts: DocumentArtifact[];
   parser: {
     id: string;
     version: number;
@@ -25,6 +50,7 @@ export interface KnowledgeParserAdapter {
   id: string;
   version: number;
   sourceType: KnowledgeSourceType;
+  sourceTypeForFilename?: (filename: string) => KnowledgeSourceType;
   extensions: string[];
   inputMode: KnowledgeParserInputMode;
   parse(opts: { filename: string; buffer: Buffer; raw: string }): ParsedKnowledgeDocument;
@@ -51,15 +77,19 @@ function parsedDocument(opts: {
   adapter: KnowledgeParserAdapter;
   text: string;
   originalBytes: number;
+  sourceType?: KnowledgeSourceType;
+  artifacts?: DocumentArtifact[];
   warnings?: string[];
 }): ParsedKnowledgeDocument {
-  const text = normalizeParsedKnowledgeText(opts.text, opts.adapter.sourceType).trim();
+  const sourceType = opts.sourceType ?? opts.adapter.sourceType;
+  const text = normalizeParsedKnowledgeText(opts.text, sourceType).trim();
   if (!text) {
     throw new Error("Boş bilgi dosyası yüklenemez");
   }
   return {
-    sourceType: opts.adapter.sourceType,
+    sourceType,
     text,
+    artifacts: normalizeDocumentArtifacts(opts.artifacts, text, sourceType),
     parser: {
       id: opts.adapter.id,
       version: opts.adapter.version,
@@ -133,6 +163,95 @@ export function normalizeParsedKnowledgeText(text: string, sourceType: Knowledge
     .trim();
 }
 
+function sourceTypeForExtension(filename: string): KnowledgeSourceType {
+  const ext = getKnowledgeExtension(filename);
+  if (ext === ".pdf") return "PDF";
+  if (ext === ".docx") return "DOCX";
+  if (ext === ".pptx") return "PPTX";
+  if (ext === ".html" || ext === ".htm") return "HTML";
+  if (ext === ".md") return "MARKDOWN";
+  if (ext === ".json") return "JSON";
+  return "TEXT";
+}
+
+function normalizeSourceType(value: unknown, fallback: KnowledgeSourceType): KnowledgeSourceType {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "TEXT" || raw === "MARKDOWN" || raw === "JSON" || raw === "PDF" || raw === "DOCX" || raw === "PPTX" || raw === "HTML") {
+    return raw;
+  }
+  return fallback;
+}
+
+function normalizeArtifactKind(value: unknown): DocumentArtifactKind {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (
+    raw === "title" ||
+    raw === "heading" ||
+    raw === "paragraph" ||
+    raw === "definition" ||
+    raw === "list" ||
+    raw === "table" ||
+    raw === "qa" ||
+    raw === "url" ||
+    raw === "footer" ||
+    raw === "page_marker" ||
+    raw === "image_caption"
+  ) return raw;
+  return "paragraph";
+}
+
+function artifactAnswerabilityScore(kind: DocumentArtifactKind, text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  if (kind === "definition") return 92;
+  if (kind === "table" || kind === "list" || kind === "qa") return 84;
+  if (kind === "paragraph") return 68;
+  if (kind === "heading" || kind === "title") return 28;
+  if (kind === "url" || kind === "footer" || kind === "page_marker") return 4;
+  return 45;
+}
+
+function cleanArtifactText(value: string): string {
+  return normalizeParsedKnowledgeText(value, "MARKDOWN")
+    .replace(/^#{1,6}\s*/u, "")
+    .trim();
+}
+
+function normalizeDocumentArtifacts(
+  artifacts: DocumentArtifact[] | undefined,
+  fallbackText: string,
+  sourceType: KnowledgeSourceType,
+): DocumentArtifact[] {
+  const source = artifacts && artifacts.length > 0 ? artifacts : inferDocumentArtifactsFromText(fallbackText);
+  const shouldReclassifyScaffold =
+    sourceType === "PDF" || sourceType === "DOCX" || sourceType === "PPTX" || sourceType === "HTML";
+  const out: DocumentArtifact[] = [];
+  for (const [index, artifact] of source.entries()) {
+    const text = cleanArtifactText(String(artifact.text ?? ""));
+    if (!text) continue;
+    const rawKind = normalizeArtifactKind(artifact.kind);
+    const kind = shouldReclassifyScaffold && rawKind === "paragraph" && isLikelyStandaloneHeading(text)
+      ? "heading"
+      : rawKind;
+    out.push({
+      id: artifact.id || `artifact-${index}`,
+      kind,
+      text,
+      title: artifact.title ?? null,
+      page: typeof artifact.page === "number" ? artifact.page : null,
+      level: typeof artifact.level === "number" ? artifact.level : null,
+      items: Array.isArray(artifact.items) ? artifact.items.map((item) => cleanArtifactText(String(item))).filter(Boolean) : undefined,
+      metadata: artifact.metadata && typeof artifact.metadata === "object" ? artifact.metadata : undefined,
+      answerabilityScore: Math.max(0, Math.min(100, Math.round(
+        typeof artifact.answerabilityScore === "number"
+          ? artifact.answerabilityScore
+          : artifactAnswerabilityScore(kind, text),
+      ))),
+    });
+  }
+  return out;
+}
+
 const TEXT_PARSER: KnowledgeParserAdapter = {
   id: "plain-text-v1",
   version: 1,
@@ -180,6 +299,160 @@ const BUILT_IN_KNOWLEDGE_PARSERS: KnowledgeParserAdapter[] = [
   MARKDOWN_PARSER,
   JSON_PARSER,
 ];
+
+function isLikelyUrlLine(line: string): boolean {
+  return /^https?:\/\/\S+$/iu.test(line.trim());
+}
+
+function isLikelyFooterLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    /^page\s+\d+$/iu.test(trimmed) ||
+    /^#{0,6}\s*page\s+\d+$/iu.test(trimmed) ||
+    /^hafta\s+\d+(?:\s*[-–]\s*\d+)?$/iu.test(trimmed) ||
+    (trimmed.length <= 140 &&
+      /\b(?:ocak|şubat|subat|mart|nisan|mayıs|mayis|haziran|temmuz|ağustos|agustos|eylül|eylul|ekim|kasım|kasim|aralık|aralik)\s+20\d{2}\b/iu.test(trimmed)) ||
+    /^[\p{L}\p{N}\s._-]{2,80}\s+(?:mart|nisan|mayıs|mayis|haziran|temmuz|ağustos|agustos|eylül|eylul|ekim|kasım|kasim|aralık|aralik)\s+20\d{2}$/iu.test(trimmed)
+  );
+}
+
+function isLikelyDefinition(text: string): boolean {
+  const normalized = text.toLocaleLowerCase("tr-TR");
+  return /\b(?:nedir|ne demek|denir|ifade eder|tanımlanır|tanimlanir|bütünüdür|butunudur)\b/u.test(normalized);
+}
+
+function isLikelyStandaloneHeading(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.includes("\n") || trimmed.length > 120 || isLikelyDefinition(trimmed)) return false;
+  const withoutDecimalDots = trimmed.replace(/\d+\.\d+/gu, "");
+  if (/[.!?;:]/u.test(withoutDecimalDots)) return false;
+  const words = trimmed.split(/\s+/u).filter(Boolean);
+  return words.length > 1 && words.length <= 12;
+}
+
+function isMarkdownTableLike(text: string): boolean {
+  return text.split(/\r?\n/).some((line) => MARKDOWN_TABLE_LINE_PATTERN.test(line));
+}
+
+function flushArtifactBlock(opts: {
+  artifacts: DocumentArtifact[];
+  lines: string[];
+  kind?: DocumentArtifactKind;
+  title?: string | null;
+  page?: number | null;
+  level?: number | null;
+}): void {
+  const text = opts.lines.join("\n").trim();
+  if (!text) return;
+  const kind = opts.kind ?? (isMarkdownTableLike(text) ? "table" : isLikelyDefinition(text) ? "definition" : "paragraph");
+  opts.artifacts.push({
+    id: `artifact-${opts.artifacts.length}`,
+    kind,
+    text,
+    title: opts.title ?? null,
+    page: opts.page ?? null,
+    level: opts.level ?? null,
+    answerabilityScore: artifactAnswerabilityScore(kind, text),
+  });
+  opts.lines.length = 0;
+}
+
+export function inferDocumentArtifactsFromText(text: string): DocumentArtifact[] {
+  const normalized = text.replace(/\r\n/g, "\n");
+  const artifacts: DocumentArtifact[] = [];
+  let currentLines: string[] = [];
+  let currentTitle: string | null = null;
+  let currentPage: number | null = null;
+  let currentLevel: number | null = null;
+
+  const flush = () => flushArtifactBlock({
+    artifacts,
+    lines: currentLines,
+    title: currentTitle,
+    page: currentPage,
+    level: currentLevel,
+  });
+
+  for (const rawLine of normalized.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      flush();
+      continue;
+    }
+
+    const pageMatch = line.match(/^#{0,6}\s*Page\s+(\d+)\s*$/iu);
+    if (pageMatch) {
+      flush();
+      currentPage = Number.parseInt(pageMatch[1] ?? "0", 10) || currentPage;
+      artifacts.push({
+        id: `artifact-${artifacts.length}`,
+        kind: "page_marker",
+        text: line.replace(/^#+\s*/u, ""),
+        page: currentPage,
+        title: currentTitle,
+        answerabilityScore: 2,
+      });
+      continue;
+    }
+
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/u);
+    if (headingMatch) {
+      flush();
+      currentLevel = headingMatch[1]?.length ?? 1;
+      currentTitle = cleanArtifactText(headingMatch[2] ?? line);
+      artifacts.push({
+        id: `artifact-${artifacts.length}`,
+        kind: currentLevel === 1 ? "title" : "heading",
+        text: currentTitle,
+        title: currentTitle,
+        page: currentPage,
+        level: currentLevel,
+        answerabilityScore: currentLevel === 1 ? 24 : 30,
+      });
+      continue;
+    }
+
+    if (isLikelyUrlLine(line)) {
+      flush();
+      artifacts.push({
+        id: `artifact-${artifacts.length}`,
+        kind: "url",
+        text: line,
+        title: currentTitle,
+        page: currentPage,
+        answerabilityScore: 1,
+      });
+      continue;
+    }
+
+    if (isLikelyFooterLine(line)) {
+      flush();
+      artifacts.push({
+        id: `artifact-${artifacts.length}`,
+        kind: "footer",
+        text: line,
+        title: currentTitle,
+        page: currentPage,
+        answerabilityScore: 3,
+      });
+      continue;
+    }
+
+    currentLines.push(line);
+  }
+  flush();
+
+  return artifacts.length > 0
+    ? artifacts
+    : [{
+        id: "artifact-0",
+        kind: "paragraph",
+        text: normalized.trim(),
+        title: null,
+        page: null,
+        answerabilityScore: artifactAnswerabilityScore("paragraph", normalized),
+      }];
+}
 
 function splitCommandLineArgs(value: string): string[] {
   const args: string[] = [];
@@ -242,8 +515,9 @@ function externalDocumentParser(): KnowledgeParserAdapter | null {
   return {
     id: "external-document-parser-v1",
     version: 1,
-    sourceType: "MARKDOWN",
-    extensions: [".pdf", ".docx"],
+    sourceType: "PDF",
+    sourceTypeForFilename: sourceTypeForExtension,
+    extensions: [".pdf", ".docx", ".pptx", ".html", ".htm"],
     inputMode: "binary",
     parse: ({ filename, buffer }) => {
       const ext = getKnowledgeExtension(filename) || ".bin";
@@ -263,9 +537,12 @@ function externalDocumentParser(): KnowledgeParserAdapter | null {
         if (result.status !== 0) {
           throw new Error(`External document parser failed with exit code ${result.status ?? "unknown"}: ${String(result.stderr ?? "").slice(0, 500)}`);
         }
+        const parsedOutput = parseExternalParserOutput(String(result.stdout ?? ""), filename);
         return parsedDocument({
           adapter: externalDocumentParser() ?? TEXT_PARSER,
-          text: String(result.stdout ?? ""),
+          sourceType: parsedOutput.sourceType,
+          text: parsedOutput.text,
+          artifacts: parsedOutput.artifacts,
           originalBytes: buffer.length,
           warnings: String(result.stderr ?? "").trim()
             ? [`external_parser_stderr:${String(result.stderr).trim().slice(0, 240)}`]
@@ -275,6 +552,62 @@ function externalDocumentParser(): KnowledgeParserAdapter | null {
         rmSync(tempDir, { recursive: true, force: true });
       }
     },
+  };
+}
+
+function parseExternalParserOutput(stdout: string, filename: string): {
+  sourceType: KnowledgeSourceType;
+  text: string;
+  artifacts?: DocumentArtifact[];
+} {
+  const trimmed = stdout.trim();
+  const fallbackSourceType = sourceTypeForExtension(filename);
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        sourceType?: unknown;
+        text?: unknown;
+        markdown?: unknown;
+        artifacts?: unknown;
+      };
+      const sourceType = normalizeSourceType(parsed.sourceType, fallbackSourceType);
+      const text = String(parsed.text ?? parsed.markdown ?? "").trim();
+      const rawArtifacts = Array.isArray(parsed.artifacts) ? parsed.artifacts : [];
+      const artifacts: DocumentArtifact[] = [];
+      for (const [index, item] of rawArtifacts.entries()) {
+          if (!item || typeof item !== "object") continue;
+          const record = item as Record<string, unknown>;
+          const textValue = String(record.text ?? "").trim();
+          if (!textValue) continue;
+          artifacts.push({
+            id: String(record.id ?? `artifact-${index}`),
+            kind: normalizeArtifactKind(record.kind),
+            text: textValue,
+            title: typeof record.title === "string" ? record.title : null,
+            page: typeof record.page === "number" ? record.page : null,
+            level: typeof record.level === "number" ? record.level : null,
+            items: Array.isArray(record.items) ? record.items.map((value) => String(value)) : undefined,
+            metadata: record.metadata && typeof record.metadata === "object" ? record.metadata as Record<string, unknown> : undefined,
+            answerabilityScore: typeof record.answerabilityScore === "number"
+              ? record.answerabilityScore
+              : artifactAnswerabilityScore(normalizeArtifactKind(record.kind), textValue),
+          });
+      }
+      if (text) {
+        return {
+          sourceType: sourceType === "TEXT" ? fallbackSourceType : sourceType,
+          text,
+          artifacts,
+        };
+      }
+    } catch {
+      // Keep compatibility with legacy parser commands that print Markdown.
+    }
+  }
+  return {
+    sourceType: fallbackSourceType,
+    text: trimmed,
+    artifacts: inferDocumentArtifactsFromText(trimmed),
   };
 }
 
@@ -346,6 +679,11 @@ export interface KnowledgeChunkDraft {
   chunkIndex: number;
   content: string;
   tokenCount: number;
+  artifactKind?: DocumentArtifactKind;
+  sectionTitle?: string | null;
+  pageNumber?: number | null;
+  isScaffold?: boolean;
+  answerabilityScore?: number;
 }
 
 const RECORD_HEADING_PATTERN = /^##\s+Kayıt\b/m;
@@ -363,6 +701,35 @@ function createChunkDrafts(contents: string[]): KnowledgeChunkDraft[] {
     content,
     tokenCount: approximateTokenCount(content),
   }));
+}
+
+function createArtifactChunkDrafts(artifacts: DocumentArtifact[], maxChars: number): KnowledgeChunkDraft[] {
+  const chunks: KnowledgeChunkDraft[] = [];
+  const addChunk = (content: string, artifact: DocumentArtifact) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    chunks.push({
+      chunkIndex: chunks.length,
+      content: trimmed,
+      tokenCount: approximateTokenCount(trimmed),
+      artifactKind: artifact.kind,
+      sectionTitle: artifact.title ?? null,
+      pageNumber: artifact.page ?? null,
+      isScaffold: artifact.kind === "title" || artifact.kind === "heading" || artifact.kind === "footer" || artifact.kind === "page_marker" || artifact.kind === "url",
+      answerabilityScore: artifact.answerabilityScore,
+    });
+  };
+
+  for (const artifact of artifacts) {
+    if (artifact.kind === "footer" || artifact.kind === "page_marker" || artifact.kind === "url" || artifact.kind === "title" || artifact.kind === "heading") {
+      continue;
+    }
+    const content = artifact.text;
+    const pieces = content.length > maxChars ? splitOversizedText(content, maxChars) : [content];
+    for (const piece of pieces) addChunk(piece, artifact);
+  }
+
+  return chunks;
 }
 
 function chunkParagraphs(paragraphs: string[], maxChars: number): string[] {
@@ -625,6 +992,12 @@ export function chunkKnowledgeText(text: string, maxChars = 900): KnowledgeChunk
   return createChunkDrafts(
     chunkParagraphs(paragraphs.length > 0 ? paragraphs : [trimmed], maxChars),
   );
+}
+
+export function chunkParsedKnowledgeDocument(document: ParsedKnowledgeDocument, maxChars = 900): KnowledgeChunkDraft[] {
+  const artifactChunks = createArtifactChunkDrafts(document.artifacts, maxChars);
+  if (artifactChunks.length > 0) return artifactChunks;
+  return chunkKnowledgeText(document.text, maxChars);
 }
 
 export function approximateTokenCount(text: string): number {

@@ -22,7 +22,8 @@ type UploadState =
   | { kind: "ok"; summary: string }
   | { kind: "err"; message: string };
 
-const KNOWLEDGE_ACCEPT = ".txt,.md,.json,application/json,text/plain,text/markdown";
+const KNOWLEDGE_ACCEPT =
+  ".txt,.md,.json,.pdf,.docx,.pptx,.html,.htm,application/json,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/html";
 const BUILT_IN_EXTENSIONS = [".txt", ".md", ".json"];
 
 export function KnowledgeUploadPanel() {
@@ -62,7 +63,15 @@ export function KnowledgeUploadPanel() {
   }, [account?.address, ensureAuthHeaders]);
 
   const accept = useMemo(() => {
-    const mimeHints = ["application/json", "text/plain", "text/markdown"];
+    const mimeHints = [
+      "application/json",
+      "text/plain",
+      "text/markdown",
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "text/html",
+    ];
     return [...availableExtensions, ...mimeHints].join(",");
   }, [availableExtensions]);
 
