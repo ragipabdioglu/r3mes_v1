@@ -6,15 +6,13 @@ import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 
 import {
-  enrichKnowledgeChunkWithAutoMetadata,
   inferKnowledgeAutoMetadata,
   mergeKnowledgeAutoMetadata,
 } from "../dist/lib/knowledgeAutoMetadata.js";
 import { parseKnowledgeCard } from "../dist/lib/knowledgeCard.js";
 import { embedKnowledgeText, formatVectorLiteral, getKnowledgeEmbeddingDimensions } from "../dist/lib/knowledgeEmbedding.js";
 import { scoreKnowledgeParseQuality } from "../dist/lib/knowledgeParseQuality.js";
-import { normalizeKnowledgeChunkContent } from "../dist/lib/knowledgeNormalize.js";
-import { chunkKnowledgeText, parseKnowledgeBuffer } from "../dist/lib/knowledgeText.js";
+import { chunkParsedKnowledgeDocument, parseKnowledgeBuffer } from "../dist/lib/knowledgeText.js";
 import { embedTextsForQdrant } from "../dist/lib/qdrantEmbedding.js";
 import {
   buildQdrantPayloadMetadata,
@@ -310,7 +308,7 @@ async function main() {
       }));
       const buffer = readFileSync(filePath);
       const parsed = parseKnowledgeBuffer(fileName, buffer);
-      const parsedChunks = chunkKnowledgeText(parsed.text)
+      const parsedChunks = chunkParsedKnowledgeDocument(parsed)
         .filter((chunk) => !isLowSignalChunk(chunk.content))
         .slice(0, maxChunksPerDocument);
       const parseQuality = scoreKnowledgeParseQuality({
@@ -336,17 +334,18 @@ async function main() {
         ...parsed.parser,
         diagnostics: parsed.diagnostics,
       });
-      const chunkDrafts = parsedChunks.map((chunk) => {
-        const normalized = normalizeKnowledgeChunkContent(chunk.content, { title });
-        return {
-          ...chunk,
-          content: normalized,
-          ...enrichKnowledgeChunkWithAutoMetadata({ ...chunk, content: normalized }, { title }),
-        };
-      });
+      const chunkDrafts = parsedChunks.map((chunk) => ({ ...chunk, content: chunk.content.trim() }));
       const chunksWithMetadata = chunkDrafts.map((chunk) => ({
         ...chunk,
-        autoMetadata: buildChunkMetadata({ row, title, content: chunk.content }),
+        autoMetadata: {
+          ...buildChunkMetadata({ row, title, content: chunk.content }),
+          sourceType: parsed.sourceType,
+          artifactKind: chunk.artifactKind,
+          sectionTitle: chunk.sectionTitle ?? null,
+          pageNumber: chunk.pageNumber ?? null,
+          isScaffold: chunk.isScaffold ?? false,
+          answerabilityScore: chunk.answerabilityScore,
+        },
       }));
       const inferredDocumentMetadata = mergeKnowledgeAutoMetadata(chunksWithMetadata.map((chunk) => chunk.autoMetadata));
       const documentMetadata = mergeKapMetadata(baseMetadata, inferredDocumentMetadata);

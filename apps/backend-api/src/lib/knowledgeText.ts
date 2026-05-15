@@ -214,6 +214,10 @@ function artifactAnswerabilityScore(kind: DocumentArtifactKind, text: string): n
 function cleanArtifactText(value: string): string {
   return normalizeParsedKnowledgeText(value, "MARKDOWN")
     .replace(/^#{1,6}\s*/u, "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => !isLowValueDocumentLine(line))
+    .join("\n")
     .trim();
 }
 
@@ -316,6 +320,19 @@ function isLikelyFooterLine(line: string): boolean {
   );
 }
 
+function isLowValueDocumentLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  return (
+    /^©\s*copyright\b/iu.test(trimmed) ||
+    /^copyright\s+20\d{2}\b/iu.test(trimmed) ||
+    /^her hakk[ıi] sakl[ıi]d[ıi]r\.?$/iu.test(trimmed) ||
+    /^all rights reserved\.?$/iu.test(trimmed) ||
+    isLikelyFooterLine(trimmed) ||
+    isLikelyUrlLine(trimmed)
+  );
+}
+
 function isLikelyDefinition(text: string): boolean {
   const normalized = text.toLocaleLowerCase("tr-TR");
   return /\b(?:nedir|ne demek|denir|ifade eder|tanımlanır|tanimlanir|bütünüdür|butunudur)\b/u.test(normalized);
@@ -323,11 +340,15 @@ function isLikelyDefinition(text: string): boolean {
 
 function isLikelyStandaloneHeading(text: string): boolean {
   const trimmed = text.trim();
-  if (!trimmed || trimmed.includes("\n") || trimmed.length > 120 || isLikelyDefinition(trimmed)) return false;
-  const withoutDecimalDots = trimmed.replace(/\d+\.\d+/gu, "");
+  if (!trimmed || trimmed.length > 180 || isLikelyDefinition(trimmed)) return false;
+  const lines = trimmed.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  if (lines.length > 3) return false;
+  if (lines.some((line) => line.length > 90)) return false;
+  const withoutDecorators = trimmed.replace(/[*•#-]+/gu, " ");
+  const withoutDecimalDots = withoutDecorators.replace(/\d+\.\d+/gu, "");
   if (/[.!?;:]/u.test(withoutDecimalDots)) return false;
-  const words = trimmed.split(/\s+/u).filter(Boolean);
-  return words.length > 1 && words.length <= 12;
+  const words = withoutDecorators.split(/\s+/u).filter(Boolean);
+  return words.length >= 1 && words.length <= 12;
 }
 
 function isMarkdownTableLike(text: string): boolean {
@@ -642,8 +663,8 @@ export function listKnowledgeParserCapabilities(): KnowledgeParserCapability[] {
     {
       id: "external-document-parser-v1",
       version: 1,
-      sourceType: "MARKDOWN",
-      extensions: [".pdf", ".docx"],
+      sourceType: "PDF",
+      extensions: [".pdf", ".docx", ".pptx", ".html", ".htm"],
       inputMode: "binary",
       available: externalConfigured,
       kind: "external",
@@ -666,7 +687,7 @@ export function isSupportedKnowledgeFilename(filename: string): boolean {
 export function parseKnowledgeBuffer(filename: string, buffer: Buffer): ParsedKnowledgeDocument {
   const parser = getKnowledgeParserForFilename(filename);
   if (!parser) {
-    throw new Error("Desteklenmeyen bilgi dosyası. Yalnızca .txt, .md ve .json kabul edilir; PDF/DOCX için R3MES_DOCUMENT_PARSER_COMMAND gerekir.");
+    throw new Error("Desteklenmeyen bilgi dosyası. .txt, .md ve .json yerleşik desteklenir; .pdf/.docx/.pptx/.html için R3MES_DOCUMENT_PARSER_COMMAND gerekir.");
   }
   const raw = parser.inputMode === "utf8" ? buffer.toString("utf8").trim() : "";
   if (parser.inputMode === "utf8" && !raw) {

@@ -76,7 +76,7 @@ describe("knowledge parser adapters", () => {
     expect(withoutExternal.some((parser) => parser.id === "plain-text-v1" && parser.available)).toBe(true);
     expect(withoutExternal.find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
       available: false,
-      extensions: [".pdf", ".docx"],
+      extensions: [".pdf", ".docx", ".pptx", ".html", ".htm"],
       kind: "external",
     });
 

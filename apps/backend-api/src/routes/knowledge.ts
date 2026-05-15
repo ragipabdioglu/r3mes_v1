@@ -22,7 +22,6 @@ import { parseKnowledgeCard } from "../lib/knowledgeCard.js";
 import { formatVectorLiteral, getKnowledgeEmbeddingDimensions, embedKnowledgeText } from "../lib/knowledgeEmbedding.js";
 import { scoreKnowledgeParseQuality, type KnowledgeParseQuality } from "../lib/knowledgeParseQuality.js";
 import { scoreKnowledgeProfileHealth } from "../lib/knowledgeProfileHealth.js";
-import { normalizeKnowledgeChunkContent } from "../lib/knowledgeNormalize.js";
 import {
   chunkParsedKnowledgeDocument,
   isSupportedKnowledgeFilename,
@@ -473,16 +472,13 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       return sendApiError(reply, 400, "FILE_REQUIRED", "Bir knowledge dosyası gerekli");
     }
     if (!isSupportedKnowledgeFilename(fileName)) {
-      return sendApiError(reply, 400, "UNSUPPORTED_FILE_TYPE", "Yalnızca .txt, .md ve .json knowledge dosyaları desteklenir");
+      return sendApiError(reply, 400, "UNSUPPORTED_FILE_TYPE", ".txt, .md ve .json yerleşik desteklenir; PDF/DOCX/PPTX/HTML için document parser yapılandırması gerekir");
     }
 
     const parsed = parseKnowledgeBuffer(fileName, fileBuf);
     const rawChunks = chunkParsedKnowledgeDocument(parsed);
     const documentTitle = title || fileName;
-    const chunks = rawChunks.map((chunk) => ({
-      ...chunk,
-      content: normalizeKnowledgeChunkContent(chunk.content, { title: documentTitle }),
-    }));
+    const chunks = rawChunks.map((chunk) => ({ ...chunk, content: chunk.content.trim() }));
     if (chunks.length === 0) {
       return sendApiError(reply, 400, "EMPTY_DOCUMENT", "Yüklenen knowledge dosyasında kullanılabilir içerik yok");
     }

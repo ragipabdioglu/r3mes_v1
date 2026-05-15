@@ -56,6 +56,7 @@
     "smoke:quality-providers": "node scripts/smoke-quality-providers.mjs",
     "smoke:document-parser": "pnpm exec tsc -p tsconfig.json && node --env-file=.env scripts/smoke-document-parser.mjs",
     "import:kap-pilot": "pnpm exec tsc -p tsconfig.json && node --env-file=.env scripts/import-kap-pilot-corpus.mjs",
+    "import:local-knowledge-folder": "pnpm exec tsc -p tsconfig.json && node --env-file=.env scripts/import-local-knowledge-folder.mjs",
     "lora:scale": "node scripts/set-llama-lora-scale.mjs",
     "seed:legal-basic-demo": "node --env-file=.env scripts/seed-legal-basic-demo.mjs",
     "seed:legal-divorce-demo": "node --env-file=.env scripts/seed-legal-divorce-demo.mjs",
