@@ -227,6 +227,160 @@ describe("deterministic safety gate", () => {
     expect(result.metrics.redFlagCount).toBe(1);
   });
 
+  it("uses EvidenceBundle-derived signals to avoid false no-usable-facts rewrites", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "Kaynağa göre net dönem kârı 12,4 milyon TL olarak verilmiştir; yanıt bu kaynaklı sayısal alanla sınırlıdır.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "finance",
+        grounding_confidence: "medium",
+        user_query: "Net dönem kârı kaç?",
+      },
+      answerSpec: {
+        answerDomain: "finance",
+        answerIntent: "explain",
+        groundingConfidence: "medium",
+        userQuery: "Net dönem kârı kaç?",
+        tone: "direct",
+        sections: ["assessment"],
+        assessment: "12,4 milyon TL",
+        action: "",
+        caution: [],
+        summary: "12,4 milyon TL",
+        unknowns: [],
+        sourceIds: ["doc_1"],
+        facts: [],
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      evidenceSignals: {
+        legacyUsableFactCount: 0,
+        usableEvidenceBundleItemCount: 1,
+        selectedStructuredFactCount: 0,
+        requestedFieldCount: 1,
+        coveredRequestedFieldCount: 1,
+        answerPlanCoverage: "complete",
+        sourceCount: 1,
+        retrievalWasUsed: true,
+      },
+    });
+
+    expect(result.blockedReasons).not.toContain("NO_USABLE_FACTS");
+    expect(result.metrics.usableFactCount).toBe(1);
+    expect(result.metrics.usableEvidenceBundleItemCount).toBe(1);
+  });
+
+  it("adds safety rails for raw table dump answer-quality failures", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "| Alan | Değer |\n| Net dönem kârı | 12,4 milyon TL |\nBu ham tablo çıktısı kullanıcıya işlenmeden gösterildi.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "finance",
+        user_query: "Sadece net dönem kârını yaz.",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      answerQualityFindings: [
+        { bucket: "raw_table_dump", severity: "fail", message: "answer looks like a raw table dump" },
+      ],
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockedReasons).toContain("ANSWER_QUALITY_RAW_TABLE_DUMP");
+    expect(result.railChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "ANSWER_QUALITY_RAW_TABLE_DUMP", category: "output", status: "rewrite" }),
+      ]),
+    );
+  });
+
+  it("adds safety rails for table field mismatch answer-quality failures", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "Kaynaklı tabloda kullanıcı net dönem kârını istedi, ancak yanıt başka bir tablo alanını döndürdü.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "finance",
+        user_query: "Net dönem kârı kaç?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      answerQualityFindings: [
+        { bucket: "table_field_mismatch", severity: "fail", message: "missing required field" },
+      ],
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockedReasons).toContain("ANSWER_QUALITY_TABLE_FIELD_MISMATCH");
+  });
+
+  it("does not rewrite complete short numeric answers as too thin", () => {
+    const result = evaluateSafetyGate({
+      answerText: "12,4 milyon TL",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "technical",
+        grounding_confidence: "medium",
+        user_query: "Sadece sayıyı yaz: gelir kaç?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      answerPlan: {
+        domain: "technical",
+        intent: "explain",
+        taskType: "field_extraction",
+        outputFormat: "short",
+        requestedFields: [{
+          id: "revenue",
+          label: "Gelir",
+          aliases: ["gelir"],
+          required: true,
+          outputHint: "number",
+          confidence: "high",
+          matchedAliases: ["gelir"],
+        }],
+        selectedFacts: [{
+          id: "fact_1",
+          kind: "numeric_value",
+          sourceId: "doc_1",
+          field: "Gelir",
+          value: "12,4 milyon TL",
+          confidence: "high",
+          provenance: { quote: "Gelir: 12,4 milyon TL", extractor: "test" },
+        }],
+        constraints: {
+          forbidCaution: true,
+          noRawTableDump: true,
+          sourceGroundedOnly: true,
+          format: "short",
+        },
+        coverage: "complete",
+        forbiddenAdditions: [],
+        requiresModelSynthesis: false,
+        diagnostics: {
+          requestedFieldCount: 1,
+          selectedFactCount: 1,
+          missingFieldIds: [],
+        },
+      },
+      evidenceSignals: {
+        legacyUsableFactCount: 0,
+        usableEvidenceBundleItemCount: 1,
+        selectedStructuredFactCount: 1,
+        requestedFieldCount: 1,
+        coveredRequestedFieldCount: 1,
+        answerPlanCoverage: "complete",
+        sourceCount: 1,
+        retrievalWasUsed: true,
+      },
+    });
+
+    expect(result.blockedReasons).not.toContain("ANSWER_TOO_THIN");
+    expect(result.pass).toBe(true);
+  });
+
   it("blocks sources outside accessible collection scope", () => {
     const result = evaluateSafetyGate({
       answerText:

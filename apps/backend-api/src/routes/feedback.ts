@@ -51,6 +51,7 @@ import {
 
 import { sendApiError } from "../lib/apiErrors.js";
 import { getDecisionConfig } from "../lib/decisionConfig.js";
+import { normalizeFeedbackBadAnswerPayload } from "../lib/feedbackQualityPayload.js";
 import { prisma } from "../lib/prisma.js";
 import { walletAuthPreHandler } from "../lib/walletAuth.js";
 
@@ -111,6 +112,8 @@ type FeedbackRow = {
   expectedCollectionId: string | null;
   queryHash: string | null;
 };
+
+type FeedbackRepairTrack = "routing" | "ingestion_evidence" | "answer_quality" | "safety_policy";
 
 function aggregateKey(row: FeedbackRow): string {
   return [
@@ -389,7 +392,19 @@ function asObject(value: unknown): Record<string, unknown> | null {
 const FEEDBACK_METADATA_STRING_LIMIT = 1000;
 const FEEDBACK_METADATA_ARRAY_LIMIT = 25;
 const FEEDBACK_METADATA_OBJECT_KEYS_LIMIT = 80;
-const FEEDBACK_METADATA_BLOCKED_KEYS = new Set(["query", "rawQuery", "question", "prompt", "messages"]);
+const FEEDBACK_METADATA_BLOCKED_KEYS = new Set([
+  "query",
+  "rawQuery",
+  "question",
+  "prompt",
+  "messages",
+  "answer",
+  "rawAnswer",
+  "answerText",
+  "rawAnswerText",
+  "response",
+  "rawResponse",
+]);
 const FEEDBACK_SAFE_QUERY_LIMIT = 500;
 
 function sanitizeFeedbackMetadata(value: unknown, depth = 0): Prisma.InputJsonValue | undefined {
@@ -442,9 +457,40 @@ function metadataHasSafeEvalQuery(metadata: Record<string, unknown>): boolean {
   return false;
 }
 
+function classifyFeedbackRepairTrack(opts: {
+  kind: string;
+  metadata: Record<string, unknown>;
+  collectionId: string | null;
+}): FeedbackRepairTrack {
+  if (opts.kind === "WRONG_SOURCE" || opts.kind === "GOOD_SOURCE") return "routing";
+  if (opts.kind === "MISSING_SOURCE") return "ingestion_evidence";
+  if (opts.kind === "BAD_ANSWER") {
+    const explicit = opts.metadata.repairTrack;
+    if (
+      explicit === "routing" ||
+      explicit === "ingestion_evidence" ||
+      explicit === "answer_quality" ||
+      explicit === "safety_policy"
+    ) {
+      return explicit;
+    }
+    const qualityPayload = normalizeFeedbackBadAnswerPayload(opts.metadata);
+    if (qualityPayload) return "answer_quality";
+    const usableEvidence =
+      Number(opts.metadata.evidenceFactCount ?? 0) > 0 ||
+      Number(opts.metadata.evidenceBundleItemCount ?? 0) > 0 ||
+      Number(opts.metadata.sourceCount ?? 0) > 0 ||
+      Boolean(opts.collectionId);
+    return usableEvidence ? "answer_quality" : "ingestion_evidence";
+  }
+  return "answer_quality";
+}
+
 function buildFeedbackMetadata(opts: {
+  kind: string;
   metadata: unknown;
   query?: string | null;
+  collectionId?: string | null;
 }): Prisma.InputJsonValue | undefined {
   const sanitized = sanitizeFeedbackMetadata(opts.metadata);
   const metadata = asObject(sanitized) ? { ...asObject(sanitized) } : {};
@@ -453,6 +499,20 @@ function buildFeedbackMetadata(opts: {
     if (safeQuery) {
       metadata.safeQuery = safeQuery;
       metadata.evalQuerySource = "server_redacted_v1";
+    }
+  }
+  const repairTrack = classifyFeedbackRepairTrack({
+    kind: opts.kind,
+    metadata,
+    collectionId: opts.collectionId ?? null,
+  });
+  metadata.repairTrack = repairTrack;
+  if (opts.kind === "BAD_ANSWER") {
+    const qualityPayload = normalizeFeedbackBadAnswerPayload(metadata);
+    if (qualityPayload) {
+      metadata.feedbackBadAnswerPayload = qualityPayload as unknown as Prisma.InputJsonObject;
+      metadata.qualityBucket = qualityPayload.qualityBucket;
+      metadata.repairTrack = "answer_quality";
     }
   }
   return Object.keys(metadata).length > 0 ? metadata as Prisma.InputJsonObject : undefined;
@@ -898,7 +958,12 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
         chunkId: normalizeOptionalString(body.chunkId),
         expectedCollectionId,
         reason: normalizeOptionalString(body.reason),
-        metadata: buildFeedbackMetadata({ metadata: body.metadata, query: body.query }),
+        metadata: buildFeedbackMetadata({
+          kind: body.kind,
+          metadata: body.metadata,
+          query: body.query,
+          collectionId,
+        }),
       },
       select: {
         id: true,
@@ -1171,9 +1236,14 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
 
     if (adjustments.length === 0) {
       const preview = buildMutationPreview(record);
-      await prisma.knowledgeFeedbackRouterAdjustment.createMany({
-        data: preview.previewSteps.map((step) => adjustmentDataFromPreviewStep({ userId: user.id, record, step })),
-      });
+      const routerAdjustmentSteps = preview.previewSteps.filter(
+        (step) => step.mutationPath === "query_scoped_collection_adjustment",
+      );
+      if (routerAdjustmentSteps.length > 0) {
+        await prisma.knowledgeFeedbackRouterAdjustment.createMany({
+          data: routerAdjustmentSteps.map((step) => adjustmentDataFromPreviewStep({ userId: user.id, record, step })),
+        });
+      }
       adjustments = await prisma.knowledgeFeedbackRouterAdjustment.findMany({
         where: { userId: user.id, applyRecordId: record.id },
         orderBy: { createdAt: "asc" },
@@ -1188,6 +1258,7 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
             routerRuntimeAffected: false,
             adjustmentIds: adjustments.map((item) => item.id),
             previewSteps: preview.previewSteps,
+            reviewOnlySteps: preview.previewSteps.filter((step) => step.mutationPath !== "query_scoped_collection_adjustment"),
           } as unknown as Prisma.InputJsonValue,
           reason: "passive router adjustments recorded; router runtime integration remains disabled",
         },

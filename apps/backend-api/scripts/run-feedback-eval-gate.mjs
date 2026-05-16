@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { PrismaClient } from "@prisma/client";
 
@@ -16,7 +17,7 @@ function hasArg(name) {
   return process.argv.includes(name);
 }
 
-const appRoot = process.cwd();
+const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(appRoot, "..", "..");
 const outFile = resolve(repoRoot, argValue("--out", "artifacts/evals/feedback-gate/latest.json"));
 const feedbackGolden = "artifacts/evals/feedback-regression/golden.jsonl";
@@ -185,6 +186,36 @@ async function countJsonlRows(file) {
   }
 }
 
+async function summarizeFeedbackRegressionCases(file) {
+  const path = resolve(repoRoot, file);
+  try {
+    const raw = await readFile(path, "utf8");
+    const cases = raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const badAnswerCases = cases.filter((testCase) => (
+      testCase?.bucket === "feedback_bad_answer" ||
+      String(testCase?.id ?? "").startsWith("feedback-bad-answer-")
+    ));
+    const weakBadAnswerCases = badAnswerCases.filter((testCase) => testCase?.weakFeedbackCase === true);
+    return {
+      total: cases.length,
+      badAnswerCaseCount: badAnswerCases.length,
+      weakBadAnswerCaseCount: weakBadAnswerCases.length,
+      strongBadAnswerCaseCount: badAnswerCases.length - weakBadAnswerCases.length,
+    };
+  } catch {
+    return {
+      total: 0,
+      badAnswerCaseCount: 0,
+      weakBadAnswerCaseCount: 0,
+      strongBadAnswerCaseCount: 0,
+    };
+  }
+}
+
 async function fileExists(file) {
   try {
     await stat(resolve(repoRoot, file));
@@ -206,9 +237,23 @@ async function approvedProposalCount() {
   });
 }
 
+async function approvedBadAnswerProposalCount() {
+  const wallet = process.env.R3MES_DEV_WALLET || "0x0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d";
+  const user = await prisma.user.findUnique({ where: { walletAddress: wallet }, select: { id: true } });
+  if (!user) return 0;
+  return prisma.knowledgeFeedbackProposal.count({
+    where: {
+      userId: user.id,
+      status: "APPROVED",
+      action: "REVIEW_ANSWER_QUALITY",
+    },
+  });
+}
+
 async function main() {
   const started = Date.now();
   const approvedCount = await approvedProposalCount();
+  const approvedBadAnswerCount = await approvedBadAnswerProposalCount();
   const checks = [];
 
   if (requireApproved && approvedCount === 0) {
@@ -239,6 +284,7 @@ async function main() {
   ]));
 
   const feedbackCaseCount = await countJsonlRows(feedbackGolden);
+  const feedbackCaseSummary = await summarizeFeedbackRegressionCases(feedbackGolden);
   if (feedbackCaseCount > 0) {
     checks.push(await runCommand("feedback_regression", "node", evalArgs(feedbackGolden, feedbackOut, quick ? 5 : 0)));
   } else {
@@ -355,6 +401,8 @@ async function main() {
     productionRag: await readJsonIfExists(productionRagOut),
   };
   const approvedWithoutFeedbackCases = approvedCount > 0 && feedbackCaseCount === 0;
+  const approvedBadAnswerWithoutStrongCases =
+    approvedBadAnswerCount > 0 && feedbackCaseSummary.strongBadAnswerCaseCount === 0;
   if (approvedWithoutFeedbackCases) {
     checks.push({
       name: "feedback_case_coverage",
@@ -364,6 +412,19 @@ async function main() {
       error: "approved feedback proposals exist, but no feedback-derived eval cases were generated",
       remediation: "Submit feedback with metadata.redactedQuery/evalQuery, then regenerate the feedback regression golden file.",
     });
+  } else if (approvedBadAnswerWithoutStrongCases) {
+    checks.push({
+      name: "bad_answer_feedback_case_coverage",
+      command: "generated BAD_ANSWER feedback quality coverage check",
+      ok: false,
+      durationMs: 0,
+      approvedBadAnswerProposalCount: approvedBadAnswerCount,
+      badAnswerCaseCount: feedbackCaseSummary.badAnswerCaseCount,
+      weakBadAnswerCaseCount: feedbackCaseSummary.weakBadAnswerCaseCount,
+      strongBadAnswerCaseCount: feedbackCaseSummary.strongBadAnswerCaseCount,
+      error: "approved BAD_ANSWER proposals require at least one strict feedback-derived answer-quality eval case",
+      remediation: "Submit BAD_ANSWER feedback with metadata.qualityBucket and quality expectations, then regenerate the feedback regression golden file.",
+    });
   } else {
     checks.push({
       name: "feedback_case_coverage",
@@ -371,7 +432,9 @@ async function main() {
       ok: true,
       durationMs: 0,
       approvedProposalCount: approvedCount,
+      approvedBadAnswerProposalCount: approvedBadAnswerCount,
       feedbackCaseCount,
+      ...feedbackCaseSummary,
     });
   }
   const ok = checks.every((check) => check.ok === true);
@@ -382,10 +445,14 @@ async function main() {
       ? "feedback eval gate passed"
       : approvedWithoutFeedbackCases
         ? "approved feedback proposals require at least one feedback-derived eval case"
+        : approvedBadAnswerWithoutStrongCases
+          ? "approved BAD_ANSWER proposals require strict answer-quality feedback cases"
         : "one or more feedback eval gate checks failed",
     approvedProposalCount: approvedCount,
+    approvedBadAnswerProposalCount: approvedBadAnswerCount,
     feedbackCaseCount,
-    feedbackCaseCoverageOk: !approvedWithoutFeedbackCases,
+    feedbackCaseCoverageOk: !approvedWithoutFeedbackCases && !approvedBadAnswerWithoutStrongCases,
+    feedbackCaseSummary,
     checks,
     summaries: {
       feedbackRegression: evalSummaries.feedbackRegression?.summary ?? null,
@@ -408,7 +475,9 @@ async function main() {
     ok: report.ok,
     applyAllowed: report.applyAllowed,
     approvedProposalCount: report.approvedProposalCount,
+    approvedBadAnswerProposalCount: report.approvedBadAnswerProposalCount,
     feedbackCaseCount: report.feedbackCaseCount,
+    feedbackCaseSummary: report.feedbackCaseSummary,
     recordedGateResult: gateResult
       ? {
           applyRecordId: gateResult.applyRecordId,

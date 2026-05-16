@@ -1,6 +1,9 @@
 import type { ChatSourceCitation } from "@r3mes/shared-types";
 
 import type { GroundedMedicalAnswer } from "./answerSchema.js";
+import type { AnswerPlan } from "./answerPlan.js";
+import { safetyRailsFromAnswerQuality } from "./answerQualityRailMap.js";
+import type { AnswerQualityFinding } from "./answerQualityValidator.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import { hasLowLanguageQuality } from "./answerQuality.js";
 import { detectAnswerTask } from "./answerTaskDetector.js";
@@ -14,6 +17,7 @@ import {
   type SafetyRailStatus,
   type SafetySeverity,
 } from "./safetyRailRegistry.js";
+import type { SafetyEvidenceSignals } from "./safetyEvidenceSignals.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 interface SafetyRailCheck {
@@ -43,6 +47,9 @@ export interface SafetyInput {
   answerText: string;
   answer: GroundedMedicalAnswer;
   answerSpec?: AnswerSpec;
+  answerPlan?: AnswerPlan | null;
+  answerQualityFindings?: AnswerQualityFinding[];
+  evidenceSignals?: SafetyEvidenceSignals;
   sources: ChatSourceCitation[];
   retrievalWasUsed: boolean;
   evidence?: EvidenceExtractorOutput | null;
@@ -65,6 +72,12 @@ export interface SafetyGateResult {
     redFlagCount: number;
     finalCandidateCount: number | null;
     answerLength: number;
+    legacyUsableFactCount?: number;
+    usableEvidenceBundleItemCount?: number;
+    selectedStructuredFactCount?: number;
+    requestedFieldCount?: number;
+    coveredRequestedFieldCount?: number;
+    answerPlanCoverage?: SafetyEvidenceSignals["answerPlanCoverage"];
   };
 }
 
@@ -96,6 +109,37 @@ function queryExplicitlySuppressesRiskComment(query: string): boolean {
 function isFinanceFieldExtractionQuery(query: string, domain: GroundedMedicalAnswer["answer_domain"]): boolean {
   if (domain !== "finance") return false;
   return detectAnswerTask(query).requestedFields.some((field) => field.outputHint === "number");
+}
+
+function hasCompleteShortSupportedAnswer(opts: {
+  answerText: string;
+  answerPlan?: AnswerPlan | null;
+  evidenceSignals?: SafetyEvidenceSignals;
+  sourceCount: number;
+  retrievalWasUsed: boolean;
+}): boolean {
+  if (!opts.retrievalWasUsed || !opts.evidenceSignals) return false;
+  const requestedFieldCount = opts.evidenceSignals.requestedFieldCount;
+  const requestedFieldsCovered =
+    requestedFieldCount > 0 &&
+    opts.evidenceSignals.coveredRequestedFieldCount >= requestedFieldCount &&
+    opts.evidenceSignals.answerPlanCoverage === "complete";
+  const hasUsableEvidence =
+    opts.evidenceSignals.usableEvidenceBundleItemCount > 0 ||
+    opts.evidenceSignals.selectedStructuredFactCount > 0 ||
+    opts.evidenceSignals.legacyUsableFactCount > 0;
+  const shortOrStructuredFormat =
+    opts.answerPlan?.outputFormat === "short" ||
+    opts.answerPlan?.outputFormat === "table" ||
+    opts.answerPlan?.taskType === "field_extraction";
+
+  return Boolean(
+    opts.answerText &&
+    shortOrStructuredFormat &&
+    requestedFieldsCovered &&
+    hasUsableEvidence &&
+    opts.sourceCount > 0,
+  );
 }
 
 function addUnique(values: string[], value: string): void {
@@ -204,8 +248,16 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   const combined = [answerText, opts.answer.answer, opts.answer.condition_context, opts.answer.safe_action].join(" ");
   const evidence = opts.evidence ?? null;
   const routeDecision = opts.sourceSelection?.routeDecision;
-  const hasEvidenceSignals = Boolean(evidence || opts.answerSpec);
-  const usableFactCount = evidence?.usableFacts.length ?? opts.answerSpec?.facts.length ?? 0;
+  const evidenceSignals = opts.evidenceSignals;
+  const legacyUsableFactCount = evidence?.usableFacts.length ?? opts.answerSpec?.facts.length ?? 0;
+  const usableFactCount = evidenceSignals
+    ? Math.max(
+      evidenceSignals.usableEvidenceBundleItemCount,
+      evidenceSignals.selectedStructuredFactCount,
+      evidenceSignals.legacyUsableFactCount,
+    )
+    : legacyUsableFactCount;
+  const hasEvidenceSignals = Boolean(evidenceSignals || evidence || opts.answerSpec);
   const evidenceRedFlagCount = evidence?.redFlags.length ?? 0;
   const redFlagCount = evidenceRedFlagCount || opts.answerSpec?.caution.length || 0;
   const finalCandidateCount = readFinalCandidateCount(opts.retrievalDiagnostics);
@@ -228,6 +280,10 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
     if (resolvedStatus === "warn") addUnique(warnings, id);
     if (resolvedStatus === "rewrite" || resolvedStatus === "block") addUnique(blockedReasons, id);
   };
+
+  for (const railId of safetyRailsFromAnswerQuality(opts.answerQualityFindings)) {
+    addRail(railId);
+  }
 
   if (!answerText) {
     addRail("EMPTY_ANSWER");
@@ -305,7 +361,18 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
     addRail("RED_FLAG_WITHOUT_URGENT_GUIDANCE");
   }
 
-  if (answerText.length < 40 && opts.retrievalWasUsed && !isFinanceFieldExtractionQuery(query, opts.answer.answer_domain)) {
+  if (
+    answerText.length < 40 &&
+    opts.retrievalWasUsed &&
+    !isFinanceFieldExtractionQuery(query, opts.answer.answer_domain) &&
+    !hasCompleteShortSupportedAnswer({
+      answerText,
+      answerPlan: opts.answerPlan,
+      evidenceSignals,
+      sourceCount: opts.sources.length,
+      retrievalWasUsed: opts.retrievalWasUsed,
+    })
+  ) {
     addRail("ANSWER_TOO_THIN");
   }
 
@@ -336,6 +403,14 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
       redFlagCount,
       finalCandidateCount,
       answerLength: answerText.length,
+      ...(evidenceSignals ? {
+        legacyUsableFactCount: evidenceSignals.legacyUsableFactCount,
+        usableEvidenceBundleItemCount: evidenceSignals.usableEvidenceBundleItemCount,
+        selectedStructuredFactCount: evidenceSignals.selectedStructuredFactCount,
+        requestedFieldCount: evidenceSignals.requestedFieldCount,
+        coveredRequestedFieldCount: evidenceSignals.coveredRequestedFieldCount,
+        answerPlanCoverage: evidenceSignals.answerPlanCoverage,
+      } : {}),
     },
   };
 }

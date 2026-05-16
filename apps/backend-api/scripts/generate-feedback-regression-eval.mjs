@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { PrismaClient } from "@prisma/client";
 
@@ -9,12 +10,26 @@ function argValue(name, fallback) {
   return process.argv[index + 1];
 }
 
-const appRoot = process.cwd();
+const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(appRoot, "..", "..");
 const outFile = resolve(repoRoot, argValue("--out", "artifacts/evals/feedback-regression/golden.jsonl"));
 const fixtureFile = argValue("--fixture", "");
 const wallet = process.env.R3MES_DEV_WALLET || "0x0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d";
 const limit = Number(argValue("--limit", "100"));
+const QUALITY_BUCKETS = new Set([
+  "incomplete_answer",
+  "template_answer",
+  "unnecessary_warning",
+  "table_field_mismatch",
+  "raw_table_dump",
+  "ignored_user_constraint",
+  "source_found_but_bad_answer",
+  "over_aggressive_no_source",
+  "answer_too_long",
+  "wrong_output_format",
+]);
+const OUTPUT_FORMATS = new Set(["short", "bullets", "table", "freeform"]);
+const HASH_RE = /^[a-f0-9]{8,128}$/i;
 
 function normalize(value) {
   return String(value ?? "")
@@ -45,6 +60,69 @@ function stableIdPart(value) {
 
 function metadataObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function normalizeOptionalPayloadString(value, limit = 500) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, " ").trim().slice(0, limit).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readPayloadStringArray(value) {
+  const source = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const seen = new Set();
+  const out = [];
+  for (const item of source.slice(0, 25)) {
+    const normalized = normalizeOptionalPayloadString(item);
+    if (!normalized) continue;
+    const key = normalized.toLocaleLowerCase("tr-TR");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(normalized);
+  }
+  return out.length > 0 ? out : null;
+}
+
+function feedbackBadAnswerPayloadSource(metadata) {
+  const nested = metadataObject(metadata.feedbackBadAnswerPayload);
+  if (Object.keys(nested).length > 0) return nested;
+  const legacyNested = metadataObject(metadata.badAnswerQualityPayload);
+  if (Object.keys(legacyNested).length > 0) return legacyNested;
+  const qualityNested = metadataObject(metadata.qualityPayload);
+  if (Object.keys(qualityNested).length > 0) return qualityNested;
+  return metadata;
+}
+
+function normalizeFeedbackBadAnswerPayload(metadata) {
+  const source = feedbackBadAnswerPayloadSource(metadata);
+  const qualityBucket = normalizeOptionalPayloadString(source.qualityBucket, 80);
+  if (!qualityBucket || !QUALITY_BUCKETS.has(qualityBucket)) return null;
+
+  const expectedOutputFormatValue = source.expectedOutputFormat;
+  const expectedOutputFormat = expectedOutputFormatValue === undefined
+    ? null
+    : normalizeOptionalPayloadString(expectedOutputFormatValue, 40);
+  if (expectedOutputFormatValue !== undefined && (!expectedOutputFormat || !OUTPUT_FORMATS.has(expectedOutputFormat))) {
+    return null;
+  }
+
+  const payload = { qualityBucket };
+  const safeQuery = normalizeOptionalPayloadString(source.safeQuery ?? source.evalQuery ?? source.redactedQuery);
+  const expectedAnswerTerms = readPayloadStringArray(source.expectedAnswerTerms ?? source.requiredAnswerTerms);
+  const forbiddenAnswerTerms = readPayloadStringArray(source.forbiddenAnswerTerms);
+  const requestedFields = readPayloadStringArray(source.requestedFields ?? source.requiredFields);
+  const maxLength = Number(source.maxLength ?? source.maxWords ?? source.maxAnswerWords);
+  const badAnswerExcerptHash = normalizeOptionalPayloadString(source.badAnswerExcerptHash, 128);
+
+  if (safeQuery) payload.safeQuery = safeQuery;
+  if (expectedAnswerTerms) payload.expectedAnswerTerms = expectedAnswerTerms;
+  if (forbiddenAnswerTerms) payload.forbiddenAnswerTerms = forbiddenAnswerTerms;
+  if (requestedFields) payload.requestedFields = requestedFields;
+  if (expectedOutputFormat) payload.expectedOutputFormat = expectedOutputFormat;
+  if (Number.isFinite(maxLength) && maxLength > 0) payload.maxLength = Math.min(2000, Math.floor(maxLength));
+  if (badAnswerExcerptHash && HASH_RE.test(badAnswerExcerptHash)) payload.badAnswerExcerptHash = badAnswerExcerptHash.toLowerCase();
+
+  return payload;
 }
 
 function resolveRepoFile(value) {
@@ -121,6 +199,10 @@ function firstNonEmptyStringArray(...values) {
     if (items.length > 0) return uniqueStrings(items);
   }
   return [];
+}
+
+function mergeUniqueStrings(...values) {
+  return uniqueStrings(values.flatMap((value) => Array.isArray(value) ? value : []));
 }
 
 function readOptionalString(value) {
@@ -239,12 +321,47 @@ function caseFromFeedback(row) {
   }
 
   if (row.kind === "BAD_ANSWER") {
+    const qualityPayload = normalizeFeedbackBadAnswerPayload(metadata);
+    const forbiddenBuckets = qualityPayload ? [qualityPayload.qualityBucket] : [];
+    const requiredAnswerTerms = mergeUniqueStrings(
+      readStringArray(metadata.requiredAnswerTerms),
+      qualityPayload?.expectedAnswerTerms,
+    );
+    const forbiddenAnswerTerms = mergeUniqueStrings(
+      readStringArray(metadata.forbiddenAnswerTerms),
+      qualityPayload?.forbiddenAnswerTerms,
+    );
+    const requiredFields = qualityPayload?.requestedFields ?? [];
+    const qualityExpectations = qualityPayload
+      ? {
+          ...(requiredAnswerTerms.length > 0 ? { requiredAnswerTerms } : {}),
+          ...(forbiddenAnswerTerms.length > 0 ? { forbiddenAnswerTerms } : {}),
+          ...(requiredFields.length > 0 ? { requiredFields } : {}),
+          forbiddenBuckets,
+          ...(qualityPayload.expectedOutputFormat ? { format: qualityPayload.expectedOutputFormat } : {}),
+          ...(qualityPayload.maxLength ? { maxWords: qualityPayload.maxLength } : {}),
+          ...(qualityPayload.expectedOutputFormat === "short" ? { maxSentences: 1 } : {}),
+          ...(qualityPayload.qualityBucket === "unnecessary_warning" ? { forbidCaution: true } : {}),
+          ...(qualityPayload.qualityBucket === "raw_table_dump" ? { noRawTableDump: true } : {}),
+        }
+      : null;
     return {
       ...base,
+      ...(requiredAnswerTerms.length > 0 ? { requiredAnswerTerms } : {}),
+      ...(forbiddenAnswerTerms.length > 0 ? { forbiddenAnswerTerms } : {}),
+      ...(qualityPayload ? {
+        feedbackQualityPayload: qualityPayload,
+        qualityExpectations,
+        expectedAnswerQualityBucketsAbsent: forbiddenBuckets,
+      } : {
+        weakFeedbackCase: true,
+      }),
       forbiddenSafetyRailIds: ["LOW_LANGUAGE_QUALITY"],
       mustHaveSources: collectionIds.length > 0,
       minEvidenceFacts: collectionIds.length > 0 ? 1 : 0,
       maxSources: Number(metadata.maxSources ?? 3),
+      ...(qualityPayload?.maxLength ? { maxAnswerWords: qualityPayload.maxLength } : {}),
+      ...(qualityPayload?.expectedOutputFormat ? { expectedOutputFormat: qualityPayload.expectedOutputFormat } : {}),
     };
   }
 

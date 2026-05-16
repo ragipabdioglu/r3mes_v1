@@ -25,4 +25,15 @@ describe("safety rail registry", () => {
     expect(definition.defaultStatus).toBe("rewrite");
     expect(definition.defaultFallbackMode).toBe("source_suggestion");
   });
+
+  it("classifies critical answer-quality buckets as output rewrites", () => {
+    expect(getSafetyRailDefinition("ANSWER_QUALITY_RAW_TABLE_DUMP")).toMatchObject({
+      category: "output",
+      defaultStatus: "rewrite",
+    });
+    expect(getSafetyRailDefinition("ANSWER_QUALITY_TABLE_FIELD_MISMATCH")).toMatchObject({
+      category: "output",
+      defaultStatus: "rewrite",
+    });
+  });
 });

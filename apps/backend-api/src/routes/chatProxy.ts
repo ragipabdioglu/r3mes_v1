@@ -19,6 +19,7 @@ import { hasCompiledUsableGrounding, type CompiledEvidence } from "../lib/compil
 import type { ConversationalIntentDecision } from "../lib/conversationalIntent.js";
 import { getDecisionConfig, getDecisionConfigVersion } from "../lib/decisionConfig.js";
 import { composePlannedAnswer } from "../lib/domainEvidenceComposer.js";
+import { buildEvalDebugContract, EVAL_DEBUG_CONTRACT_VERSION } from "../lib/evalDebugContract.js";
 import { evaluateFeedbackShadowRuntime, type FeedbackShadowRuntimeReport } from "../lib/feedbackShadowRuntime.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
 import { retrieveKnowledgeContextTrueHybrid } from "../lib/hybridKnowledgeRetrieval.js";
@@ -49,6 +50,8 @@ import {
   type RetrievalRuntimeHealth,
 } from "../lib/retrievalRuntimeHealth.js";
 import { evaluateSafetyGate } from "../lib/safetyGate.js";
+import { buildSafetyEvidenceSignals, type SafetyEvidenceSignals } from "../lib/safetyEvidenceSignals.js";
+import { renderSafetyFallback } from "../lib/safetyFallbackRenderer.js";
 import {
   buildSourceResolutionPlan,
   summarizeSourceResolutionPlan,
@@ -997,7 +1000,15 @@ function applyRenderedAnswer(
     plannedComposerUsed,
     findings: qualityFindings,
   };
-  const safetyGate = evaluateSafetyGate({
+  const evidenceSignals: SafetyEvidenceSignals = buildSafetyEvidenceSignals({
+    answerSpec,
+    answerPlan,
+    evidenceBundle,
+    evidence: retrievalDebug?.evidence ?? null,
+    sources,
+    retrievalWasUsed,
+  });
+  const safetyGateInput: Parameters<typeof evaluateSafetyGate>[0] = {
     answerText: finalRendered,
     answer: enrichedAnswer,
     answerSpec,
@@ -1006,18 +1017,41 @@ function applyRenderedAnswer(
     evidence: retrievalDebug?.evidence ?? null,
     retrievalDiagnostics: retrievalDebug?.retrievalDiagnostics ?? null,
     sourceSelection: retrievalDebug?.sourceSelection ?? null,
-  });
+    evidenceSignals,
+    answerPlan,
+    answerQualityFindings: qualityFindings,
+  };
+  const safetyGate = evaluateSafetyGate(safetyGateInput);
+  let renderedSafetyFallback = safetyGate.safeFallback;
+  if (safetyGate.requiredRewrite && safetyGate.fallbackMode) {
+    try {
+      renderedSafetyFallback = renderSafetyFallback({
+        answerSpec,
+        answerPlan,
+        evidenceBundle,
+        sources,
+        fallbackMode: safetyGate.fallbackMode,
+        qualityFindings: qualityFindings,
+      });
+    } catch {
+      renderedSafetyFallback = safetyGate.safeFallback;
+    }
+  }
+  const exposedSafetyGate =
+    renderedSafetyFallback !== safetyGate.safeFallback
+      ? { ...safetyGate, safeFallback: renderedSafetyFallback }
+      : safetyGate;
   const shouldHideCitations =
-    safetyGate.blockedReasons.includes("NO_USABLE_FACTS") ||
-    safetyGate.blockedReasons.includes("QUERY_SOURCE_MISMATCH") ||
-    safetyGate.fallbackMode === "source_suggestion" ||
-    safetyGate.fallbackMode === "privacy_safe";
+    exposedSafetyGate.blockedReasons.includes("NO_USABLE_FACTS") ||
+    exposedSafetyGate.blockedReasons.includes("QUERY_SOURCE_MISMATCH") ||
+    exposedSafetyGate.fallbackMode === "source_suggestion" ||
+    exposedSafetyGate.fallbackMode === "privacy_safe";
   const exposedSources = shouldHideCitations ? [] : sources;
   const exposedAnswer = shouldHideCitations ? { ...enrichedAnswer, used_source_ids: [] } : enrichedAnswer;
   opts.chatTrace?.recordNow("render_safety", "ok", {
-    pass: safetyGate.pass,
-    fallbackMode: safetyGate.fallbackMode,
-    blockedReasons: safetyGate.blockedReasons,
+    pass: exposedSafetyGate.pass,
+    fallbackMode: exposedSafetyGate.fallbackMode,
+    blockedReasons: exposedSafetyGate.blockedReasons,
     exposedSourceCount: exposedSources.length,
     hiddenSourceCount: sources.length - exposedSources.length,
     fallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
@@ -1031,11 +1065,12 @@ function applyRenderedAnswer(
       requiresModelSynthesis: answerPlan.requiresModelSynthesis,
     },
     structuredFactCount: answerSpec.structuredFacts?.length ?? 0,
+    evidenceSignals,
     evidenceBundleDiagnostics: evidenceBundle?.diagnostics ?? null,
     answerQualityFindings: qualityFindings,
   });
   const finalContent = shouldHideCitations
-    ? (safetyGate.safeFallback ?? finalRendered)
+    ? (renderedSafetyFallback ?? finalRendered)
         .replace(
           "Bu kaynaklarla net ve kesin bir cevap vermek doğru olmaz; aşağıdaki yanıt yalnızca eldeki sınırlı dayanağa göre okunmalı.",
           "Seçili kaynaklarda bu soruya doğrudan yeterli bilgi bulamadım; aşağıdaki yanıt genel ve temkinli yönlendirme olarak okunmalı.",
@@ -1044,7 +1079,7 @@ function applyRenderedAnswer(
           "Eldeki kaynaklar bu soruya sınırlı dayanak sağlıyor.",
           "Seçili kaynaklarda bu soruya doğrudan yeterli bilgi bulunamadı.",
         )
-    : safetyGate.safeFallback ?? finalRendered;
+    : renderedSafetyFallback ?? finalRendered;
   const choices = Array.isArray(next.choices) ? [...next.choices] : [];
   if (choices.length > 0) {
     const first = { ...(choices[0] as Record<string, unknown>) };
@@ -1057,10 +1092,26 @@ function applyRenderedAnswer(
   next.sources = exposedSources;
   if (opts.exposeDebug === true) {
     next.grounded_answer = exposedAnswer;
+    next.debug_contract_version = EVAL_DEBUG_CONTRACT_VERSION;
     next.answer_plan = answerPlan;
-    next.safety_gate = safetyGate;
+    next.safety_gate = exposedSafetyGate;
     next.answer_quality = answerQuality;
-    if (retrievalDebug) next.retrieval_debug = { ...retrievalDebug, evidenceBundle, answerPlan };
+    next.evidenceSignals = evidenceSignals;
+    next.eval_debug_contract = buildEvalDebugContract({
+      safetyGate: exposedSafetyGate,
+      answerQualityFindings: qualityFindings,
+      answerPlan,
+      evidenceSignals,
+      evidenceBundleDiagnostics: evidenceBundle?.diagnostics ?? null,
+      sourceSelection: retrievalDebug?.sourceSelection,
+      retrievalDebug: retrievalDebug
+        ? {
+            retrievalMode: retrievalDebug.retrievalMode,
+            retrievalDiagnostics: retrievalDebug.retrievalDiagnostics,
+          }
+        : undefined,
+    });
+    if (retrievalDebug) next.retrieval_debug = { ...retrievalDebug, evidenceBundle, answerPlan, evidenceSignals };
     if (opts.chatTrace) {
       next.chat_trace = opts.chatTrace.snapshot({
         sourceMode: retrievalDebug?.sourceMode,
@@ -1104,9 +1155,9 @@ function applyRenderedAnswer(
           responseMode: retrievalDebug?.responseMode ?? null,
         },
         safety: {
-          pass: safetyGate.pass,
-          fallbackMode: safetyGate.fallbackMode,
-          blockedReasons: safetyGate.blockedReasons,
+          pass: exposedSafetyGate.pass,
+          fallbackMode: exposedSafetyGate.fallbackMode,
+          blockedReasons: exposedSafetyGate.blockedReasons,
           exposedSourceCount: exposedSources.length,
         },
       } as Parameters<ChatTraceBuilder["snapshot"]>[0] & Record<string, unknown>);
