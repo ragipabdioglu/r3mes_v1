@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { composeAnswerSpec, composeDomainEvidenceAnswer } from "./domainEvidenceComposer.js";
+import { buildAnswerPlan } from "./answerPlan.js";
+import type { AnswerSpec } from "./answerSpec.js";
+import type { CompiledEvidence } from "./compiledEvidence.js";
+import { composeAnswerSpec, composeDomainEvidenceAnswer, composePlannedAnswer } from "./domainEvidenceComposer.js";
+
+function compiledEvidence(overrides: Partial<CompiledEvidence> = {}): CompiledEvidence {
+  return {
+    facts: [],
+    structuredFacts: [],
+    risks: [],
+    unknowns: [],
+    contradictions: [],
+    sourceIds: ["kap-doc"],
+    confidence: "high",
+    usableFactCount: 0,
+    structuredFactCount: 0,
+    riskFactCount: 0,
+    unknownCount: 0,
+    contradictionCount: 0,
+    ...overrides,
+  };
+}
 
 describe("composeDomainEvidenceAnswer", () => {
   it("renders directly from AnswerSpec without requiring legacy grounded answer fields", () => {
@@ -355,5 +376,108 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).toContain("internet bağlantısı");
     expect(rendered).not.toContain("Ne zaman doktora");
     expect(rendered).not.toContain("risk koşulu");
+  });
+
+  it("composePlannedAnswer renders selected structured facts before generic safety prose", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "finance",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery:
+        "EREGL kar payında dağıtılması öngörülen diğer kaynaklar ve olağanüstü yedekler nedir? Sadece rakamları kısa maddelerle yaz, risk yorumu ekleme.",
+      tone: "direct",
+      sections: ["assessment", "action", "summary"],
+      assessment: "Kaynakta ilgili KAP tablo satırları var.",
+      action: "Sadece sorulan tablo değerleri yazılmalıdır.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Sorulan alanlar KAP tablosundan alınmalıdır.",
+      unknowns: [],
+      sourceIds: ["kap-doc"],
+      facts: [],
+      structuredFacts: [
+        {
+          id: "sf-1",
+          kind: "table_row",
+          sourceId: "kap-doc",
+          field: "Dağıtılması Öngörülen Diğer Kaynaklar",
+          value: "3.352.908.083 / 3.850.000.000",
+          confidence: "high",
+          provenance: {
+            quote: "Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083 3.850.000.000",
+            extractor: "table-numeric-v1",
+          },
+        },
+        {
+          id: "sf-2",
+          kind: "table_row",
+          sourceId: "kap-doc",
+          field: "Olağanüstü Yedekler",
+          value: "3.352.908.083 / 3.850.000.000",
+          confidence: "high",
+          provenance: {
+            quote: "Olağanüstü Yedekler 3.352.908.083 3.850.000.000",
+            extractor: "table-numeric-v1",
+          },
+        },
+      ],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        structuredFacts: answerSpec.structuredFacts,
+        structuredFactCount: 2,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("- Dağıtılması Öngörülen Diğer Kaynaklar: 3.352.908.083");
+    expect(rendered).toContain("- Olağanüstü Yedekler: 3.352.908.083");
+    expect(rendered).not.toContain("Dikkat");
+    expect(rendered).not.toContain("risk koşulu");
+  });
+
+  it("composePlannedAnswer does not mine finance table strings unless fallback is explicitly enabled", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "finance",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery:
+        "EREGL kar payında dağıtılması öngörülen diğer kaynaklar nedir? Sadece rakamı yaz, risk yorumu ekleme.",
+      tone: "direct",
+      sections: ["assessment", "action", "summary"],
+      assessment: "Kaynakta ilgili KAP tablo satırları var.",
+      action: "Sadece sorulan tablo değeri yazılmalıdır.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Sorulan alan KAP tablosundan alınmalıdır.",
+      unknowns: [],
+      sourceIds: ["kap-doc"],
+      facts: [
+        "Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083 3.850.000.000",
+      ],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("tam değer bulunamadı");
+    expect(rendered).not.toContain("3.352.908.083");
   });
 });

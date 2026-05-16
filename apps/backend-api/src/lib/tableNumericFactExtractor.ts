@@ -2,11 +2,14 @@ import { detectAnswerTask } from "./answerTaskDetector.js";
 import type { RequestedField } from "./requestedFieldDetector.js";
 import type { StructuredFact } from "./structuredFact.js";
 import { normalizeConceptText } from "./conceptNormalizer.js";
+import type { TableFact } from "./tableFact.js";
+import { structuredFactFromTableFact } from "./tableFactBridge.js";
 
 export interface TableNumericFactExtractionInput {
   query: string;
   facts: string[];
   sourceIds?: string[];
+  tableFacts?: TableFact[];
 }
 
 const NOISE_NUMBERS = new Set(["20", "21", "2025", "1578858"]);
@@ -131,6 +134,102 @@ function columnScore(columnLabel: string | undefined, desiredColumn: string | un
   return 0;
 }
 
+function tableFactSearchText(fact: TableFact): string {
+  return normalize([
+    fact.fieldId,
+    fact.label,
+    fact.rowLabel ?? "",
+    fact.columnLabel ?? "",
+    fact.headerPath.join(" "),
+    fact.rawValue,
+  ].join(" "));
+}
+
+function extractQueryTokens(query: string): string[] {
+  const weakTerms = new Set([
+    "nedir",
+    "ne",
+    "kac",
+    "kaç",
+    "hangi",
+    "deger",
+    "değer",
+    "sadece",
+    "kaynak",
+    "ver",
+    "yaz",
+  ]);
+  return normalize(query)
+    .split(/\s+/u)
+    .filter((token) => token.length >= 3 && !weakTerms.has(token));
+}
+
+function tableFactMatchesRequestedField(fact: TableFact, field: RequestedField): boolean {
+  if (normalize(fact.fieldId) === normalize(field.id)) return true;
+  const haystack = tableFactSearchText(fact);
+  return [field.label, ...field.aliases]
+    .map(normalize)
+    .filter((alias) => alias.length >= 3)
+    .some((alias) => haystack.includes(alias));
+}
+
+function genericTableFactQueryScore(fact: TableFact, queryTokens: string[]): number {
+  if (queryTokens.length === 0) return 0;
+  const haystack = tableFactSearchText(fact);
+  const matchedCount = queryTokens.filter((token) => haystack.includes(token)).length;
+  if (matchedCount === 0) return 0;
+  return matchedCount / Math.max(1, Math.min(queryTokens.length, 4));
+}
+
+function isTableNumericValue(fact: TableFact): boolean {
+  return fact.valueType === "money" ||
+    fact.valueType === "number" ||
+    fact.valueType === "percentage" ||
+    fact.valueType === "date";
+}
+
+function structuredFactsFromTableFacts(opts: {
+  query: string;
+  requestedFields: RequestedField[];
+  tableFacts?: TableFact[];
+  fallbackSourceId: string;
+}): StructuredFact[] {
+  const tableFacts = opts.tableFacts?.filter(isTableNumericValue) ?? [];
+  if (tableFacts.length === 0) return [];
+  const queryTokens = extractQueryTokens(opts.query);
+  const matched = opts.requestedFields.length > 0
+    ? tableFacts.filter((fact) => opts.requestedFields.some((field) => tableFactMatchesRequestedField(fact, field)))
+    : tableFacts
+        .map((fact) => ({ fact, score: genericTableFactQueryScore(fact, queryTokens) }))
+        .filter((item) => item.score >= 0.34)
+        .sort((left, right) => right.score - left.score || right.fact.provenance.confidence - left.fact.provenance.confidence)
+        .map((item) => item.fact);
+  const out: StructuredFact[] = [];
+  const seen = new Set<string>();
+  for (const fact of matched) {
+    const structured = structuredFactFromTableFact(fact, {
+      defaultSourceId: opts.fallbackSourceId,
+      extractor: fact.provenance.extractor === "docling" ||
+        fact.provenance.extractor === "excel" ||
+        fact.provenance.extractor === "ocr" ||
+        fact.provenance.extractor === "regex_fallback"
+        ? fact.provenance.extractor
+        : undefined,
+    });
+    const key = [
+      structured.sourceId,
+      structured.field ?? "",
+      structured.value ?? "",
+      structured.table?.title ?? "",
+      structured.table?.rawRow ?? "",
+    ].join("|").toLocaleLowerCase("tr-TR");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(structured);
+  }
+  return out;
+}
+
 function extractShareGroupFacts(opts: {
   query: string;
   facts: string[];
@@ -182,9 +281,16 @@ function extractShareGroupFacts(opts: {
 export function extractTableNumericFacts(input: TableNumericFactExtractionInput): StructuredFact[] {
   const detection = detectAnswerTask(input.query);
   const requestedFields = detection.requestedFields.filter((field) => field.outputHint === "number");
+  const fallbackSourceId = input.sourceIds?.[0] ?? "unknown-source";
+  const tableFactStructuredFacts = structuredFactsFromTableFacts({
+    query: input.query,
+    requestedFields,
+    tableFacts: input.tableFacts,
+    fallbackSourceId,
+  });
+  if (tableFactStructuredFacts.length > 0) return tableFactStructuredFacts;
   if (requestedFields.length === 0 || input.facts.length === 0) return [];
 
-  const fallbackSourceId = input.sourceIds?.[0] ?? "unknown-source";
   const desiredColumn = desiredColumnLabel(input.query);
   const structuredFacts: StructuredFact[] = [];
   const seen = new Set<string>();

@@ -1,5 +1,6 @@
 import type { GroundingConfidence } from "./answerSchema.js";
 import { getDecisionConfig, getDecisionConfigVersion } from "./decisionConfig.js";
+import { countUsableEvidenceItems, type EvidenceBundle, type EvidenceBundleDiagnostics } from "./evidenceBundle.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 import type { StructuredFact } from "./structuredFact.js";
 
@@ -12,6 +13,7 @@ export interface CompiledEvidence {
   unknowns: string[];
   contradictions: string[];
   sourceIds: string[];
+  evidenceBundle?: EvidenceBundle;
   confidence: CompiledEvidenceConfidence;
   usableFactCount: number;
   structuredFactCount?: number;
@@ -35,6 +37,10 @@ export interface CompiledEvidence {
       unknowns: number;
       sources: number;
       contradictions: number;
+    };
+    evidenceBundle?: EvidenceBundleDiagnostics & {
+      itemCount: number;
+      usableItemCount: number;
     };
   };
 }
@@ -89,7 +95,7 @@ function clampConfidence(value: GroundingConfidence | undefined): CompiledEviden
 
 function deriveConfidence(opts: {
   groundingConfidence?: GroundingConfidence;
-  factCount: number;
+  usableGroundingCount: number;
   sourceCount: number;
   contradictionCount: number;
 }): { confidence: CompiledEvidenceConfidence; reason: string } {
@@ -97,11 +103,11 @@ function deriveConfidence(opts: {
   if (config.contradictionDowngradesToLow && opts.contradictionCount > 0) {
     return { confidence: "low", reason: "contradiction" };
   }
-  if (opts.factCount === 0) return { confidence: "low", reason: "no_usable_facts" };
+  if (opts.usableGroundingCount === 0) return { confidence: "low", reason: "no_usable_facts" };
 
   const requested = clampConfidence(opts.groundingConfidence);
-  const hasMediumFacts = opts.factCount >= config.minUsableFactsForMedium;
-  const hasHighFacts = opts.factCount >= config.minUsableFactsForHigh;
+  const hasMediumFacts = opts.usableGroundingCount >= config.minUsableFactsForMedium;
+  const hasHighFacts = opts.usableGroundingCount >= config.minUsableFactsForHigh;
   const hasMediumSource = !config.requireSourceForMedium || opts.sourceCount > 0;
   const hasHighSource = !config.requireSourceForHigh || opts.sourceCount > 0;
 
@@ -121,6 +127,7 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
   const evidence = opts.evidence;
   const decisionConfig = getDecisionConfig();
   const budget = decisionConfig.evidenceBudget;
+  const evidenceBundle = evidence?.evidenceBundle;
   const rawFacts = uniqueText([
     ...(evidence?.directAnswerFacts ?? []),
     ...(evidence?.usableFacts ?? []),
@@ -141,12 +148,15 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
   );
   const rawSourceIds = uniqueText([
     ...(evidence?.sourceIds ?? []),
+    ...(evidenceBundle?.sourceIds ?? []),
     ...(opts.sourceRefs ?? []).map((source) => source.id),
   ]);
   const sourceIds = rawSourceIds.slice(0, budget.sourceIdLimit);
+  const usableEvidenceItemCount = countUsableEvidenceItems(evidenceBundle);
+  const usableGroundingCount = Math.max(facts.length, structuredFacts.length, usableEvidenceItemCount);
   const confidence = deriveConfidence({
     groundingConfidence: opts.groundingConfidence,
-    factCount: facts.length,
+    usableGroundingCount,
     sourceCount: sourceIds.length,
     contradictionCount: contradictions.length,
   });
@@ -158,8 +168,9 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
     unknowns,
     contradictions,
     sourceIds,
+    evidenceBundle,
     confidence: confidence.confidence,
-    usableFactCount: facts.length,
+    usableFactCount: usableGroundingCount,
     structuredFactCount: structuredFacts.length,
     riskFactCount: risks.length,
     unknownCount: unknowns.length,
@@ -182,10 +193,24 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
         sources: rawSourceIds.length,
         contradictions: contradictions.length,
       },
+      evidenceBundle: evidenceBundle
+        ? {
+            ...evidenceBundle.diagnostics,
+            itemCount: evidenceBundle.items.length,
+            usableItemCount: usableEvidenceItemCount,
+          }
+        : undefined,
     },
   };
 }
 
 export function hasCompiledUsableGrounding(evidence: CompiledEvidence | null | undefined): boolean {
-  return Boolean(evidence && evidence.usableFactCount > 0);
+  return Boolean(
+    evidence &&
+      (
+        evidence.usableFactCount > 0 ||
+        (evidence.structuredFactCount ?? 0) > 0 ||
+        countUsableEvidenceItems(evidence.evidenceBundle) > 0
+      ),
+  );
 }

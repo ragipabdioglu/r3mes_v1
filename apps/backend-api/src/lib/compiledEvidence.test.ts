@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { compileEvidence, hasCompiledUsableGrounding } from "./compiledEvidence.js";
+import { buildEvidenceBundle } from "./evidenceBundle.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 function evidence(partial: Partial<EvidenceExtractorOutput>): EvidenceExtractorOutput {
@@ -150,5 +151,80 @@ describe("compileEvidence", () => {
     expect(compiled.structuredFactCount).toBe(1);
     expect(compiled.structuredFacts?.[0]?.field).toBe("Dağıtılması Öngörülen Diğer Kaynaklar");
     expect(compiled.structuredFacts?.[0]?.value).toBe("3.352.908.083");
+  });
+
+  it("carries evidence bundle and exposes bundle diagnostics", () => {
+    const bundle = buildEvidenceBundle({
+      userQuery: "Belgedeki toplam tutar nedir?",
+      textFacts: ["doc-1: Toplam tutar 120 olarak geçiyor."],
+      notSupported: ["Kaynakta ikinci dönem belirtilmiyor."],
+      sourceIds: ["doc-1"],
+      requestedFieldIds: ["total_amount"],
+    });
+
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        usableFacts: ["doc-1: Toplam tutar 120 olarak geçiyor."],
+        sourceIds: ["doc-1"],
+        evidenceBundle: bundle,
+      }),
+    });
+
+    expect(compiled.evidenceBundle).toBe(bundle);
+    expect(compiled.diagnostics?.evidenceBundle).toMatchObject({
+      itemCount: 2,
+      usableItemCount: 1,
+      stringFactCount: 1,
+      sourceLimitCount: 1,
+    });
+    expect(compiled.evidenceBundle?.requestedFieldIds).toEqual(["total_amount"]);
+  });
+
+  it("treats structured-only evidence as usable grounding", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        sourceIds: ["doc-structured"],
+        structuredFacts: [
+          {
+            id: "sf-structured-only",
+            kind: "numeric_value",
+            sourceId: "doc-structured",
+            field: "Toplam",
+            value: "120",
+            confidence: "high",
+            provenance: {
+              quote: "Toplam 120",
+              extractor: "test",
+            },
+          },
+        ],
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Toplam nedir?",
+          structuredFacts: [
+            {
+              id: "sf-structured-only",
+              kind: "numeric_value",
+              sourceId: "doc-structured",
+              field: "Toplam",
+              value: "120",
+              confidence: "high",
+              provenance: {
+                quote: "Toplam 120",
+                extractor: "test",
+              },
+            },
+          ],
+          sourceIds: ["doc-structured"],
+        }),
+      }),
+    });
+
+    expect(compiled.facts).toEqual([]);
+    expect(compiled.structuredFactCount).toBe(1);
+    expect(compiled.usableFactCount).toBe(1);
+    expect(compiled.confidence).toBe("high");
+    expect(hasCompiledUsableGrounding(compiled)).toBe(true);
   });
 });

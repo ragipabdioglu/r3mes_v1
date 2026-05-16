@@ -211,7 +211,55 @@ function wordCount(value) {
   return tokenize(value).length;
 }
 
-function detectAnswerQualityFindings(testCase, content) {
+function answerLooksLikeNoSource(content) {
+  const normalized = normalize(content);
+  return (
+    normalized.includes("kaynak yok") ||
+    normalized.includes("kaynak bulunamad") ||
+    normalized.includes("kaynaklarda bulunamad") ||
+    normalized.includes("ilgili kaynak bulunamad") ||
+    normalized.includes("no source") ||
+    normalized.includes("not found in the source")
+  );
+}
+
+function answerLooksTemplated(content) {
+  return includesForbiddenAny(content, [
+    "Dikkat edilmesi gereken nokta",
+    "Kaynakta özel alarm",
+    "Kaynakta açık dayanak yoksa",
+    "Bu yanıt genel bilgilendirme amaçlıdır",
+    "Karar vermeden önce güncel ve yetkili kaynakla doğrulama yapın",
+  ]).length > 0;
+}
+
+function selectedFieldIds(answerPlan) {
+  return (Array.isArray(answerPlan?.selectedFacts) ? answerPlan.selectedFacts : [])
+    .map((fact) => fact?.fieldId ?? fact?.field)
+    .filter(Boolean)
+    .map(normalize);
+}
+
+function planMissingFieldIds(answerPlan) {
+  return (Array.isArray(answerPlan?.diagnostics?.missingFieldIds) ? answerPlan.diagnostics.missingFieldIds : [])
+    .filter(Boolean)
+    .map(normalize);
+}
+
+function missingRequiredFields(requiredFields, answerPlan) {
+  if (!Array.isArray(requiredFields) || requiredFields.length === 0) return [];
+  if (!answerPlan) return requiredFields;
+  const missingInPlan = new Set(planMissingFieldIds(answerPlan));
+  const selected = new Set(selectedFieldIds(answerPlan));
+  if (answerPlan.coverage === "complete" && missingInPlan.size === 0) return [];
+  return requiredFields.filter((field) => {
+    const normalizedField = normalize(field);
+    if (missingInPlan.has(normalizedField)) return true;
+    return selected.size > 0 ? !selected.has(normalizedField) : false;
+  });
+}
+
+function detectAnswerQualityFindings(testCase, content, context = {}) {
   const expectations = testCase.qualityExpectations;
   if (!expectations || typeof expectations !== "object") return [];
   const findings = [];
@@ -235,6 +283,10 @@ function detectAnswerQualityFindings(testCase, content) {
     if (forbiddenTerms.length > 0) {
       push("template_answer", "fail", `forbidden answer terms: ${forbiddenTerms.join(",")}`);
     }
+  }
+
+  if (answerLooksTemplated(content)) {
+    push("template_answer", "warn", "answer contains a generic/template safety phrase");
   }
 
   if (expectations.forbidCaution === true) {
@@ -266,6 +318,50 @@ function detectAnswerQualityFindings(testCase, content) {
     const bulletLines = content.split(/\r?\n/).filter((line) => /^\s*(?:[-*]|\d+[.)])\s+/u.test(line));
     if (bulletLines.length === 0) {
       push("wrong_output_format", "fail", "expected bullet/list formatted answer");
+    }
+  }
+
+  const missingFields = missingRequiredFields(expectations.requiredFields, context.answerPlan);
+  if (missingFields.length > 0) {
+    push("table_field_mismatch", "fail", `missing required fields in answer plan: ${missingFields.join(",")}`);
+  }
+
+  const missingRequiredFieldValues = [];
+  if (Array.isArray(expectations.requiredFieldValues)) {
+    for (const expected of expectations.requiredFieldValues) {
+      if (!expected || typeof expected !== "object") continue;
+      const value = String(expected.value ?? "").trim();
+      if (!value) continue;
+      if (!normalized.includes(normalize(value))) {
+        missingRequiredFieldValues.push(expected);
+        push(
+          "source_found_but_bad_answer",
+          "fail",
+          `missing required field value${expected.fieldId ? ` for ${expected.fieldId}` : ""}: ${value}`,
+        );
+        continue;
+      }
+      if (expected.label && !normalized.includes(normalize(expected.label))) {
+        push("table_field_mismatch", "fail", `value ${value} appears without expected field label: ${expected.label}`);
+      }
+    }
+  }
+
+  const hasSourceEvidence =
+    Number(context.sourceCount ?? 0) > 0 &&
+    (Number(context.evidenceFactCount ?? 0) > 0 || Number(context.evidenceBundleItemCount ?? 0) > 0);
+  if (hasSourceEvidence) {
+    if (answerLooksLikeNoSource(content)) {
+      push("over_aggressive_no_source", "fail", "answer says no source despite available source/evidence");
+    }
+    if (missingRequiredFieldValues.length > 0) {
+      push("source_found_but_bad_answer", "fail", "source/evidence exists but required answer content is missing");
+    }
+  }
+
+  if (testCase.mustHaveSources === false && Number(context.sourceCount ?? 0) === 0 && context.noSourceExpected === true) {
+    if (!answerLooksLikeNoSource(content)) {
+      push("ignored_user_constraint", "warn", "no-source response was expected but answer did not clearly say source is unavailable");
     }
   }
 
@@ -326,7 +422,15 @@ function scoreCase(testCase, response) {
     : null;
   const evidence = retrievalDebug?.evidence;
   const compiledEvidence = retrievalDebug?.compiledEvidence;
+  const evidenceBundle = retrievalDebug?.evidenceBundle ?? retrievalDebug?.compiledEvidence?.evidenceBundle ?? null;
   const routeDecision = retrievalDebug?.sourceSelection?.routeDecision;
+  const answerPlan =
+    response?.answer_plan ??
+    retrievalDebug?.answerPlan ??
+    retrievalDebug?.answer_plan ??
+    chatTrace?.answerPlan ??
+    chatTrace?.answer_plan ??
+    null;
   const safetyRailIds = Array.isArray(safetyGate?.railChecks)
     ? safetyGate.railChecks.map((check) => check?.id).filter(Boolean)
     : [];
@@ -400,6 +504,16 @@ function scoreCase(testCase, response) {
     failures.push(`evidence_facts:${factCount}<${minEvidenceFacts}`);
   }
 
+  const evidenceBundleItemCount = Array.isArray(evidenceBundle?.items)
+    ? evidenceBundle.items.length
+    : Number(evidenceBundle?.diagnostics?.itemCount ?? evidenceBundle?.itemCount ?? 0);
+  if (Number.isFinite(Number(testCase.minEvidenceBundleItemCount))) {
+    const minEvidenceBundleItemCount = Number(testCase.minEvidenceBundleItemCount);
+    if (evidenceBundleItemCount < minEvidenceBundleItemCount) {
+      failures.push(`evidence_bundle_items:${evidenceBundleItemCount}<${minEvidenceBundleItemCount}`);
+    }
+  }
+
   if (typeof response?._latencyMs === "number" && response._latencyMs > maxLatencyMs) {
     failures.push(`latency:${response._latencyMs}>${maxLatencyMs}`);
   }
@@ -446,6 +560,7 @@ function scoreCase(testCase, response) {
 
   failures.push(...assertExpectedPaths("expectTrace", testCase.expectTrace, retrievalDebug));
   failures.push(...assertExpectedPaths("expectRuntime", testCase.expectRuntime, retrievalDebug, RUNTIME_PATH_ALIASES));
+  failures.push(...assertExpectedPaths("expectAnswerPlan", testCase.expectAnswerPlan, answerPlan));
 
   if (Number.isFinite(Number(testCase.minRerankerInputCandidates))) {
     const actual = Number(reranker?.inputCandidateCount ?? 0);
@@ -875,7 +990,13 @@ function scoreCase(testCase, response) {
     }
   }
 
-  const answerQualityFindings = detectAnswerQualityFindings(testCase, content);
+  const answerQualityFindings = detectAnswerQualityFindings(testCase, content, {
+    answerPlan,
+    evidenceBundleItemCount,
+    evidenceFactCount: factCount,
+    noSourceExpected: testCase.mustHaveSources === false || testCase.expectedFallbackMode === "source_suggestion",
+    sourceCount: sources.length,
+  });
   const blockingAnswerQualityFindings = answerQualityFindings.filter((finding) => finding.severity === "fail");
   if (blockingAnswerQualityFindings.length > 0) {
     failures.push(`answer_quality:${blockingAnswerQualityFindings.map((finding) => finding.bucket).join(",")}`);
@@ -918,6 +1039,7 @@ function scoreCase(testCase, response) {
     fallbackMode: safetyGate?.fallbackMode ?? null,
     sourceSuggestionAlternativeAccepted: acceptsSourceSuggestionAlternative,
     factCount,
+    evidenceBundleItemCount,
     redFlagCount: Array.isArray(evidence?.redFlags) ? evidence.redFlags.length : 0,
     notSupportedCount: Array.isArray(evidence?.notSupported) ? evidence.notSupported.length : 0,
     alignmentFastFailed: alignment?.fastFailed ?? null,
@@ -1055,7 +1177,7 @@ function scoreCase(testCase, response) {
       : null,
     latencyMs: response?._latencyMs ?? null,
     answerPathName: chatTrace?.answerPath?.name ?? null,
-    answerPlan: response?.answer_plan ?? null,
+    answerPlan,
     traceTotalDurationMs: Number.isFinite(Number(chatTrace?.totalDurationMs)) ? Number(chatTrace.totalDurationMs) : null,
     traceStageDurations: Array.isArray(chatTrace?.stages)
       ? chatTrace.stages.map((stage) => ({

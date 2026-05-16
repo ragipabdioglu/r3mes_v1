@@ -2,8 +2,10 @@ import type { GroundedMedicalAnswer } from "./answerSchema.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import { buildAnswerSpecFromGroundedAnswer } from "./answerSpec.js";
 import { buildAnswerPlan, type AnswerPlan } from "./answerPlan.js";
+import type { ComposerInput, ComposePlannedAnswerOptions } from "./composerInput.js";
 import { polishAnswerText } from "./answerQuality.js";
 import { getDomainPolicy } from "./domainPolicy.js";
+import { buildSafetyPresentationPolicy, shouldSuppressGenericCaution } from "./safetyPresentationPolicy.js";
 import { buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 
 function clean(value: string, fallback: string): string {
@@ -336,6 +338,35 @@ function composeStructuredFieldAnswer(plan: AnswerPlan): string | null {
   return lines.join("\n");
 }
 
+function composeMissingFieldAnswer(plan: AnswerPlan): string | null {
+  if (plan.taskType !== "field_extraction") return null;
+  const missingFieldIds = plan.diagnostics.missingFieldIds;
+  if (missingFieldIds.length > 0) {
+    return `Kaynakta sorulan alanlar için tam değer bulunamadı: ${missingFieldIds.join(", ")}.`;
+  }
+  return "Kaynakta sorulan alan için doğrulanmış değer bulunamadı.";
+}
+
+function withSafetyPresentationPolicy(spec: AnswerSpec, answerPlan: AnswerPlan, input: ComposerInput): AnswerSpec {
+  const policy = buildSafetyPresentationPolicy({
+    answerPlan,
+    constraints: input.constraints,
+  });
+  if (!shouldSuppressGenericCaution(policy)) return spec;
+  return {
+    ...spec,
+    caution: [],
+    sections: spec.sections.filter((section) => section !== "caution"),
+  };
+}
+
+function enforceMaxWords(value: string, maxWords: number | undefined): string {
+  if (!Number.isFinite(maxWords) || Number(maxWords) <= 0) return value;
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length <= Number(maxWords)) return value;
+  return `${words.slice(0, Number(maxWords)).join(" ").replace(/[.,;:!?]*$/u, "")}.`;
+}
+
 function queryRelevantFact(spec: AnswerSpec, usedText: string): string | null {
   const queryTokens = new Set(matchTokens(spec.userQuery));
   if (queryTokens.size === 0) return null;
@@ -497,13 +528,17 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
   return null;
 }
 
-export function composeAnswerSpec(spec: AnswerSpec): string {
+export function composeAnswerSpec(spec: AnswerSpec, opts: ComposePlannedAnswerOptions = {
+  enableFinanceTableStringFallback: true,
+}): string {
   const policy = getDomainPolicy(spec.answerDomain);
   const answerPlan = buildAnswerPlan(spec);
   const structuredFieldAnswer = composeStructuredFieldAnswer(answerPlan);
   if (structuredFieldAnswer) return structuredFieldAnswer;
-  const financeTableAnswer = composeFinanceTableFacts(spec);
-  if (financeTableAnswer) return financeTableAnswer;
+  if (opts.enableFinanceTableStringFallback === true) {
+    const financeTableAnswer = composeFinanceTableFacts(spec);
+    if (financeTableAnswer) return financeTableAnswer;
+  }
   const sourceNote =
     spec.groundingConfidence === "low"
       ? "Eldeki kaynak dayanağı sınırlı."
@@ -596,6 +631,24 @@ export function composeAnswerSpec(spec: AnswerSpec): string {
     `${policy.answerLabels.summary}: ${sentence(summary)}`,
   );
   return lines.join("\n");
+}
+
+export function composePlannedAnswer(input: ComposerInput, opts: ComposePlannedAnswerOptions = {}): string {
+  const plannedStructuredAnswer = composeStructuredFieldAnswer(input.answerPlan);
+  if (plannedStructuredAnswer) {
+    return enforceMaxWords(plannedStructuredAnswer, input.constraints.maxWords);
+  }
+
+  const missingFieldAnswer = composeMissingFieldAnswer(input.answerPlan);
+  if (missingFieldAnswer && (input.constraints.forbidCaution || input.answerPlan.taskType === "field_extraction")) {
+    return enforceMaxWords(missingFieldAnswer, input.constraints.maxWords);
+  }
+
+  const spec = withSafetyPresentationPolicy(input.answerSpec, input.answerPlan, input);
+  const rendered = composeAnswerSpec(spec, {
+    enableFinanceTableStringFallback: opts.enableFinanceTableStringFallback === true,
+  });
+  return enforceMaxWords(rendered, input.constraints.maxWords);
 }
 
 export function composeDomainEvidenceAnswer(answer: GroundedMedicalAnswer): string {

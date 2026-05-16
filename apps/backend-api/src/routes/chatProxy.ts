@@ -6,6 +6,7 @@ import { getConfiguredChatRuntime, normalizeAdapterPath } from "../lib/adapterRu
 import { parseGroundedMedicalAnswer } from "../lib/answerParse.js";
 import { buildAnswerPlan } from "../lib/answerPlan.js";
 import { hasLowLanguageQuality, polishAnswerText } from "../lib/answerQuality.js";
+import { validateAnswerQuality, type AnswerQualityExpectations } from "../lib/answerQualityValidator.js";
 import { EMPTY_GROUNDED_MEDICAL_ANSWER, type GroundedMedicalAnswer } from "../lib/answerSchema.js";
 import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
@@ -14,10 +15,10 @@ import { shouldExposeChatDebugFromHeaders } from "../lib/chatDebugBoundary.js";
 import { buildChatRequestContext, summarizeChatRequestContext, type ChatRequestContext } from "../lib/chatRequestContext.js";
 import { stripChatDebugFields } from "../lib/chatResponseBoundary.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
-import type { CompiledEvidence } from "../lib/compiledEvidence.js";
+import { hasCompiledUsableGrounding, type CompiledEvidence } from "../lib/compiledEvidence.js";
 import type { ConversationalIntentDecision } from "../lib/conversationalIntent.js";
 import { getDecisionConfig, getDecisionConfigVersion } from "../lib/decisionConfig.js";
-import { composeAnswerSpec } from "../lib/domainEvidenceComposer.js";
+import { composePlannedAnswer } from "../lib/domainEvidenceComposer.js";
 import { evaluateFeedbackShadowRuntime, type FeedbackShadowRuntimeReport } from "../lib/feedbackShadowRuntime.js";
 import { getDomainPolicy, inferAnswerDomain, type DomainPolicy } from "../lib/domainPolicy.js";
 import { retrieveKnowledgeContextTrueHybrid } from "../lib/hybridKnowledgeRetrieval.js";
@@ -90,7 +91,9 @@ interface ChatRetrievalDebug {
   queryPlan: QueryPlannerOutput | null;
   routePlan: DomainRoutePlan | null;
   evidence: EvidenceExtractorOutput | null;
+  evidenceBundle?: EvidenceExtractorOutput["evidenceBundle"];
   compiledEvidence?: CompiledEvidence | null;
+  answerPlan?: ReturnType<typeof buildAnswerPlan>;
   domain: DomainPolicy["domain"];
   responseMode: "natural" | "json";
   retrievalMode?: "true_hybrid" | "qdrant" | "prisma" | "legacy_hybrid";
@@ -888,6 +891,18 @@ function applyFeedbackRuntimeToSourceSelection(
   };
 }
 
+function buildRuntimeAnswerQualityExpectations(
+  answerPlan: ReturnType<typeof buildAnswerPlan>,
+): AnswerQualityExpectations {
+  return {
+    maxWords: answerPlan.constraints.maxWords,
+    requiredFields: answerPlan.requestedFields.map((field) => field.id),
+    forbidCaution: answerPlan.constraints.forbidCaution,
+    noRawTableDump: answerPlan.constraints.noRawTableDump,
+    format: answerPlan.outputFormat,
+  };
+}
+
 function applyRenderedAnswer(
   payload: Record<string, unknown>,
   answer: GroundedMedicalAnswer,
@@ -912,21 +927,75 @@ function applyRenderedAnswer(
     compiledEvidence: retrievalDebug?.compiledEvidence ?? null,
   });
   const answerPlan = buildAnswerPlan(answerSpec);
+  const evidenceBundle =
+    retrievalDebug?.evidenceBundle ??
+    retrievalDebug?.compiledEvidence?.evidenceBundle ??
+    retrievalDebug?.evidence?.evidenceBundle;
+  const composerInput = {
+    answerSpec,
+    answerPlan,
+    compiledEvidence: retrievalDebug?.compiledEvidence ?? null,
+    evidenceBundle,
+    constraints: {
+      forbidCaution: answerPlan.constraints.forbidCaution,
+      noRawTableDump: answerPlan.constraints.noRawTableDump,
+      maxWords: answerPlan.constraints.maxWords,
+      sourceGroundedOnly: answerPlan.constraints.sourceGroundedOnly,
+    },
+  };
   const useSafeTemplate =
     opts.useFallbackTemplate === true ||
     shouldUseSafeRenderedTemplate(enrichedAnswer, retrievalWasUsed);
-  const rendered =
+  let plannedComposerUsed = useSafeTemplate;
+  let rendered =
     useSafeTemplate
-      ? composeAnswerSpec(answerSpec)
+      ? composePlannedAnswer(composerInput)
       : renderGroundedMedicalAnswer(enrichedAnswer, {
           useFallbackTemplate: useSafeTemplate,
         });
-  const finalRendered = polishAnswerText(rendered);
+  let finalRendered = polishAnswerText(rendered);
+  const qualityExpectations = buildRuntimeAnswerQualityExpectations(answerPlan);
+  let qualityFindings = validateAnswerQuality({
+    answer: finalRendered,
+    query: userQuery || enrichedAnswer.user_query,
+    expectations: qualityExpectations,
+    answerPlan,
+    sourceCount: sources.length,
+    evidenceFactCount: retrievalDebug?.evidence?.usableFacts.length ?? answerSpec.facts.length,
+    evidenceBundleItemCount: evidenceBundle?.items.length ?? 0,
+    noSourceExpected: sources.length === 0 && !retrievalWasUsed,
+  });
+  if (!plannedComposerUsed && qualityFindings.some((finding) => finding.severity === "fail")) {
+    const plannedRendered = polishAnswerText(composePlannedAnswer(composerInput));
+    if (plannedRendered) {
+      const plannedFindings = validateAnswerQuality({
+        answer: plannedRendered,
+        query: userQuery || enrichedAnswer.user_query,
+        expectations: qualityExpectations,
+        answerPlan,
+        sourceCount: sources.length,
+        evidenceFactCount: retrievalDebug?.evidence?.usableFacts.length ?? answerSpec.facts.length,
+        evidenceBundleItemCount: evidenceBundle?.items.length ?? 0,
+        noSourceExpected: sources.length === 0 && !retrievalWasUsed,
+      });
+      if (
+        plannedFindings.filter((finding) => finding.severity === "fail").length <=
+        qualityFindings.filter((finding) => finding.severity === "fail").length
+      ) {
+        rendered = plannedRendered;
+        finalRendered = plannedRendered;
+        qualityFindings = plannedFindings;
+        plannedComposerUsed = true;
+      }
+    }
+  }
   const languageSourceText = enrichedAnswer.answer.trim() || rendered;
   const answerQuality = {
     lowLanguageQualityDetected: hasLowLanguageQuality(languageSourceText),
     polishChangedOutput: finalRendered !== rendered,
     fallbackTemplateUsed: useSafeTemplate,
+    plannedComposerUsed,
+    findings: qualityFindings,
   };
   const safetyGate = evaluateSafetyGate({
     answerText: finalRendered,
@@ -962,6 +1031,8 @@ function applyRenderedAnswer(
       requiresModelSynthesis: answerPlan.requiresModelSynthesis,
     },
     structuredFactCount: answerSpec.structuredFacts?.length ?? 0,
+    evidenceBundleDiagnostics: evidenceBundle?.diagnostics ?? null,
+    answerQualityFindings: qualityFindings,
   });
   const finalContent = shouldHideCitations
     ? (safetyGate.safeFallback ?? finalRendered)
@@ -989,7 +1060,7 @@ function applyRenderedAnswer(
     next.answer_plan = answerPlan;
     next.safety_gate = safetyGate;
     next.answer_quality = answerQuality;
-    if (retrievalDebug) next.retrieval_debug = retrievalDebug;
+    if (retrievalDebug) next.retrieval_debug = { ...retrievalDebug, evidenceBundle, answerPlan };
     if (opts.chatTrace) {
       next.chat_trace = opts.chatTrace.snapshot({
         sourceMode: retrievalDebug?.sourceMode,
@@ -2028,11 +2099,15 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         runtimeAffected: shadowRuntime.runtimeAffected,
       });
       chatTrace.recordNow("source_selection", "ok", summarizeSourceSelectionForTrace(sourceSelection));
+      const compiledEvidence = "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null;
+      const evidenceBundle = retrieval.evidence?.evidenceBundle ?? compiledEvidence?.evidenceBundle;
       const routeDecisionQuality = {
         sourceCount: retrieval.sources.length,
         directFactCount: retrieval.evidence?.directAnswerFacts.length ?? retrieval.evidence?.usableFacts.length ?? 0,
         riskFactCount: retrieval.evidence?.riskFacts.length ?? retrieval.evidence?.redFlags.length ?? 0,
-        hasUsableGrounding: retrieval.sources.length > 0 && retrieval.groundingConfidence !== "low",
+        hasUsableGrounding:
+          retrieval.sources.length > 0 &&
+          (retrieval.groundingConfidence !== "low" || hasCompiledUsableGrounding(compiledEvidence)),
       };
       req.log.info(
         buildRouteDecisionLogEvent({
@@ -2061,7 +2136,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             queryPlan: queryPlan?.output ?? null,
             routePlan,
             evidence: retrieval.evidence,
-            compiledEvidence: "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null,
+            evidenceBundle,
+            compiledEvidence,
             domain: answerDomain,
             responseMode,
             retrievalMode: retrieval.retrievalMode,
@@ -2076,9 +2152,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
 
       const retrievalWasUsed = retrieval.contextText.length > 0;
       const hasContradictoryCompiledEvidence =
-        "compiledEvidence" in retrieval && (retrieval.compiledEvidence?.contradictionCount ?? 0) > 0;
-      const hasUsableCompiledEvidence =
-        "compiledEvidence" in retrieval && (retrieval.compiledEvidence?.usableFactCount ?? 0) > 0;
+        (compiledEvidence?.contradictionCount ?? 0) > 0;
+      const hasUsableCompiledEvidence = hasCompiledUsableGrounding(compiledEvidence);
       const shouldUseLowConfidenceEvidenceFastPath =
         !stream && retrievalWasUsed && retrieval.sources.length > 0 && retrieval.groundingConfidence === "low" && hasUsableCompiledEvidence;
       if (
@@ -2102,7 +2177,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           groundingConfidence: retrieval.groundingConfidence,
           userQuery: retrievalQuery,
           evidence: retrieval.evidence,
-          compiledEvidence: "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null,
+          compiledEvidence,
         });
         return reply.type("application/json").send(
           applyRenderedAnswer(
@@ -2143,7 +2218,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           groundingConfidence: retrieval.groundingConfidence,
           userQuery: retrievalQuery,
           evidence: retrieval.evidence,
-          compiledEvidence: "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null,
+          compiledEvidence,
         });
         return reply.type("application/json").send(
           applyRenderedAnswer(
@@ -2174,7 +2249,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           groundingConfidence: retrieval.groundingConfidence,
           userQuery: retrievalQuery,
           evidence: retrieval.evidence,
-          compiledEvidence: "compiledEvidence" in retrieval ? retrieval.compiledEvidence ?? null : null,
+          compiledEvidence,
         });
         return reply.type("application/json").send(
           applyRenderedAnswer(

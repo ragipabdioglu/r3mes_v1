@@ -1,7 +1,9 @@
 import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import type { AnswerIntent } from "./answerSchema.js";
+import { detectAnswerTask } from "./answerTaskDetector.js";
 import { expandConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { getDecisionConfig } from "./decisionConfig.js";
+import { buildEvidenceBundle, type EvidenceBundle } from "./evidenceBundle.js";
 import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
 import type { StructuredFact } from "./structuredFact.js";
 import { extractTableNumericFacts } from "./tableNumericFactExtractor.js";
@@ -67,6 +69,7 @@ export interface EvidenceExtractorOutput {
   sourceIds: string[];
   missingInfo: string[];
   structuredFacts?: StructuredFact[];
+  evidenceBundle?: EvidenceBundle;
 }
 
 export interface EvidenceExtractorBudget {
@@ -1363,25 +1366,44 @@ export function buildDeterministicEvidenceExtraction(
 
   const rankedUsableFacts = rankEvidenceFacts(input.userQuery, usableFacts);
   const rankedDirectFacts = rankEvidenceFacts(input.userQuery, directAnswerFacts);
+  const finalDirectAnswerFacts = promoteCriticalDirectFacts(input.userQuery, rankedDirectFacts, rankedUsableFacts).slice(0, budget.directFactLimit);
+  const finalSupportingContext = rankEvidenceFacts(input.userQuery, supportingContext).slice(0, budget.supportingFactLimit);
+  const finalRiskFacts = unique(redFlags).slice(0, budget.riskFactLimit);
+  const finalNotSupported = unique([...uncertainOrUnusable, ...missingInfo]).slice(0, budget.notSupportedLimit);
+  const finalUsableFacts = rankedUsableFacts.slice(0, budget.usableFactLimit);
+  const finalUncertainOrUnusable = unique(uncertainOrUnusable).slice(0, budget.notSupportedLimit);
+  const finalRedFlags = unique(redFlags).slice(0, budget.riskFactLimit + 1);
+  const finalSourceIds = unique(sourceIds).slice(0, budget.sourceIdLimit);
   const structuredFacts = extractTableNumericFacts({
     query: input.userQuery,
     facts: unique([...rankedDirectFacts, ...rankedUsableFacts, ...supportingContext]),
-    sourceIds,
+    sourceIds: finalSourceIds,
+  });
+  const requestedFieldIds = detectAnswerTask(input.userQuery).requestedFields.map((field) => field.id);
+  const evidenceBundle = buildEvidenceBundle({
+    userQuery: input.userQuery,
+    textFacts: unique([...finalDirectAnswerFacts, ...finalUsableFacts, ...finalSupportingContext]),
+    riskFacts: finalRiskFacts,
+    notSupported: finalNotSupported,
+    structuredFacts,
+    sourceIds: finalSourceIds,
+    requestedFieldIds,
   });
 
   return {
     answerIntent: intentResolution.intent,
     intentResolution,
-    directAnswerFacts: promoteCriticalDirectFacts(input.userQuery, rankedDirectFacts, rankedUsableFacts).slice(0, budget.directFactLimit),
-    supportingContext: rankEvidenceFacts(input.userQuery, supportingContext).slice(0, budget.supportingFactLimit),
-    riskFacts: unique(redFlags).slice(0, budget.riskFactLimit),
-    notSupported: unique([...uncertainOrUnusable, ...missingInfo]).slice(0, budget.notSupportedLimit),
-    usableFacts: rankedUsableFacts.slice(0, budget.usableFactLimit),
-    uncertainOrUnusable: unique(uncertainOrUnusable).slice(0, budget.notSupportedLimit),
-    redFlags: unique(redFlags).slice(0, budget.riskFactLimit + 1),
-    sourceIds: unique(sourceIds).slice(0, budget.sourceIdLimit),
+    directAnswerFacts: finalDirectAnswerFacts,
+    supportingContext: finalSupportingContext,
+    riskFacts: finalRiskFacts,
+    notSupported: finalNotSupported,
+    usableFacts: finalUsableFacts,
+    uncertainOrUnusable: finalUncertainOrUnusable,
+    redFlags: finalRedFlags,
+    sourceIds: finalSourceIds,
     missingInfo,
     structuredFacts,
+    evidenceBundle,
   };
 }
 

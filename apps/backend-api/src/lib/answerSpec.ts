@@ -428,8 +428,16 @@ export function buildAnswerSpec(opts: {
   ]).slice(0, 3);
   const summary = directFacts[0] ?? usableFacts[0] ?? assessment;
   const taskDetection = detectAnswerTask(opts.userQuery);
-  const answerIntent =
-    taskDetection.answerIntent !== "unknown"
+  const hasUsableGroundingSignal =
+    facts.length > 0 ||
+    (opts.compiledEvidence?.structuredFacts?.length ?? opts.evidence?.structuredFacts?.length ?? 0) > 0;
+  const shouldPreserveNoSourceIntent =
+    !hasUsableGroundingSignal &&
+    groundingConfidence === "low" &&
+    (opts.evidence?.answerIntent === "unknown" || unknowns.length > 0);
+  const answerIntent = shouldPreserveNoSourceIntent
+    ? opts.evidence?.answerIntent ?? "unknown"
+    : taskDetection.answerIntent !== "unknown"
       ? taskDetection.answerIntent
       : opts.evidence?.answerIntent ?? "unknown";
   const tone = groundingConfidence === "low" ? "cautious" : answerIntent === "reassure" ? "calm" : "direct";
