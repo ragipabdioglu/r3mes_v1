@@ -106,6 +106,107 @@ function readEvidenceText(evidence, fields) {
     .join(" ");
 }
 
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function formatAssertionValue(value) {
+  if (value === undefined) return "missing";
+  if (typeof value === "string") return JSON.stringify(value);
+  return JSON.stringify(value);
+}
+
+function splitPath(path) {
+  return String(path)
+    .replace(/\[(\d+)\]/g, ".$1")
+    .split(".")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function getNestedValue(rootValue, path) {
+  let current = rootValue;
+  for (const part of splitPath(path)) {
+    if (current == null) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function flattenExpectationPaths(expectations, prefix = "") {
+  if (!isPlainObject(expectations)) return [];
+  return Object.entries(expectations).flatMap(([key, value]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    return isPlainObject(value)
+      ? flattenExpectationPaths(value, path)
+      : [{ path, expected: value }];
+  });
+}
+
+function valuesEqual(actual, expected) {
+  if (Array.isArray(actual) || Array.isArray(expected) || isPlainObject(actual) || isPlainObject(expected)) {
+    return JSON.stringify(actual) === JSON.stringify(expected);
+  }
+  return actual === expected;
+}
+
+const TRACE_PATH_ALIASES = new Map([
+  ["debugEnabled", ["debugEnabled", "requestContext.debugEnabled", "chatRequestContext.debugEnabled"]],
+  ["effectiveCollectionCount", [
+    "effectiveCollectionCount",
+    "requestContext.effectiveCollectionIds.length",
+    "chatRequestContext.effectiveCollectionIds.length",
+    "sourceSelection.usedCollectionIds.length",
+  ]],
+  ["sourceMode", ["sourceMode", "requestContext.sourceMode", "chatRequestContext.sourceMode"]],
+  ["sourceResolutionMode", ["sourceResolution.mode", "sourceResolutionPlan.mode", "sourceSelection.routeDecision.mode"]],
+  ["retrievalEngineActual", ["runtime.retrievalEngineActual", "runtimeHealth.retrievalEngineActual"]],
+  ["embeddingProviderActual", ["runtime.embeddingProviderActual", "runtimeHealth.embeddingProviderActual"]],
+  ["embeddingFallbackUsed", ["runtime.embeddingFallbackUsed", "runtimeHealth.embeddingFallbackUsed"]],
+  ["rerankerFallbackUsed", [
+    "runtime.rerankerFallbackUsed",
+    "runtimeHealth.rerankerFallbackUsed",
+    "retrievalDiagnostics.reranker.fallbackUsed",
+  ]],
+]);
+
+const RUNTIME_PATH_ALIASES = new Map([
+  ["retrievalEngineRequested", ["runtime.retrievalEngineRequested", "runtimeHealth.retrievalEngineRequested"]],
+  ["retrievalEngineActual", ["runtime.retrievalEngineActual", "runtimeHealth.retrievalEngineActual"]],
+  ["embeddingProviderRequested", ["runtime.embeddingProviderRequested", "runtimeHealth.embeddingProviderRequested"]],
+  ["embeddingProviderActual", ["runtime.embeddingProviderActual", "runtimeHealth.embeddingProviderActual"]],
+  ["embeddingFallbackUsed", ["runtime.embeddingFallbackUsed", "runtimeHealth.embeddingFallbackUsed"]],
+  ["rerankerModeRequested", ["runtime.rerankerModeRequested", "runtimeHealth.rerankerModeRequested"]],
+  ["rerankerModeActual", ["runtime.rerankerModeActual", "runtimeHealth.rerankerModeActual"]],
+  ["rerankerFallbackUsed", [
+    "runtime.rerankerFallbackUsed",
+    "runtimeHealth.rerankerFallbackUsed",
+    "retrievalDiagnostics.reranker.fallbackUsed",
+  ]],
+  ["strictRuntime", ["runtime.strictRuntime", "runtimeHealth.strictRuntime"]],
+]);
+
+function readTracePathValue(rootValue, path, aliases = TRACE_PATH_ALIASES) {
+  const candidatePaths = aliases.get(path) ?? [path];
+  for (const candidatePath of candidatePaths) {
+    const value = getNestedValue(rootValue, candidatePath);
+    if (value !== undefined) return { value, resolvedPath: candidatePath };
+  }
+  return { value: undefined, resolvedPath: candidatePaths[0] ?? path };
+}
+
+function assertExpectedPaths(label, expectations, rootValue, aliases = TRACE_PATH_ALIASES) {
+  if (!isPlainObject(expectations)) return [];
+  return flattenExpectationPaths(expectations).flatMap(({ path, expected }) => {
+    const { value, resolvedPath } = readTracePathValue(rootValue, path, aliases);
+    if (valuesEqual(value, expected)) return [];
+    const aliasSuffix = resolvedPath !== path ? ` (${resolvedPath})` : "";
+    return [
+      `${label}.${path}${aliasSuffix} expected ${formatAssertionValue(expected)}, got ${formatAssertionValue(value)}`,
+    ];
+  });
+}
+
 function wordCount(value) {
   return tokenize(value).length;
 }
@@ -342,6 +443,9 @@ function scoreCase(testCase, response) {
   if (typeof testCase.expectedRerankerFallbackUsed === "boolean" && reranker?.fallbackUsed !== testCase.expectedRerankerFallbackUsed) {
     failures.push(`reranker_fallback:${reranker?.fallbackUsed ?? "missing"}`);
   }
+
+  failures.push(...assertExpectedPaths("expectTrace", testCase.expectTrace, retrievalDebug));
+  failures.push(...assertExpectedPaths("expectRuntime", testCase.expectRuntime, retrievalDebug, RUNTIME_PATH_ALIASES));
 
   if (Number.isFinite(Number(testCase.minRerankerInputCandidates))) {
     const actual = Number(reranker?.inputCandidateCount ?? 0);
@@ -866,6 +970,17 @@ function scoreCase(testCase, response) {
       ? reranker.topCandidates.map((candidate) => candidate.title ?? candidate.documentId ?? candidate.chunkId).filter(Boolean)
       : [],
     selectionMode: retrievalDebug?.sourceSelection?.selectionMode ?? null,
+    sourceMode:
+      retrievalDebug?.sourceMode ??
+      retrievalDebug?.requestContext?.sourceMode ??
+      retrievalDebug?.chatRequestContext?.sourceMode ??
+      null,
+    sourceResolutionMode:
+      retrievalDebug?.sourceResolution?.mode ??
+      retrievalDebug?.sourceResolutionPlan?.mode ??
+      routeDecision?.mode ??
+      null,
+    runtime: retrievalDebug?.runtime ?? null,
     routeDecisionMode: routeDecision?.mode ?? null,
     routeDecisionConfidence: routeDecision?.confidence ?? null,
     routePrimaryDomain: routeDecision?.primaryDomain ?? null,

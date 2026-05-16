@@ -11,6 +11,7 @@ import { buildAnswerSpec } from "../lib/answerSpec.js";
 import { sendApiError } from "../lib/apiErrors.js";
 import { resolveAdapterCidForChatProxy } from "../lib/chatAdapterResolve.js";
 import { shouldExposeChatDebugFromHeaders } from "../lib/chatDebugBoundary.js";
+import { buildChatRequestContext, summarizeChatRequestContext, type ChatRequestContext } from "../lib/chatRequestContext.js";
 import { stripChatDebugFields } from "../lib/chatResponseBoundary.js";
 import { createChatTrace, type ChatTraceBuilder } from "../lib/chatTrace.js";
 import type { CompiledEvidence } from "../lib/compiledEvidence.js";
@@ -40,7 +41,18 @@ import { buildQueryUnderstanding, summarizeQueryUnderstandingForTrace } from "..
 import { renderGroundedMedicalAnswer } from "../lib/renderMedicalAnswer.js";
 import { buildRouteDecisionLogEvent } from "../lib/routeDecisionLog.js";
 import { resolveRetrievalBudget } from "../lib/retrievalBudget.js";
+import { buildRetrievalPlan, summarizeRetrievalPlan, type RetrievalPlan } from "../lib/retrievalPlan.js";
+import {
+  buildRetrievalRuntimeHealthFromEnv,
+  summarizeRetrievalRuntimeHealth,
+  type RetrievalRuntimeHealth,
+} from "../lib/retrievalRuntimeHealth.js";
 import { evaluateSafetyGate } from "../lib/safetyGate.js";
+import {
+  buildSourceResolutionPlan,
+  summarizeSourceResolutionPlan,
+  type SourceResolutionPlan,
+} from "../lib/sourceResolutionPlan.js";
 import type { DomainRoutePlan } from "../lib/queryRouter.js";
 import type { EvidenceExtractorOutput, QueryPlannerOutput } from "../lib/skillPipeline.js";
 import { runQueryPlannerSkill } from "../lib/skillPipeline.js";
@@ -69,6 +81,11 @@ type GroundedComposerMode = "deterministic" | "model" | "auto";
 
 interface ChatRetrievalDebug {
   decisionConfigVersion: string;
+  requestContext: ChatRequestContext;
+  sourceMode: ChatRequestContext["sourceMode"];
+  sourceResolution: SourceResolutionPlan;
+  runtime: RetrievalRuntimeHealth;
+  retrievalPlan: RetrievalPlan;
   groundingConfidence: "high" | "medium" | "low";
   queryPlan: QueryPlannerOutput | null;
   routePlan: DomainRoutePlan | null;
@@ -121,6 +138,15 @@ function getAiEngineBase(): string {
 function getRetrievalEngine(): "prisma" | "qdrant" | "hybrid" {
   const raw = (process.env.R3MES_RETRIEVAL_ENGINE ?? "prisma").trim().toLowerCase();
   return raw === "qdrant" || raw === "hybrid" ? raw : "prisma";
+}
+
+function shouldUseSourceResolutionPlan(): boolean {
+  const raw = (process.env.R3MES_SOURCE_RESOLUTION_PLAN ?? "1").trim().toLowerCase();
+  return raw !== "0" && raw !== "false" && raw !== "off";
+}
+
+function shouldEnforceSourceResolutionLowConfidenceGuard(): boolean {
+  return (process.env.R3MES_SOURCE_RESOLUTION_ENFORCE_GUARD ?? "").trim() === "1";
 }
 
 function shouldUseTrueHybridRetrieval(): boolean {
@@ -966,6 +992,16 @@ function applyRenderedAnswer(
     if (retrievalDebug) next.retrieval_debug = retrievalDebug;
     if (opts.chatTrace) {
       next.chat_trace = opts.chatTrace.snapshot({
+        sourceMode: retrievalDebug?.sourceMode,
+        sourceResolution: retrievalDebug
+          ? summarizeSourceResolutionPlan(retrievalDebug.sourceResolution)
+          : undefined,
+        runtime: retrievalDebug
+          ? summarizeRetrievalRuntimeHealth(retrievalDebug.runtime)
+          : undefined,
+        retrievalPlan: retrievalDebug
+          ? summarizeRetrievalPlan(retrievalDebug.retrievalPlan)
+          : undefined,
         route: retrievalDebug?.routePlan
           ? {
               domain: retrievalDebug.routePlan.domain,
@@ -980,6 +1016,11 @@ function applyRenderedAnswer(
               sourceCount: retrievalDebug.quality.sourceCount,
               directFactCount: retrievalDebug.quality.directFactCount,
               hasUsableGrounding: retrievalDebug.quality.hasUsableGrounding,
+              requestContext: summarizeChatRequestContext(retrievalDebug.requestContext),
+              sourceMode: retrievalDebug.sourceMode,
+              sourceResolution: summarizeSourceResolutionPlan(retrievalDebug.sourceResolution),
+              runtime: summarizeRetrievalRuntimeHealth(retrievalDebug.runtime),
+              retrievalPlan: summarizeRetrievalPlan(retrievalDebug.retrievalPlan),
               diagnostics: summarizeRetrievalDiagnostics(retrievalDebug.retrievalDiagnostics),
             }
           : undefined,
@@ -997,7 +1038,7 @@ function applyRenderedAnswer(
           blockedReasons: safetyGate.blockedReasons,
           exposedSourceCount: exposedSources.length,
         },
-      });
+      } as Parameters<ChatTraceBuilder["snapshot"]>[0] & Record<string, unknown>);
     }
   }
   return next;
@@ -1062,11 +1103,19 @@ function createConversationalIntentPayload(opts: {
   decision: ConversationalIntentDecision;
   exposeDebug: boolean;
   chatTrace: ChatTraceBuilder;
+  requestContext?: ChatRequestContext;
 }): Record<string, unknown> {
   const payload = createChatCompletionPayload(opts.decision.response);
   payload.sources = [];
   if (opts.exposeDebug) {
     payload.chat_trace = opts.chatTrace.snapshot({
+      sourceMode: opts.requestContext?.sourceMode ?? "conversational",
+      retrieval: opts.requestContext
+        ? {
+            requestContext: summarizeChatRequestContext(opts.requestContext),
+            sourceMode: opts.requestContext.sourceMode,
+          }
+        : undefined,
       answerPath: {
         name: "conversational_intent",
         retrievalWasUsed: false,
@@ -1074,7 +1123,7 @@ function createConversationalIntentPayload(opts: {
         confidence: opts.decision.confidence,
         reason: opts.decision.reason,
       },
-    });
+    } as Parameters<ChatTraceBuilder["snapshot"]>[0] & Record<string, unknown>);
   }
   return payload;
 }
@@ -1595,6 +1644,25 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       }
 
       const conversationalIntent = queryUnderstanding.conversationalIntent;
+      const sourceDiscoveryIntentContext = sourceDiscoveryIntent;
+      const requestContext = buildChatRequestContext({
+        requestId: req.id,
+        body: rawBody,
+        requestedCollectionIds,
+        effectiveCollectionIds: accessibleCollections.map((item) => item.id),
+        includePublic,
+        debugEnabled: exposeDebug,
+        retrievalQuery,
+        uiSelectedCollectionIds: rawBody.uiSelectedCollectionIds,
+        uiAutoSingle: rawBody.uiAutoSingle,
+        retrievalQueryContextualized: extractedRetrievalQuery.contextualized,
+        sourceDiscoveryIntent: sourceDiscoveryIntentContext,
+        conversationalIntent,
+      });
+      chatTrace.recordNow("request", "ok", {
+        name: "request_context",
+        ...summarizeChatRequestContext(requestContext),
+      });
       if (!stream && conversationalIntent) {
         chatTrace.recordNow("query_planning", "skipped", {
           name: "conversational_intent",
@@ -1615,6 +1683,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             decision: conversationalIntent,
             exposeDebug,
             chatTrace,
+            requestContext,
           }),
         );
       }
@@ -1665,6 +1734,59 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       });
 
       const accessibleCollectionIds = activeAccessibleCollections.map((item) => item.id);
+      const sourceResolutionPlanEnabled = shouldUseSourceResolutionPlan();
+      const sourceResolutionLowConfidenceGuard = shouldEnforceSourceResolutionLowConfidenceGuard();
+      const sourceResolutionPlan = buildSourceResolutionPlan({
+        accessibleCollections: activeAccessibleCollections,
+        requestedCollectionIds,
+        includePublic,
+        retrievalQuery: plannedRetrievalQuery,
+        queryUnderstanding: retrievalQueryUnderstanding,
+        enforceLowConfidenceGuard: sourceResolutionLowConfidenceGuard,
+        sourceDiscoveryIntent,
+      });
+      const retrievalCollectionIds = sourceResolutionPlanEnabled
+        ? sourceResolutionPlan.selectedCollectionIds
+        : accessibleCollectionIds;
+      const retrievalCollectionIdSet = new Set(retrievalCollectionIds);
+      const retrievalScopedCollections = activeAccessibleCollections.filter((collection) =>
+        retrievalCollectionIdSet.has(collection.id),
+      );
+      const runtimeBeforeRetrieval = buildRetrievalRuntimeHealthFromEnv(process.env, {
+        retrievalEngineRequested: getRetrievalEngine(),
+        retrievalEngineActual: getRetrievalEngine(),
+      });
+      const retrievalPlanBeforeRetrieval = buildRetrievalPlan({
+        query: plannedRetrievalQuery,
+        normalizedQuery: retrievalQueryUnderstanding.normalized.normalized,
+        sourcePlan: sourceResolutionPlanEnabled
+          ? { ...sourceResolutionPlan }
+          : {
+              ...sourceResolutionPlan,
+              selectedCollectionIds: accessibleCollectionIds,
+              warnings: [
+                ...sourceResolutionPlan.warnings,
+                "source_resolution_plan_disabled_legacy_collection_ids",
+              ],
+            },
+        runtime: runtimeBeforeRetrieval,
+        requestContext: {
+          ...requestContext,
+          effectiveCollectionIds: retrievalCollectionIds,
+        },
+        warnings: sourceResolutionPlanEnabled ? [] : ["source_resolution_plan_disabled_legacy_collection_ids"],
+      });
+      chatTrace.recordNow("source_selection", "ok", {
+        name: "source_resolution_plan",
+        enabled: sourceResolutionPlanEnabled,
+        enforceLowConfidenceGuard: sourceResolutionLowConfidenceGuard,
+        legacyCollectionCount: accessibleCollectionIds.length,
+        retrievalCollectionCount: retrievalCollectionIds.length,
+        requestContext: summarizeChatRequestContext(requestContext),
+        sourceResolution: summarizeSourceResolutionPlan(sourceResolutionPlan),
+        runtime: summarizeRetrievalRuntimeHealth(runtimeBeforeRetrieval),
+        retrievalPlan: summarizeRetrievalPlan(retrievalPlanBeforeRetrieval),
+      });
       const retrievalTrace = chatTrace.start("retrieval");
       const retrievalBudget = resolveRetrievalBudget({
         routePlan,
@@ -1675,25 +1797,25 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       });
       const selectedSourcesAreStrictIneligible =
         requestedCollectionIds.length > 0 &&
-        activeAccessibleCollections.length > 0 &&
-        activeAccessibleCollections.every((collection) => !readKnowledgeCollectionStrictRouteEligible(collection));
+        retrievalScopedCollections.length > 0 &&
+        retrievalScopedCollections.every((collection) => !readKnowledgeCollectionStrictRouteEligible(collection));
       const retrievalRoutePlan = selectedSourcesAreStrictIneligible ? null : routePlan;
       if (selectedSourcesAreStrictIneligible) {
         chatTrace.recordNow("query_planning", "ok", {
           name: "strict_route_scope_relaxed",
           reason: "selected sources are thin/noisy and cannot support strict routing",
-          selectedCollectionCount: accessibleCollections.length,
+          selectedCollectionCount: retrievalScopedCollections.length,
         });
       }
       const retrieval =
-        retrievalQuery && accessibleCollectionIds.length > 0
+        retrievalQuery && retrievalCollectionIds.length > 0
           ? await (async () => {
               const engine = getRetrievalEngine();
               if (engine === "hybrid" && shouldUseTrueHybridRetrieval()) {
                 const hybridRetrieval = await retrieveKnowledgeContextTrueHybrid({
                   query: plannedRetrievalQuery,
                   evidenceQuery: retrievalQuery,
-                  accessibleCollectionIds,
+                  accessibleCollectionIds: retrievalCollectionIds,
                   routePlan: retrievalRoutePlan,
                   limit: retrievalBudget.sourceLimit,
                   budgetMode: retrievalBudget.mode,
@@ -1709,7 +1831,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                   const qdrantRetrieval = await retrieveKnowledgeContextQdrant({
                     query: plannedRetrievalQuery,
                     evidenceQuery: retrievalQuery,
-                    accessibleCollectionIds,
+                    accessibleCollectionIds: retrievalCollectionIds,
                     routePlan: retrievalRoutePlan,
                   });
                   if (engine === "qdrant" || qdrantRetrieval.sources.length > 0) {
@@ -1738,7 +1860,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               const prismaRetrieval = await retrieveKnowledgeContext({
                 query: plannedRetrievalQuery,
                 evidenceQuery: retrievalQuery,
-                accessibleCollectionIds,
+                accessibleCollectionIds: retrievalCollectionIds,
                 routePlan: retrievalRoutePlan,
               });
               return {
@@ -1756,13 +1878,48 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               retrievalMode: "prisma" as const,
               retrievalDiagnostics: null,
             };
-      chatTrace.finish(retrievalTrace, retrievalQuery && accessibleCollectionIds.length > 0 ? "ok" : "skipped", {
+      const retrievalEngineActual =
+        retrieval.retrievalMode === "true_hybrid"
+          ? "hybrid"
+          : retrieval.retrievalMode === "qdrant"
+            ? "qdrant"
+            : "prisma";
+      const runtimeAfterRetrieval = buildRetrievalRuntimeHealthFromEnv(process.env, {
+        retrievalEngineRequested: getRetrievalEngine(),
+        retrievalEngineActual,
+        diagnostics: retrieval.retrievalDiagnostics ?? undefined,
+      });
+      const retrievalPlan = buildRetrievalPlan({
+        query: plannedRetrievalQuery,
+        normalizedQuery: retrievalQueryUnderstanding.normalized.normalized,
+        sourcePlan: sourceResolutionPlanEnabled
+          ? { ...sourceResolutionPlan }
+          : {
+              ...sourceResolutionPlan,
+              selectedCollectionIds: accessibleCollectionIds,
+              warnings: [
+                ...sourceResolutionPlan.warnings,
+                "source_resolution_plan_disabled_legacy_collection_ids",
+              ],
+            },
+        runtime: runtimeAfterRetrieval,
+        requestContext: {
+          ...requestContext,
+          effectiveCollectionIds: retrievalCollectionIds,
+        },
+        warnings: sourceResolutionPlanEnabled ? [] : ["source_resolution_plan_disabled_legacy_collection_ids"],
+      });
+      chatTrace.finish(retrievalTrace, retrievalQuery && retrievalCollectionIds.length > 0 ? "ok" : "skipped", {
         mode: retrieval.retrievalMode,
         groundingConfidence: retrieval.groundingConfidence,
         sourceCount: retrieval.sources.length,
         contextLength: retrieval.contextText.length,
         hasEvidence: Boolean(retrieval.evidence),
         budgetDecision: retrievalBudget,
+        retrievalCollectionCount: retrievalCollectionIds.length,
+        sourceResolution: summarizeSourceResolutionPlan(sourceResolutionPlan),
+        runtime: summarizeRetrievalRuntimeHealth(runtimeAfterRetrieval),
+        retrievalPlan: summarizeRetrievalPlan(retrievalPlan),
         diagnostics: summarizeRetrievalDiagnostics(retrieval.retrievalDiagnostics ?? undefined),
       });
 
@@ -1806,7 +1963,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       let sourceSelection = buildSourceSelectionSummary({
         query: plannedRetrievalQuery,
         requestedCollectionIds,
-        accessibleCollectionIds,
+        accessibleCollectionIds: retrievalCollectionIds,
         suggestibleCollections,
         sources: retrieval.sources,
         includePublic,
@@ -1892,6 +2049,14 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const retrievalDebug: ChatRetrievalDebug | null = retrievalQuery
         ? {
             decisionConfigVersion: getDecisionConfigVersion(),
+            requestContext: {
+              ...requestContext,
+              effectiveCollectionIds: retrievalCollectionIds,
+            },
+            sourceMode: requestContext.sourceMode,
+            sourceResolution: sourceResolutionPlan,
+            runtime: runtimeAfterRetrieval,
+            retrievalPlan,
             groundingConfidence: retrieval.groundingConfidence,
             queryPlan: queryPlan?.output ?? null,
             routePlan,
@@ -2234,11 +2399,26 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           if (exposeDebug && retrievalDebug) parsed.retrieval_debug = retrievalDebug;
           if (exposeDebug) {
             safeParsed.chat_trace = chatTrace.snapshot({
+              sourceMode: retrievalDebug?.sourceMode,
+              sourceResolution: retrievalDebug
+                ? summarizeSourceResolutionPlan(retrievalDebug.sourceResolution)
+                : undefined,
+              runtime: retrievalDebug
+                ? summarizeRetrievalRuntimeHealth(retrievalDebug.runtime)
+                : undefined,
+              retrievalPlan: retrievalDebug
+                ? summarizeRetrievalPlan(retrievalDebug.retrievalPlan)
+                : undefined,
               retrieval: retrievalDebug
                 ? {
                     mode: retrievalDebug.retrievalMode,
                     groundingConfidence: retrievalDebug.groundingConfidence,
                     sourceCount: retrievalDebug.quality.sourceCount,
+                    requestContext: summarizeChatRequestContext(retrievalDebug.requestContext),
+                    sourceMode: retrievalDebug.sourceMode,
+                    sourceResolution: summarizeSourceResolutionPlan(retrievalDebug.sourceResolution),
+                    runtime: summarizeRetrievalRuntimeHealth(retrievalDebug.runtime),
+                    retrievalPlan: summarizeRetrievalPlan(retrievalDebug.retrievalPlan),
                   }
                 : undefined,
               answerPath: {
@@ -2246,7 +2426,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 retrievalWasUsed,
                 responseMode,
               },
-            });
+            } as Parameters<ChatTraceBuilder["snapshot"]>[0] & Record<string, unknown>);
           }
           return reply.type(ct).send(safeParsed);
         } catch {
