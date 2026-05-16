@@ -1,7 +1,7 @@
 export type KnowledgeSourceType = "TEXT" | "MARKDOWN" | "JSON" | "PDF" | "DOCX" | "PPTX" | "HTML";
 export type KnowledgeParserInputMode = "utf8" | "binary";
 export type KnowledgeExternalParserProfile = "docling" | "marker" | "external";
-export type KnowledgeParserHealth = "ready" | "unavailable";
+export type KnowledgeParserHealth = "ready" | "degraded" | "unavailable";
 
 export interface KnowledgeParserAdapter<TParsedDocument = unknown> {
   id: string;
@@ -17,11 +17,18 @@ export interface KnowledgeParserCapability {
   id: string;
   version: number;
   sourceType: KnowledgeSourceType;
+  sourceTypes: KnowledgeSourceType[];
   extensions: string[];
+  mimeTypes: string[];
   inputMode: KnowledgeParserInputMode;
   available: boolean;
   kind: "built_in" | "external";
   health: KnowledgeParserHealth;
+  priority: number;
+  supportsTables: boolean;
+  supportsOcr: boolean;
+  supportsSpreadsheets: boolean;
+  outputSchemaVersion: number;
   profile?: KnowledgeExternalParserProfile | null;
   reason?: string | null;
 }
@@ -54,7 +61,9 @@ export function createKnowledgeParserRegistry<TParsedDocument>(
     })),
     listCapabilities: () => entries.map((entry) => ({
       ...entry.capability,
+      sourceTypes: [...entry.capability.sourceTypes],
       extensions: [...entry.capability.extensions],
+      mimeTypes: [...entry.capability.mimeTypes],
     })),
     getForExtension: (extension) => adapters.find((parser) => parser.extensions.includes(extension)) ?? null,
     supportsExtension: (extension) => adapters.some((parser) => parser.extensions.includes(extension)),

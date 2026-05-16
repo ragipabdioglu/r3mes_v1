@@ -54,6 +54,30 @@ export interface KnowledgeIngestionQualityReport {
   warnings: string[];
 }
 
+export interface KnowledgeDocumentUnderstandingQuality {
+  version: 1;
+  parseQuality: KnowledgeParseQualityLevel;
+  structureQuality: "strong" | "partial" | "weak";
+  tableQuality: "none" | "text_only" | "structured";
+  spreadsheetQuality: "none" | "structured" | "partial" | "failed";
+  ocrQuality: "none" | "usable" | "weak";
+  answerReadiness: "ready" | "partial" | "needs_review" | "failed";
+  strictAnswerEligible: boolean;
+  blockers: string[];
+  warnings: string[];
+  signals: {
+    artifactCount: number;
+    structuredArtifactCount: number;
+    tableCount: number;
+    structuredTableCount: number;
+    tableCellCount: number;
+    pageCount?: number;
+    parserFallbackUsed: boolean;
+    parseWarningCount: number;
+    ocrSpanCount: number;
+  };
+}
+
 export interface KnowledgeIndexingState {
   status: KnowledgeIndexingStatus;
   vectorIndexStatus: KnowledgeIndexingStatus;
@@ -114,6 +138,7 @@ export interface KnowledgeDocumentListItem {
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
   ingestionQuality?: KnowledgeIngestionQualityReport | null;
+  documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
   inferredTopic?: string | null;
   inferredTags?: string[];
   createdAt: string;
@@ -160,6 +185,7 @@ export interface KnowledgeUploadAcceptedResponse {
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
   ingestionQuality?: KnowledgeIngestionQualityReport | null;
+  documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
 }
 
 export interface KnowledgeIngestionJobStatusResponse {
@@ -194,6 +220,11 @@ export interface KnowledgeIngestionJobStatusResponse {
   errorCode?: string | null;
   errorMessage?: string | null;
   indexingError?: string | null;
+  parseQualityScore?: number | null;
+  parseQualityLevel?: KnowledgeParseQualityLevel | null;
+  parseQualityWarnings?: string[];
+  ingestionQuality?: KnowledgeIngestionQualityReport | null;
+  documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
   startedAt?: string | null;
   completedAt?: string | null;
   createdAt?: string | null;

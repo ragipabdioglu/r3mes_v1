@@ -33,6 +33,10 @@ export interface QdrantKnowledgePayload {
   ocrRisk: "none" | "low" | "medium" | "high";
   thinSource: boolean;
   strictRouteEligible: boolean;
+  answerReadiness?: "ready" | "partial" | "needs_review" | "failed";
+  strictAnswerEligible?: boolean;
+  tableQuality?: "none" | "text_only" | "structured";
+  structureQuality?: "strong" | "partial" | "weak";
   metadataConfidence: "low" | "medium" | "high";
   collectionProfileVersion: number;
   collectionProfileTextHash: string;
@@ -116,6 +120,25 @@ function ingestionQuality(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function documentUnderstanding(value: unknown): Record<string, unknown> | null {
+  const record = metadataRecord(value);
+  return record?.documentUnderstanding && typeof record.documentUnderstanding === "object"
+    ? record.documentUnderstanding as Record<string, unknown>
+    : null;
+}
+
+function validAnswerReadiness(value: unknown): QdrantKnowledgePayload["answerReadiness"] | null {
+  return value === "ready" || value === "partial" || value === "needs_review" || value === "failed" ? value : null;
+}
+
+function validTableQuality(value: unknown): QdrantKnowledgePayload["tableQuality"] | null {
+  return value === "none" || value === "text_only" || value === "structured" ? value : null;
+}
+
+function validStructureQuality(value: unknown): QdrantKnowledgePayload["structureQuality"] | null {
+  return value === "strong" || value === "partial" || value === "weak" ? value : null;
+}
+
 function profileVersion(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
@@ -162,6 +185,10 @@ export function buildQdrantPayloadMetadata(opts: {
   | "ocrRisk"
   | "thinSource"
   | "strictRouteEligible"
+  | "answerReadiness"
+  | "strictAnswerEligible"
+  | "tableQuality"
+  | "structureQuality"
   | "metadataConfidence"
   | "collectionProfileVersion"
   | "collectionProfileTextHash"
@@ -178,6 +205,9 @@ export function buildQdrantPayloadMetadata(opts: {
   const collectionIngestion = ingestionQuality(opts.collectionMetadata);
   const documentIngestion = ingestionQuality(opts.documentMetadata);
   const chunkIngestion = ingestionQuality(opts.chunkMetadata);
+  const collectionUnderstanding = documentUnderstanding(opts.collectionMetadata);
+  const documentUnderstandingMetadata = documentUnderstanding(opts.documentMetadata);
+  const chunkUnderstanding = documentUnderstanding(opts.chunkMetadata);
   const tableRisk =
     validIngestionRisk(chunkIngestion?.tableRisk) ??
     validIngestionRisk(documentIngestion?.tableRisk) ??
@@ -192,10 +222,25 @@ export function buildQdrantPayloadMetadata(opts: {
     chunkIngestion?.thinSource === true ||
     documentIngestion?.thinSource === true ||
     collectionIngestion?.thinSource === true;
+  const answerReadiness =
+    validAnswerReadiness(chunkUnderstanding?.answerReadiness) ??
+    validAnswerReadiness(documentUnderstandingMetadata?.answerReadiness) ??
+    validAnswerReadiness(collectionUnderstanding?.answerReadiness);
+  const strictAnswerEligible =
+    chunkUnderstanding?.strictAnswerEligible === false ||
+    documentUnderstandingMetadata?.strictAnswerEligible === false ||
+    collectionUnderstanding?.strictAnswerEligible === false
+      ? false
+      : answerReadiness
+        ? true
+        : undefined;
   const strictRouteEligible =
     chunkIngestion?.strictRouteEligible === false ||
     documentIngestion?.strictRouteEligible === false ||
     collectionIngestion?.strictRouteEligible === false ||
+    strictAnswerEligible === false ||
+    answerReadiness === "needs_review" ||
+    answerReadiness === "failed" ||
     thinSource ||
     ocrRisk === "high"
       ? false
@@ -277,6 +322,18 @@ export function buildQdrantPayloadMetadata(opts: {
     ocrRisk,
     thinSource,
     strictRouteEligible,
+    answerReadiness: answerReadiness ?? undefined,
+    strictAnswerEligible,
+    tableQuality:
+      validTableQuality(chunkUnderstanding?.tableQuality) ??
+      validTableQuality(documentUnderstandingMetadata?.tableQuality) ??
+      validTableQuality(collectionUnderstanding?.tableQuality) ??
+      undefined,
+    structureQuality:
+      validStructureQuality(chunkUnderstanding?.structureQuality) ??
+      validStructureQuality(documentUnderstandingMetadata?.structureQuality) ??
+      validStructureQuality(collectionUnderstanding?.structureQuality) ??
+      undefined,
     metadataConfidence:
       validConfidence(chunkProfile?.confidence) ??
       validConfidence(documentProfile?.confidence) ??
@@ -343,6 +400,9 @@ async function ensureQdrantPayloadIndexes(): Promise<void> {
     { field_name: "sourceQuality", field_schema: "keyword" },
     { field_name: "tableRisk", field_schema: "keyword" },
     { field_name: "ocrRisk", field_schema: "keyword" },
+    { field_name: "answerReadiness", field_schema: "keyword" },
+    { field_name: "tableQuality", field_schema: "keyword" },
+    { field_name: "structureQuality", field_schema: "keyword" },
     { field_name: "metadataConfidence", field_schema: "keyword" },
     { field_name: "collectionProfileVersion", field_schema: "integer" },
     { field_name: "collectionProfileTextHash", field_schema: "keyword" },

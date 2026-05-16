@@ -24,6 +24,29 @@ export type KnowledgeIngestionQualityReport = {
   strictRouteEligible: boolean;
   warnings: string[];
 };
+export type KnowledgeDocumentUnderstandingQuality = {
+  version: 1;
+  parseQuality: KnowledgeParseQualityLevel;
+  structureQuality: "strong" | "partial" | "weak";
+  tableQuality: "none" | "text_only" | "structured";
+  spreadsheetQuality: "none" | "structured" | "partial" | "failed";
+  ocrQuality: "none" | "usable" | "weak";
+  answerReadiness: "ready" | "partial" | "needs_review" | "failed";
+  strictAnswerEligible: boolean;
+  blockers: string[];
+  warnings: string[];
+  signals: {
+    artifactCount: number;
+    structuredArtifactCount: number;
+    tableCount: number;
+    structuredTableCount: number;
+    tableCellCount: number;
+    pageCount?: number;
+    parserFallbackUsed: boolean;
+    parseWarningCount: number;
+    ocrSpanCount: number;
+  };
+};
 
 export type KnowledgeIndexingState = {
   status: KnowledgeIndexingStatus;
@@ -85,6 +108,7 @@ export type KnowledgeDocumentDetail = {
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
   ingestionQuality?: KnowledgeIngestionQualityReport | null;
+  documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
   inferredTopic?: string | null;
   inferredTags?: string[];
   createdAt: string;
@@ -131,6 +155,7 @@ export type KnowledgeUploadAcceptedResponse = {
   parseQualityLevel?: KnowledgeParseQualityLevel | null;
   parseQualityWarnings?: string[];
   ingestionQuality?: KnowledgeIngestionQualityReport | null;
+  documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
 };
 
 export type KnowledgeIngestionJobStatusResponse = {
@@ -165,6 +190,11 @@ export type KnowledgeIngestionJobStatusResponse = {
   errorCode?: string | null;
   errorMessage?: string | null;
   indexingError?: string | null;
+  parseQualityScore?: number | null;
+  parseQualityLevel?: KnowledgeParseQualityLevel | null;
+  parseQualityWarnings?: string[];
+  ingestionQuality?: KnowledgeIngestionQualityReport | null;
+  documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
   startedAt?: string | null;
   completedAt?: string | null;
   createdAt?: string | null;

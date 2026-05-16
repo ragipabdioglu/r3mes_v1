@@ -223,6 +223,8 @@ function readKnowledgeAutoMetadata(value: unknown): KnowledgeAutoMetadata | null
     questionsAnswered: Array.isArray(record.questionsAnswered) ? record.questionsAnswered.filter((item): item is string => typeof item === "string") : [],
     sourceQuality: record.sourceQuality === "structured" || record.sourceQuality === "inferred" || record.sourceQuality === "thin" ? record.sourceQuality : "thin",
     parseQuality: readKnowledgeParseQuality(record.parseQuality),
+    ingestionQuality: readKnowledgeIngestionQuality(record.ingestionQuality),
+    documentUnderstanding: readDocumentUnderstandingQuality(record.documentUnderstanding),
     parseAdapter: readKnowledgeParseAdapter(record.parseAdapter),
     sourceType: typeof record.sourceType === "string" ? record.sourceType as KnowledgeAutoMetadata["sourceType"] : undefined,
     artifactId: typeof record.artifactId === "string" ? record.artifactId : undefined,
@@ -238,6 +240,37 @@ function readKnowledgeAutoMetadata(value: unknown): KnowledgeAutoMetadata | null
     answerabilityScore: typeof record.answerabilityScore === "number" ? record.answerabilityScore : undefined,
     profile: profileRecord as KnowledgeAutoMetadata["profile"],
   };
+}
+
+function readKnowledgeIngestionQuality(value: unknown): KnowledgeAutoMetadata["ingestionQuality"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const risk = (input: unknown) =>
+    input === "none" || input === "low" || input === "medium" || input === "high" ? input : undefined;
+  const tableRisk = risk(record.tableRisk);
+  const ocrRisk = risk(record.ocrRisk);
+  if (!tableRisk || !ocrRisk || typeof record.thinSource !== "boolean" || typeof record.strictRouteEligible !== "boolean") {
+    return undefined;
+  }
+  return {
+    version: 1,
+    tableRisk,
+    ocrRisk,
+    thinSource: record.thinSource,
+    strictRouteEligible: record.strictRouteEligible,
+    warnings: Array.isArray(record.warnings) ? record.warnings.filter((item): item is string => typeof item === "string") : [],
+  };
+}
+
+function readDocumentUnderstandingQuality(value: unknown): KnowledgeAutoMetadata["documentUnderstanding"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as KnowledgeAutoMetadata["documentUnderstanding"];
+  if (record?.version !== 1) return undefined;
+  if (record.answerReadiness !== "ready" && record.answerReadiness !== "partial" && record.answerReadiness !== "needs_review" && record.answerReadiness !== "failed") {
+    return undefined;
+  }
+  if (typeof record.strictAnswerEligible !== "boolean") return undefined;
+  return record;
 }
 
 function readKnowledgeParseQuality(value: unknown): KnowledgeParseQuality | undefined {
@@ -429,6 +462,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
     }
 
     const indexStatus = mapIndexStatus(job.document.vectorIndexStatus);
+    const documentMetadata = readKnowledgeAutoMetadata(job.document.autoMetadata);
     const payload: KnowledgeIngestionJobStatusResponse = {
       jobId: job.jobId,
       collectionId: collection.id,
@@ -463,6 +497,11 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
         errorMessage: job.errorMessage,
       },
       chunkCount: job.document._count.chunks,
+      parseQualityScore: documentMetadata?.parseQuality?.score ?? null,
+      parseQualityLevel: documentMetadata?.parseQuality?.level ?? null,
+      parseQualityWarnings: documentMetadata?.parseQuality?.warnings ?? [],
+      ingestionQuality: documentMetadata?.ingestionQuality ?? null,
+      documentUnderstanding: documentMetadata?.documentUnderstanding ?? null,
       indexedChunkCount: indexStatus === "READY" ? job.document._count.chunks : null,
       errorCode: job.errorCode,
       errorMessage: job.errorMessage,
@@ -551,6 +590,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           parseQualityLevel: docMetadata?.parseQuality?.level ?? null,
           parseQualityWarnings: docMetadata?.parseQuality?.warnings ?? [],
           ingestionQuality: docMetadata?.ingestionQuality ?? null,
+          documentUnderstanding: docMetadata?.documentUnderstanding ?? null,
           inferredTopic: docMetadata?.subtopics[0] ?? chunkMetadata?.subtopics[0] ?? card?.topic ?? null,
           inferredTags: [
             ...(docMetadata ? [docMetadata.domain, ...docMetadata.subtopics, ...docMetadata.keywords] : []),
@@ -658,6 +698,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
     if (existingDocument?.ingestionJob) {
       const indexStatus = mapIndexStatus(existingDocument.vectorIndexStatus);
       const readiness = mapReadinessStatus(existingDocument.readinessStatus);
+      const documentMetadata = readKnowledgeAutoMetadata(existingDocument.autoMetadata);
       const payload: KnowledgeUploadAcceptedResponse = {
         collectionId: collection.id,
         documentId: existingDocument.id,
@@ -691,6 +732,11 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           : null,
         storageCid: existingDocument.storageCid,
         chunkCount: existingDocument._count.chunks,
+        parseQualityScore: documentMetadata?.parseQuality?.score ?? null,
+        parseQualityLevel: documentMetadata?.parseQuality?.level ?? null,
+        parseQualityWarnings: documentMetadata?.parseQuality?.warnings ?? [],
+        ingestionQuality: documentMetadata?.ingestionQuality ?? null,
+        documentUnderstanding: documentMetadata?.documentUnderstanding ?? null,
       };
       const validated = safeParseKnowledgeUploadAcceptedResponse(payload);
       if (!validated.success) {

@@ -1,0 +1,11 @@
+Production migration runbook
+
+Amaç: Veritabanı şema değişikliği güvenli şekilde uygulanır.
+
+Adımlar:
+- Staging ortamında aynı migration çalıştırılır ve uygulama smoke testleri tamamlanır.
+- Production öncesinde yedek alınır, yedek bütünlüğü doğrulanır ve rollback komutu hazırlanır.
+- Migration sırasında kilit süresi, hata logları ve kuyruk gecikmesi izlenir.
+- İşlem bittikten sonra kritik endpointler ve örnek kullanıcı akışları kontrol edilir.
+
+Rollback: Hata oranı yükselirse servis yazma trafiği durdurulur, son yedek geri yüklenir ve olay kaydı açılır.

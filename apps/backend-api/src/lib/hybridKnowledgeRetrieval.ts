@@ -772,6 +772,30 @@ function payloadToChunk(payload: QdrantKnowledgePayload): HybridKnowledgeChunk {
         strictRouteEligible: payload.strictRouteEligible !== false,
         warnings: [],
       },
+      documentUnderstanding: payload.answerReadiness
+        ? {
+            version: 1,
+            parseQuality: "usable",
+            structureQuality: payload.structureQuality ?? "partial",
+            tableQuality: payload.tableQuality ?? "none",
+            spreadsheetQuality: "none",
+            ocrQuality: payload.ocrRisk === "high" ? "weak" : "none",
+            answerReadiness: payload.answerReadiness,
+            strictAnswerEligible: payload.strictAnswerEligible !== false,
+            blockers: [],
+            warnings: [],
+            signals: {
+              artifactCount: 0,
+              structuredArtifactCount: 0,
+              tableCount: 0,
+              structuredTableCount: payload.tableQuality === "structured" ? 1 : 0,
+              tableCellCount: 0,
+              parserFallbackUsed: false,
+              parseWarningCount: 0,
+              ocrSpanCount: 0,
+            },
+          }
+        : undefined,
       profile: {
         domains: payload.domains ?? [payload.domain],
         subtopics: payload.profileSubtopics ?? payload.subtopics,
@@ -823,6 +847,12 @@ function strictRouteEligibleFromMetadata(value: unknown): boolean | null {
     record.ingestionQuality && typeof record.ingestionQuality === "object"
       ? record.ingestionQuality as Record<string, unknown>
       : null;
+  const documentUnderstanding =
+    record.documentUnderstanding && typeof record.documentUnderstanding === "object"
+      ? record.documentUnderstanding as Record<string, unknown>
+      : null;
+  if (documentUnderstanding?.strictAnswerEligible === false) return false;
+  if (documentUnderstanding?.answerReadiness === "needs_review" || documentUnderstanding?.answerReadiness === "failed") return false;
   if (!ingestionQuality) return null;
   if (ingestionQuality.strictRouteEligible === false) return false;
   if (ingestionQuality.thinSource === true) return false;

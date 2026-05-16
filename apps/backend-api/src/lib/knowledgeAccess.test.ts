@@ -672,6 +672,64 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(collectionHasSpecificRouteSupport(collection, routePlan, query)).toBe(false);
   });
 
+  it("keeps needs-review document understanding profiles out of strict route support", async () => {
+    const {
+      collectionHasSpecificRouteSupport,
+      readKnowledgeCollectionStrictRouteEligible,
+      rankMetadataRouteCandidates,
+    } = await import("./knowledgeAccess.js");
+    const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "Net dönem karı tabloda kaç görünüyor?";
+    const routePlan = {
+      ...routeQuery(query),
+      domain: "finance" as const,
+      subtopics: ["kap"],
+      riskLevel: "high" as const,
+      retrievalHints: ["net dönem karı", "finans tablo"],
+      mustIncludeTerms: ["net", "dönem", "kar", "tablo"],
+      confidence: "high" as const,
+    };
+    const collection = {
+      id: "text-table-upload",
+      name: "Text-only finans tablosu",
+      visibility: "PRIVATE" as const,
+      autoMetadata: {
+        documentUnderstanding: {
+          version: 1,
+          answerReadiness: "needs_review",
+          strictAnswerEligible: false,
+          tableQuality: "text_only",
+          structureQuality: "partial",
+        },
+        profile: {
+          profileVersion: 3,
+          domains: ["finance"],
+          subtopics: ["kap"],
+          keywords: ["net dönem karı", "tablo"],
+          entities: [],
+          topicPhrases: ["net dönem karı"],
+          answerableConcepts: ["net dönem karı"],
+          tableConcepts: ["financial table"],
+          sampleQuestions: [query],
+          summary: "Finans tablo metni.",
+          sourceQuality: "structured",
+          confidence: "high",
+          profileEmbedding: embedKnowledgeText("net dönem karı tablo"),
+          sampleQuestionsEmbedding: embedKnowledgeText(query),
+        },
+      },
+      documents: [],
+    };
+
+    const candidates = rankMetadataRouteCandidates({ routePlan, query, collections: [collection], limit: 1 });
+
+    expect(candidates[0]?.scoreBreakdown?.signals.sourceQuality).toBeLessThanOrEqual(30);
+    expect(readKnowledgeCollectionStrictRouteEligible(collection)).toBe(false);
+    expect(collectionHasSpecificRouteSupport(collection, routePlan, query)).toBe(false);
+  });
+
   it("uses profile v3 table concepts when suggesting data-heavy collections", async () => {
     const { rankMetadataRouteCandidates, rankSuggestedKnowledgeCollections } = await import("./knowledgeAccess.js");
     const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");

@@ -45,6 +45,12 @@ describe("knowledge parser adapters", () => {
         sourceType: "JSON",
         extensions: [".json"],
       },
+      {
+        id: "csv-spreadsheet-v1",
+        version: 1,
+        sourceType: "TEXT",
+        extensions: [".csv"],
+      },
     ]);
   });
 
@@ -55,6 +61,8 @@ describe("knowledge parser adapters", () => {
     expect(isSupportedKnowledgeFilename("note.txt")).toBe(true);
     expect(isSupportedKnowledgeFilename("note.md")).toBe(true);
     expect(isSupportedKnowledgeFilename("note.json")).toBe(true);
+    expect(isSupportedKnowledgeFilename("sheet.csv")).toBe(true);
+    expect(isSupportedKnowledgeFilename("sheet.xlsx")).toBe(false);
     expect(isSupportedKnowledgeFilename("note.pdf")).toBe(false);
     expect(getKnowledgeParserForFilename("note.pdf")).toBeNull();
   });
@@ -76,9 +84,17 @@ describe("knowledge parser adapters", () => {
     expect(withoutExternal.some((parser) => parser.id === "plain-text-v1" && parser.available)).toBe(true);
     expect(withoutExternal.find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
       available: false,
+      sourceType: "PDF",
+      sourceTypes: ["PDF", "DOCX", "PPTX", "HTML"],
       extensions: [".pdf", ".docx", ".pptx", ".html", ".htm"],
+      mimeTypes: expect.arrayContaining(["application/pdf", "text/html"]),
       kind: "external",
       health: "unavailable",
+      priority: 50,
+      supportsTables: true,
+      supportsOcr: false,
+      supportsSpreadsheets: false,
+      outputSchemaVersion: 1,
     });
     expect(withoutExternal.find((parser) => parser.id === "external-document-parser-v1")?.reason).not.toContain(process.execPath);
 
@@ -89,6 +105,59 @@ describe("knowledge parser adapters", () => {
       available: true,
       health: "ready",
       reason: null,
+      supportsTables: true,
+      supportsSpreadsheets: false,
+      outputSchemaVersion: 1,
+    });
+  });
+
+  it("reports enriched built-in parser capabilities", () => {
+    const capabilities = listKnowledgeParserCapabilities();
+
+    expect(capabilities.find((parser) => parser.id === "plain-text-v1")).toMatchObject({
+      sourceType: "TEXT",
+      sourceTypes: ["TEXT"],
+      mimeTypes: ["text/plain"],
+      priority: 60,
+      supportsTables: false,
+      supportsOcr: false,
+      supportsSpreadsheets: false,
+      outputSchemaVersion: 1,
+    });
+    expect(capabilities.find((parser) => parser.id === "markdown-v1")).toMatchObject({
+      sourceTypes: ["MARKDOWN"],
+      mimeTypes: ["text/markdown", "text/x-markdown"],
+      priority: 70,
+      supportsTables: true,
+      supportsOcr: false,
+      supportsSpreadsheets: false,
+      outputSchemaVersion: 1,
+    });
+    expect(capabilities.find((parser) => parser.id === "json-normalized-v1")).toMatchObject({
+      sourceTypes: ["JSON"],
+      mimeTypes: ["application/json"],
+      priority: 80,
+      supportsTables: false,
+      supportsOcr: false,
+      supportsSpreadsheets: false,
+      outputSchemaVersion: 1,
+    });
+    expect(capabilities.find((parser) => parser.id === "csv-spreadsheet-v1")).toMatchObject({
+      sourceTypes: ["TEXT"],
+      mimeTypes: expect.arrayContaining(["text/csv"]),
+      priority: 85,
+      supportsTables: true,
+      supportsOcr: false,
+      supportsSpreadsheets: true,
+      outputSchemaVersion: 1,
+    });
+    expect(capabilities.find((parser) => parser.id === "xlsx-spreadsheet-parser-v1")).toMatchObject({
+      available: false,
+      sourceTypes: ["TEXT"],
+      extensions: [".xlsx"],
+      health: "unavailable",
+      supportsTables: true,
+      supportsSpreadsheets: true,
     });
   });
 
@@ -106,6 +175,7 @@ describe("knowledge parser adapters", () => {
     expect(listKnowledgeParserCapabilities().find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
       available: true,
       profile: "docling",
+      supportsOcr: true,
       reason: null,
     });
   });
@@ -160,6 +230,28 @@ describe("knowledge parser adapters", () => {
     });
   });
 
+  it("keeps external parser markdown fallback for invalid JSON", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log('{not valid json')\" {input}";
+
+    const parsed = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+
+    expect(parsed.sourceType).toBe("PDF");
+    expect(parsed.text).toBe("{not valid json");
+    expect(parsed.diagnostics.warnings).toEqual([]);
+  });
+
+  it("warns when external parser JSON output omits text and markdown", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(JSON.stringify({sourceType:'PDF',artifacts:[{kind:'table',text:'A table'}]}))\" {input}";
+
+    const parsed = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+
+    expect(parsed.sourceType).toBe("PDF");
+    expect(parsed.text).toContain("\"artifacts\"");
+    expect(parsed.diagnostics.warnings).toContain("external_parser_json_missing_text");
+  });
+
   it("parses text and includes parser diagnostics", () => {
     const parsed = parseKnowledgeBuffer("note.txt", Buffer.from("Merhaba bilgi notu", "utf8"));
 
@@ -178,6 +270,49 @@ describe("knowledge parser adapters", () => {
     expect(parsed.parser.id).toBe("json-normalized-v1");
     expect(parsed.text).toContain('"b": 2');
     expect(parsed.text).toContain('"a": 1');
+  });
+
+  it("parses CSV into text and structured table artifacts", () => {
+    const parsed = parseKnowledgeBuffer(
+      "revenue.csv",
+      Buffer.from([
+        "Date;Account;Amount;Approved",
+        "2026-05-01;Sales;1.234,56;true",
+        "2026-05-02;Services;2500;false",
+      ].join("\n"), "utf8"),
+    );
+
+    expect(parsed.sourceType).toBe("TEXT");
+    expect(parsed.parser).toEqual({ id: "csv-spreadsheet-v1", version: 1 });
+    expect(parsed.text).toContain("| Date | Account | Amount | Approved |");
+    expect(parsed.artifacts[0]).toMatchObject({
+      kind: "table",
+      metadata: {
+        delimiter: ";",
+        sourceFormat: "csv",
+      },
+    });
+    const table = parsed.structuredArtifacts?.[0];
+    expect(table).toMatchObject({
+      kind: "table",
+      sheetName: "CSV",
+      headers: [
+        expect.objectContaining({ text: "Date", sourceCell: "A1" }),
+        expect.objectContaining({ text: "Account", sourceCell: "B1" }),
+        expect.objectContaining({ text: "Amount", sourceCell: "C1" }),
+        expect.objectContaining({ text: "Approved", sourceCell: "D1" }),
+      ],
+    });
+    if (table?.kind !== "table") throw new Error("Expected CSV structured table");
+    expect(table.rows).toHaveLength(2);
+    expect(table.rows[0]?.cells.find((cell) => cell.columnId === "c1")).toMatchObject({ value: "2026-05-01", valueType: "date" });
+    expect(table.rows[0]?.cells.find((cell) => cell.columnId === "c3")).toMatchObject({ value: 1234.56, valueType: "number" });
+    expect(table.rows[0]?.cells.find((cell) => cell.columnId === "c4")).toMatchObject({ value: true, valueType: "boolean" });
+  });
+
+  it("keeps XLSX advertised as unavailable until a real parser is configured", () => {
+    expect(getKnowledgeParserForFilename("workbook.xlsx")).toBeNull();
+    expect(() => parseKnowledgeBuffer("workbook.xlsx", Buffer.from([0x50, 0x4b, 0x03, 0x04]))).toThrow("Desteklenmeyen bilgi dosyası");
   });
 
   it("normalizes parser text without destroying markdown tables and lists", () => {

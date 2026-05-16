@@ -231,6 +231,35 @@ describe("true hybrid retrieval helpers", () => {
     expect(candidateMatchesRouteScope(legal.card, legal.chunk, routePlan)).toBe(false);
   });
 
+  it("does not use needs-review document understanding chunks for strict route scope", () => {
+    const routePlan = {
+      domain: "finance" as const,
+      subtopics: ["kap"],
+      riskLevel: "high" as const,
+      retrievalHints: ["net dönem karı"],
+      mustIncludeTerms: ["net", "dönem", "kar"],
+      mustExcludeTerms: [],
+      confidence: "high" as const,
+    };
+    const finance = candidate({
+      id: "finance-table",
+      title: "net dönem karı tablosu",
+      content: "Net dönem karı tabloda metin olarak çıkarılmıştır.",
+    });
+    finance.chunk.autoMetadata = {
+      domain: "finance",
+      subtopics: ["kap"],
+      keywords: ["net dönem karı"],
+      documentUnderstanding: {
+        version: 1,
+        answerReadiness: "needs_review",
+        strictAnswerEligible: false,
+      },
+    };
+
+    expect(candidateMatchesRouteScope(finance.card, finance.chunk, routePlan)).toBe(false);
+  });
+
   it("pre-ranks by query/route relevance before expensive model rerank", () => {
     const ranked = preRankHybridKnowledgeCandidates({
       query: "Production veritabanında migration çalıştırmadan önce ne yapmalıyım?",

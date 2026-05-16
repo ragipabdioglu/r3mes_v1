@@ -236,12 +236,23 @@ function ingestionRiskTone(level: "none" | "low" | "medium" | "high" | undefined
 }
 
 function ingestionGateLabel(doc: KnowledgeDocumentDetail): string {
+  if (doc.documentUnderstanding?.strictAnswerEligible === false) return "Answer strict kapalı";
+  if (doc.documentUnderstanding?.answerReadiness === "needs_review") return "Answer review";
+  if (doc.documentUnderstanding?.answerReadiness === "failed") return "Answer failed";
   const quality = doc.ingestionQuality;
   if (!quality) return "Ingestion gate yok";
   if (quality.thinSource) return "Thin source";
   if (!quality.strictRouteEligible) return "Strict kapalı";
   if (quality.ocrRisk === "high" || quality.tableRisk === "high") return "Temkinli gate";
   return "Strict uygun";
+}
+
+function answerReadinessTone(readiness: NonNullable<KnowledgeDocumentDetail["documentUnderstanding"]>["answerReadiness"] | undefined): string {
+  if (readiness === "ready") return "text-emerald-100 bg-emerald-500/10 ring-emerald-500/30";
+  if (readiness === "partial") return "text-cyan-100 bg-cyan-500/10 ring-cyan-500/30";
+  if (readiness === "needs_review") return "text-amber-100 bg-amber-500/10 ring-amber-500/30";
+  if (readiness === "failed") return "text-red-200 bg-red-500/10 ring-red-500/30";
+  return "text-zinc-300 bg-zinc-800/60 ring-zinc-700";
 }
 
 function sortKnowledgeItems(a: KnowledgeCollectionListItem, b: KnowledgeCollectionListItem): number {
@@ -661,6 +672,16 @@ export function KnowledgeStatusBoard() {
                                 </span>
                               </>
                             ) : null}
+                            {doc.documentUnderstanding ? (
+                              <>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${answerReadinessTone(doc.documentUnderstanding.answerReadiness)}`}>
+                                  Answer {doc.documentUnderstanding.answerReadiness}
+                                </span>
+                                <span className="rounded-full bg-zinc-800/70 px-2 py-0.5 text-[10px] font-medium text-zinc-200 ring-1 ring-zinc-700">
+                                  Structure {doc.documentUnderstanding.structureQuality} / Table {doc.documentUnderstanding.tableQuality}
+                                </span>
+                              </>
+                            ) : null}
                           </div>
                           <dl className="mt-2 grid gap-2 text-[11px] text-zinc-500 sm:grid-cols-3 lg:grid-cols-6">
                             <div>
@@ -721,6 +742,11 @@ export function KnowledgeStatusBoard() {
                           {doc.ingestionQuality?.warnings.length ? (
                             <p className="mt-1 text-[11px] leading-relaxed text-amber-100/70">
                               Ingestion warning: {doc.ingestionQuality.warnings.slice(0, 5).join(", ")}
+                            </p>
+                          ) : null}
+                          {doc.documentUnderstanding?.warnings.length || doc.documentUnderstanding?.blockers.length ? (
+                            <p className="mt-1 text-[11px] leading-relaxed text-amber-100/70">
+                              Understanding: {[...(doc.documentUnderstanding.blockers ?? []), ...(doc.documentUnderstanding.warnings ?? [])].slice(0, 5).join(", ")}
                             </p>
                           ) : null}
                         </li>

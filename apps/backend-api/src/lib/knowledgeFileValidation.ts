@@ -1,7 +1,11 @@
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
-export type KnowledgeSourceType = "pdf" | "docx" | "pptx" | "json" | "text" | "markdown" | "html";
+export type KnowledgeSourceType = "pdf" | "docx" | "pptx" | "json" | "text" | "markdown" | "html" | "csv" | "xlsx";
 export type KnowledgeScanStatus = "CLEAN" | "QUARANTINED" | "FAILED";
+export type KnowledgeScanProvider = "local_stub" | "command" | "env_override";
+export type KnowledgeScanProviderStatus = "ok" | "warning" | "error";
 
 export type KnowledgeFileValidationInput = {
   filename: string;
@@ -33,12 +37,26 @@ export type KnowledgeMalwareScanInput = {
 export type KnowledgeMalwareScanResult = {
   status: KnowledgeScanStatus;
   reason?: string;
+  diagnostics: {
+    provider: KnowledgeScanProvider;
+    status: KnowledgeScanProviderStatus;
+    durationMs: number;
+    reason?: string;
+    scannerVersion?: string;
+    signature?: string;
+  };
 };
 
 const EICAR_SIGNATURE = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
 const UTF8_REPLACEMENT = "\uFFFD";
+const LOCAL_STUB_SCANNER_VERSION = "local_stub:eicar-only:v1";
+const execFileAsync = promisify(execFile);
 
-const SUPPORTED_EXTENSIONS = new Set([".pdf", ".docx", ".pptx", ".json", ".txt", ".md", ".html", ".htm"]);
+const SUPPORTED_EXTENSIONS = new Set([".pdf", ".docx", ".pptx", ".json", ".txt", ".md", ".html", ".htm", ".csv"]);
+
+function isXlsxIntakeEnabled(): boolean {
+  return process.env.R3MES_ENABLE_XLSX_INTAKE === "1";
+}
 
 function normalizeExtension(filename: string): string {
   return path.extname(filename || "").toLowerCase();
@@ -94,8 +112,12 @@ function detectedMimeFor(extension: string): string {
       return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     case ".pptx":
       return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    case ".xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     case ".json":
       return "application/json";
+    case ".csv":
+      return "text/csv";
     case ".html":
     case ".htm":
       return "text/html";
@@ -114,8 +136,12 @@ function sourceTypeFor(extension: string): KnowledgeSourceType {
       return "docx";
     case ".pptx":
       return "pptx";
+    case ".xlsx":
+      return "xlsx";
     case ".json":
       return "json";
+    case ".csv":
+      return "csv";
     case ".html":
     case ".htm":
       return "html";
@@ -130,7 +156,7 @@ export function validateKnowledgeFile(input: KnowledgeFileValidationInput): Know
   const sourceExtension = normalizeExtension(input.filename);
   const bytes = Buffer.from(input.bytes);
 
-  if (!SUPPORTED_EXTENSIONS.has(sourceExtension)) {
+  if (!SUPPORTED_EXTENSIONS.has(sourceExtension) && !(sourceExtension === ".xlsx" && isXlsxIntakeEnabled())) {
     return {
       ok: false,
       reject: {
@@ -150,7 +176,7 @@ export function validateKnowledgeFile(input: KnowledgeFileValidationInput): Know
     };
   }
 
-  if ((sourceExtension === ".docx" || sourceExtension === ".pptx") && !isZip(bytes)) {
+  if ((sourceExtension === ".docx" || sourceExtension === ".pptx" || sourceExtension === ".xlsx") && !isZip(bytes)) {
     return {
       ok: false,
       reject: {
@@ -170,7 +196,7 @@ export function validateKnowledgeFile(input: KnowledgeFileValidationInput): Know
     };
   }
 
-  if ([".txt", ".md", ".html", ".htm"].includes(sourceExtension) && !isUtf8TextLike(bytes)) {
+  if ([".txt", ".md", ".html", ".htm", ".csv"].includes(sourceExtension) && !isUtf8TextLike(bytes)) {
     return {
       ok: false,
       reject: {
@@ -189,12 +215,119 @@ export function validateKnowledgeFile(input: KnowledgeFileValidationInput): Know
   };
 }
 
+function elapsedMs(startedAt: bigint): number {
+  return Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+}
+
+function isStrictScanMode(): boolean {
+  const raw = process.env.R3MES_KNOWLEDGE_SCAN_MODE?.trim().toLowerCase();
+  return raw === "strict" || process.env.R3MES_KNOWLEDGE_SCAN_STRICT === "1" || process.env.NODE_ENV === "production";
+}
+
+function selectedScanProvider(): KnowledgeScanProvider {
+  const raw = process.env.R3MES_KNOWLEDGE_SCAN_PROVIDER?.trim().toLowerCase();
+  if (raw === "command") return "command";
+  return "local_stub";
+}
+
+async function scanWithCommand(input: KnowledgeMalwareScanInput, startedAt: bigint): Promise<KnowledgeMalwareScanResult> {
+  const configured = process.env.R3MES_KNOWLEDGE_SCAN_COMMAND?.trim();
+  if (!configured) {
+    return {
+      status: "FAILED",
+      reason: "R3MES_KNOWLEDGE_SCAN_PROVIDER=command requires R3MES_KNOWLEDGE_SCAN_COMMAND.",
+      diagnostics: {
+        provider: "command",
+        status: "error",
+        durationMs: elapsedMs(startedAt),
+        reason: "Missing scanner command.",
+      },
+    };
+  }
+
+  const [command, ...baseArgs] = configured.split(/\s+/).filter(Boolean);
+  const args = [...baseArgs];
+  if (input.storagePath) args.push(input.storagePath);
+
+  try {
+    const result = await execFileAsync(command, args, {
+      timeout: Number(process.env.R3MES_KNOWLEDGE_SCAN_TIMEOUT_MS || 30_000),
+      maxBuffer: 1024 * 1024,
+    });
+    return {
+      status: "CLEAN",
+      diagnostics: {
+        provider: "command",
+        status: "ok",
+        durationMs: elapsedMs(startedAt),
+        reason: result.stdout.trim() || undefined,
+        scannerVersion: process.env.R3MES_KNOWLEDGE_SCAN_COMMAND_VERSION?.trim() || undefined,
+      },
+    };
+  } catch (error) {
+    const exitCode = typeof error === "object" && error && "code" in error ? (error as { code?: unknown }).code : undefined;
+    const stderr = typeof error === "object" && error && "stderr" in error ? String((error as { stderr?: unknown }).stderr || "").trim() : "";
+    const stdout = typeof error === "object" && error && "stdout" in error ? String((error as { stdout?: unknown }).stdout || "").trim() : "";
+    const reason = stderr || stdout || (error instanceof Error ? error.message : "Scanner command failed.");
+
+    if (exitCode === 1) {
+      return {
+        status: "QUARANTINED",
+        reason,
+        diagnostics: {
+          provider: "command",
+          status: "ok",
+          durationMs: elapsedMs(startedAt),
+          reason,
+          scannerVersion: process.env.R3MES_KNOWLEDGE_SCAN_COMMAND_VERSION?.trim() || undefined,
+        },
+      };
+    }
+
+    return {
+      status: "FAILED",
+      reason,
+      diagnostics: {
+        provider: "command",
+        status: "error",
+        durationMs: elapsedMs(startedAt),
+        reason,
+        scannerVersion: process.env.R3MES_KNOWLEDGE_SCAN_COMMAND_VERSION?.trim() || undefined,
+      },
+    };
+  }
+}
+
 export async function scanKnowledgeUpload(input: KnowledgeMalwareScanInput): Promise<KnowledgeMalwareScanResult> {
+  const startedAt = process.hrtime.bigint();
   const forced = process.env.R3MES_KNOWLEDGE_SCAN_RESULT?.trim().toUpperCase();
   if (forced === "QUARANTINED" || forced === "FAILED" || forced === "CLEAN") {
     return {
       status: forced,
       reason: forced === "CLEAN" ? undefined : "Configured by R3MES_KNOWLEDGE_SCAN_RESULT.",
+      diagnostics: {
+        provider: "env_override",
+        status: forced === "FAILED" ? "error" : "ok",
+        durationMs: elapsedMs(startedAt),
+        reason: "Configured by R3MES_KNOWLEDGE_SCAN_RESULT.",
+      },
+    };
+  }
+
+  const provider = selectedScanProvider();
+  if (provider === "command") return scanWithCommand(input, startedAt);
+
+  if (isStrictScanMode() && process.env.R3MES_KNOWLEDGE_SCAN_ALLOW_LOCAL_STUB !== "1") {
+    return {
+      status: "FAILED",
+      reason: "Local stub malware scanner is not allowed in production or strict scan mode.",
+      diagnostics: {
+        provider: "local_stub",
+        status: "error",
+        durationMs: elapsedMs(startedAt),
+        reason: "Configure R3MES_KNOWLEDGE_SCAN_PROVIDER=command or set R3MES_KNOWLEDGE_SCAN_ALLOW_LOCAL_STUB=1 explicitly.",
+        scannerVersion: LOCAL_STUB_SCANNER_VERSION,
+      },
     };
   }
 
@@ -203,8 +336,25 @@ export async function scanKnowledgeUpload(input: KnowledgeMalwareScanInput): Pro
     return {
       status: "QUARANTINED",
       reason: "EICAR test signature detected.",
+      diagnostics: {
+        provider: "local_stub",
+        status: "warning",
+        durationMs: elapsedMs(startedAt),
+        reason: "Deterministic local stub detected the EICAR test signature.",
+        scannerVersion: LOCAL_STUB_SCANNER_VERSION,
+        signature: "EICAR",
+      },
     };
   }
 
-  return { status: "CLEAN" };
+  return {
+    status: "CLEAN",
+    diagnostics: {
+      provider: "local_stub",
+      status: "warning",
+      durationMs: elapsedMs(startedAt),
+      reason: "Deterministic local stub only checks the EICAR test signature.",
+      scannerVersion: LOCAL_STUB_SCANNER_VERSION,
+    },
+  };
 }

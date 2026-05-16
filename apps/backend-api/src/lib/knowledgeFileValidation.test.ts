@@ -31,6 +31,44 @@ describe("validateKnowledgeFile", () => {
     if (pptx.ok) expect(pptx.detectedSourceType).toBe("pptx");
   });
 
+  it("accepts UTF-8 CSV as a spreadsheet pilot source type", () => {
+    const result = validateKnowledgeFile({
+      filename: "metrics.csv",
+      bytes: Buffer.from("Date,Amount\n2026-05-01,42\n", "utf8"),
+      declaredMime: "text/csv",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.detectedMime).toBe("text/csv");
+      expect(result.detectedSourceType).toBe("csv");
+    }
+  });
+
+  it("keeps XLSX validation behind an explicit intake flag", () => {
+    const zipBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
+
+    expect(validateKnowledgeFile({ filename: "workbook.xlsx", bytes: zipBytes }).ok).toBe(false);
+
+    vi.stubEnv("R3MES_ENABLE_XLSX_INTAKE", "1");
+    const enabled = validateKnowledgeFile({ filename: "workbook.xlsx", bytes: zipBytes });
+
+    expect(enabled.ok).toBe(true);
+    if (enabled.ok) expect(enabled.detectedSourceType).toBe("xlsx");
+  });
+
+  it("rejects fake XLSX bytes even when intake validation is enabled", () => {
+    vi.stubEnv("R3MES_ENABLE_XLSX_INTAKE", "1");
+
+    const result = validateKnowledgeFile({
+      filename: "workbook.xlsx",
+      bytes: Buffer.from("not a zip"),
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reject.error).toBe("KNOWLEDGE_FILE_MAGIC_MISMATCH");
+  });
+
   it("rejects JSON that is neither parseable nor JSON-looking", () => {
     const result = validateKnowledgeFile({
       filename: "facts.json",
@@ -48,6 +86,12 @@ describe("validateKnowledgeFile", () => {
     });
 
     expect(result.status).toBe("QUARANTINED");
+    expect(result.diagnostics).toMatchObject({
+      provider: "local_stub",
+      status: "warning",
+      signature: "EICAR",
+    });
+    expect(result.diagnostics.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("allows scanner status override from env", async () => {
@@ -59,5 +103,49 @@ describe("validateKnowledgeFile", () => {
     });
 
     expect(result.status).toBe("FAILED");
+    expect(result.diagnostics.provider).toBe("env_override");
+  });
+
+  it("fails closed when strict mode would use the local stub", async () => {
+    vi.stubEnv("R3MES_KNOWLEDGE_SCAN_MODE", "strict");
+
+    const result = await scanKnowledgeUpload({
+      filename: "clean.txt",
+      bytes: Buffer.from("clean text"),
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.diagnostics).toMatchObject({
+      provider: "local_stub",
+      status: "error",
+    });
+  });
+
+  it("allows explicit local stub opt-in under strict mode", async () => {
+    vi.stubEnv("R3MES_KNOWLEDGE_SCAN_MODE", "strict");
+    vi.stubEnv("R3MES_KNOWLEDGE_SCAN_ALLOW_LOCAL_STUB", "1");
+
+    const result = await scanKnowledgeUpload({
+      filename: "clean.txt",
+      bytes: Buffer.from("clean text"),
+    });
+
+    expect(result.status).toBe("CLEAN");
+    expect(result.diagnostics.provider).toBe("local_stub");
+  });
+
+  it("fails closed when command provider has no command configured", async () => {
+    vi.stubEnv("R3MES_KNOWLEDGE_SCAN_PROVIDER", "command");
+
+    const result = await scanKnowledgeUpload({
+      filename: "clean.txt",
+      bytes: Buffer.from("clean text"),
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.diagnostics).toMatchObject({
+      provider: "command",
+      status: "error",
+    });
   });
 });

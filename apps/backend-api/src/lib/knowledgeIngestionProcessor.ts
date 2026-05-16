@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { Prisma } from "@prisma/client";
 
+import { buildDocumentUnderstandingQuality } from "./documentUnderstandingQuality.js";
 import {
   attachKnowledgeChunkArtifactMetadata,
   buildIngestionQualityReport,
@@ -97,6 +98,20 @@ function isKnowledgeAutoMetadata(value: unknown): value is KnowledgeAutoMetadata
 function sourceFilename(document: { title: string; storagePath: string | null }): string {
   if (document.storagePath) return path.basename(document.storagePath);
   return document.title;
+}
+
+function parsedStructuredArtifacts(parsed: ReturnType<typeof parseKnowledgeBuffer>): unknown[] {
+  const record = parsed as unknown as Record<string, unknown>;
+  return Array.isArray(record.structuredArtifacts) ? record.structuredArtifacts : [];
+}
+
+function parsedPageCount(parsed: ReturnType<typeof parseKnowledgeBuffer>): number | null {
+  const explicit = (parsed as unknown as Record<string, unknown>).pageCount;
+  if (typeof explicit === "number" && Number.isInteger(explicit) && explicit > 0) return explicit;
+  const pages = parsed.artifacts
+    .map((artifact) => artifact.page)
+    .filter((page): page is number => typeof page === "number" && Number.isInteger(page) && page > 0);
+  return pages.length > 0 ? Math.max(...pages) : null;
 }
 
 async function storeEmbeddings(
@@ -303,6 +318,17 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
     documentAutoMetadata.ingestionQuality = buildIngestionQualityReport({
       parseQuality,
       sourceQuality: documentAutoMetadata.sourceQuality,
+    });
+    documentAutoMetadata.documentUnderstanding = buildDocumentUnderstandingQuality({
+      parseQuality,
+      artifacts: parsed.artifacts,
+      structuredArtifacts: parsedStructuredArtifacts(parsed),
+      parserFallbackUsed: parsed.diagnostics.warnings.some((warning) => warning.includes("fallback")),
+      parserWarnings: parsed.diagnostics.warnings,
+      tableWarnings: parseQuality.warnings.filter((warning) => warning.includes("table")),
+      ocrWarnings: parseQuality.warnings.filter((warning) => warning.includes("ocr")),
+      sourceType: parsed.sourceType,
+      pageCount: parsedPageCount(parsed),
     });
     documentAutoMetadata.parseAdapter = {
       id: parsed.parser.id,

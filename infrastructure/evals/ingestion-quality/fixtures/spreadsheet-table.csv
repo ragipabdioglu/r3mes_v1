@@ -1,0 +1,4 @@
+patient_id,metric,value,unit,note
+1,LDL,160,mg/dL,Kardiyoloji takibi onerilir
+2,HDL,44,mg/dL,Kontrol araligi planlanir
+3,Trigliserid,210,mg/dL,Beslenme ve takip notu

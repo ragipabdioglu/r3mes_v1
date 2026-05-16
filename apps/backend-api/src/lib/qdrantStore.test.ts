@@ -32,6 +32,13 @@ describe("buildQdrantPayloadMetadata", () => {
           thinSource: false,
           strictRouteEligible: true,
         },
+        documentUnderstanding: {
+          version: 1,
+          answerReadiness: "needs_review",
+          strictAnswerEligible: false,
+          tableQuality: "text_only",
+          structureQuality: "partial",
+        },
       },
       chunkMetadata: {
         keywords: ["gelir belgesi"],
@@ -51,7 +58,11 @@ describe("buildQdrantPayloadMetadata", () => {
     expect(metadata.tableRisk).toBe("high");
     expect(metadata.ocrRisk).toBe("none");
     expect(metadata.thinSource).toBe(false);
-    expect(metadata.strictRouteEligible).toBe(true);
+    expect(metadata.strictRouteEligible).toBe(false);
+    expect(metadata.answerReadiness).toBe("needs_review");
+    expect(metadata.strictAnswerEligible).toBe(false);
+    expect(metadata.tableQuality).toBe("text_only");
+    expect(metadata.structureQuality).toBe("partial");
     expect(metadata.metadataConfidence).toBe("high");
     expect(metadata.collectionProfileVersion).toBe(3);
     expect(metadata.collectionProfileTextHash).toBe("abc123");
@@ -104,6 +115,31 @@ describe("buildQdrantPayloadMetadata", () => {
       tableRisk: "low",
       ocrRisk: "high",
       thinSource: true,
+      strictRouteEligible: false,
+    });
+  });
+
+  it("uses document understanding readiness to lower strict answer eligibility without blocking payload creation", () => {
+    const metadata = buildQdrantPayloadMetadata({
+      documentMetadata: {
+        sourceQuality: "structured",
+        documentUnderstanding: {
+          version: 1,
+          answerReadiness: "needs_review",
+          strictAnswerEligible: false,
+          tableQuality: "text_only",
+          structureQuality: "partial",
+        },
+      },
+      fallbackDomain: "finance",
+    });
+
+    expect(metadata).toMatchObject({
+      sourceQuality: "structured",
+      answerReadiness: "needs_review",
+      strictAnswerEligible: false,
+      tableQuality: "text_only",
+      structureQuality: "partial",
       strictRouteEligible: false,
     });
   });

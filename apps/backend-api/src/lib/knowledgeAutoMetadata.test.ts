@@ -222,6 +222,57 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(merged?.ingestionQuality?.warnings).toContain("table_risk_high");
   });
 
+  it("aggregates document understanding readiness without requiring legacy metadata", () => {
+    const ready = inferKnowledgeAutoMetadata({
+      title: "temiz tablo",
+      content: "Hasılat ve net kar kalemleri yapılandırılmış tabloda yer alır.",
+    });
+    ready.documentUnderstanding = {
+      version: 1,
+      parseQuality: "clean",
+      structureQuality: "strong",
+      tableQuality: "structured",
+      spreadsheetQuality: "none",
+      ocrQuality: "none",
+      answerReadiness: "ready",
+      strictAnswerEligible: true,
+      blockers: [],
+      warnings: [],
+      signals: {
+        artifactCount: 1,
+        structuredArtifactCount: 1,
+        tableCount: 1,
+        structuredTableCount: 1,
+        tableCellCount: 6,
+        parserFallbackUsed: false,
+        parseWarningCount: 0,
+        ocrSpanCount: 0,
+      },
+    };
+    const review = inferKnowledgeAutoMetadata({
+      title: "metin tablo",
+      content: "Tablo metin olarak çıkarılmış ve numeric cevaplar gözden geçirilmelidir.",
+    });
+    review.documentUnderstanding = {
+      ...ready.documentUnderstanding,
+      structureQuality: "partial",
+      tableQuality: "text_only",
+      answerReadiness: "needs_review",
+      strictAnswerEligible: false,
+      blockers: ["spreadsheet_structure_missing"],
+      warnings: ["table_text_only"],
+    };
+
+    const merged = mergeKnowledgeAutoMetadata([ready, review]);
+
+    expect(merged?.documentUnderstanding).toMatchObject({
+      answerReadiness: "needs_review",
+      strictAnswerEligible: false,
+      tableQuality: "text_only",
+      structureQuality: "partial",
+    });
+  });
+
   it("builds a weighted collection profile for adaptive routing", () => {
     const legal = inferKnowledgeAutoMetadata({
       title: "boşanma hazırlık",

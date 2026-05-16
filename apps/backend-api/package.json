@@ -42,6 +42,7 @@
     "eval:readiness-baseline": "node ../../infrastructure/scripts/run-production-readiness-baseline.mjs",
     "eval:profile-health": "node --env-file=.env scripts/run-knowledge-profile-health-eval.mjs",
     "eval:parse-quality": "pnpm exec tsc -p tsconfig.json && node scripts/run-parse-quality-eval.mjs",
+    "eval:ingestion-quality": "pnpm exec tsc -p tsconfig.json && node scripts/run-ingestion-quality-eval.mjs",
     "eval:generate-collection-smoke": "node --env-file=.env scripts/generate-collection-smoke-eval.mjs",
     "eval:collection-smoke": "pnpm run eval:generate-collection-smoke && node scripts/run-grounded-response-eval.mjs --file artifacts/evals/generated-collection-smoke/golden.jsonl --out artifacts/evals/generated-collection-smoke/latest.json",
     "eval:generate-feedback-regression": "node --env-file=.env scripts/generate-feedback-regression-eval.mjs",

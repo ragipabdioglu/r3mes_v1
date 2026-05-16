@@ -37,6 +37,12 @@ interface KnowledgeMetadataProfile {
     thinSource?: boolean;
     strictRouteEligible?: boolean;
   };
+  documentUnderstanding?: {
+    answerReadiness?: "ready" | "partial" | "needs_review" | "failed";
+    strictAnswerEligible?: boolean;
+    tableQuality?: "none" | "text_only" | "structured";
+    structureQuality?: "strong" | "partial" | "weak";
+  };
 }
 
 export interface KnowledgeCollectionAccessItem {
@@ -88,6 +94,7 @@ function readMetadataProfile(
   const stringArray = (input: unknown): string[] =>
     Array.isArray(input) ? input.filter((item): item is string => typeof item === "string") : [];
   const ingestionQuality = readIngestionQuality(record.ingestionQuality);
+  const documentUnderstanding = readDocumentUnderstanding(record.documentUnderstanding);
   const profile = record.profile && typeof record.profile === "object" ? record.profile as Record<string, unknown> : null;
   if (profile) {
     const domains = stringArray(profile.domains);
@@ -119,6 +126,7 @@ function readMetadataProfile(
         confidence: profile.confidence === "high" || profile.confidence === "medium" || profile.confidence === "low" ? profile.confidence : undefined,
         sourceQuality: profile.sourceQuality === "structured" || profile.sourceQuality === "inferred" || profile.sourceQuality === "thin" ? profile.sourceQuality : undefined,
         ingestionQuality,
+        documentUnderstanding,
       };
     }
   }
@@ -136,12 +144,13 @@ function readMetadataProfile(
     summary: typeof record.summary === "string" ? record.summary : "",
     questionsAnswered: stringArray(record.questionsAnswered),
     ingestionQuality,
+    documentUnderstanding,
   };
 }
 
 function readProfileVersionMetadata(value: unknown): Pick<
   KnowledgeMetadataProfile,
-  "profileVersion" | "lastProfiledAt" | "sourceQuality" | "confidence" | "tableConcepts" | "ingestionQuality"
+  "profileVersion" | "lastProfiledAt" | "sourceQuality" | "confidence" | "tableConcepts" | "ingestionQuality" | "documentUnderstanding"
 > | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -161,6 +170,7 @@ function readProfileVersionMetadata(value: unknown): Pick<
       : undefined,
     tableConcepts: stringArray(profile.tableConcepts),
     ingestionQuality: readIngestionQuality(record.ingestionQuality),
+    documentUnderstanding: readDocumentUnderstanding(record.documentUnderstanding),
   };
 }
 
@@ -174,6 +184,32 @@ function readIngestionQuality(value: unknown): KnowledgeMetadataProfile["ingesti
     ocrRisk: validRisk(record.ocrRisk),
     thinSource: typeof record.thinSource === "boolean" ? record.thinSource : undefined,
     strictRouteEligible: typeof record.strictRouteEligible === "boolean" ? record.strictRouteEligible : undefined,
+  };
+}
+
+function readDocumentUnderstanding(value: unknown): KnowledgeMetadataProfile["documentUnderstanding"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const answerReadiness =
+    record.answerReadiness === "ready" ||
+    record.answerReadiness === "partial" ||
+    record.answerReadiness === "needs_review" ||
+    record.answerReadiness === "failed"
+      ? record.answerReadiness
+      : undefined;
+  const tableQuality =
+    record.tableQuality === "none" || record.tableQuality === "text_only" || record.tableQuality === "structured"
+      ? record.tableQuality
+      : undefined;
+  const structureQuality =
+    record.structureQuality === "strong" || record.structureQuality === "partial" || record.structureQuality === "weak"
+      ? record.structureQuality
+      : undefined;
+  return {
+    answerReadiness,
+    strictAnswerEligible: typeof record.strictAnswerEligible === "boolean" ? record.strictAnswerEligible : undefined,
+    tableQuality,
+    structureQuality,
   };
 }
 
@@ -271,6 +307,8 @@ function collectionProfileVersion(value: unknown): string {
     profile?.ingestionQuality?.thinSource === true ? "thin:true" : "",
     profile?.ingestionQuality?.ocrRisk ?? "",
     profile?.ingestionQuality?.tableRisk ?? "",
+    profile?.documentUnderstanding?.answerReadiness ?? "",
+    profile?.documentUnderstanding?.strictAnswerEligible === false ? "answer:false" : "",
     profile?.tableConcepts.slice(0, 8).join("|") ?? "",
   ].join(":");
 }
@@ -409,6 +447,9 @@ export function readKnowledgeCollectionStrictRouteEligible(
   if (ingestionQuality?.strictRouteEligible === false) return false;
   if (ingestionQuality?.thinSource === true) return false;
   if (ingestionQuality?.ocrRisk === "high") return false;
+  const documentUnderstanding = metadata?.documentUnderstanding;
+  if (documentUnderstanding?.strictAnswerEligible === false) return false;
+  if (documentUnderstanding?.answerReadiness === "needs_review" || documentUnderstanding?.answerReadiness === "failed") return false;
   return true;
 }
 
@@ -721,6 +762,10 @@ function sourceQualityScore(profile: KnowledgeMetadataProfile): number {
             : profile.confidence === "medium"
               ? 55
               : 35;
+  const documentUnderstanding = profile.documentUnderstanding;
+  if (documentUnderstanding?.strictAnswerEligible === false) return Math.min(base, 28);
+  if (documentUnderstanding?.answerReadiness === "failed") return Math.min(base, 20);
+  if (documentUnderstanding?.answerReadiness === "needs_review") return Math.min(base, 28);
   const ingestionQuality = profile.ingestionQuality;
   if (!ingestionQuality) return base;
   if (ingestionQuality.strictRouteEligible === false || ingestionQuality.thinSource === true) return Math.min(base, 28);

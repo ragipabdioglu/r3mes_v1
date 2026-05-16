@@ -5,6 +5,7 @@ import { embedKnowledgeText } from "./knowledgeEmbedding.js";
 import type { DocumentArtifactKind, KnowledgeChunkDraft, KnowledgeSourceType } from "./knowledgeText.js";
 import { routeQuery } from "./queryRouter.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
+import type { DocumentUnderstandingQuality } from "./documentUnderstandingQuality.js";
 import type { KnowledgeParseQuality } from "./knowledgeParseQuality.js";
 import { getDecisionConfig } from "./decisionConfig.js";
 
@@ -23,6 +24,7 @@ export interface KnowledgeAutoMetadata {
   sourceQuality: "structured" | "inferred" | "thin";
   parseQuality?: KnowledgeParseQuality;
   ingestionQuality?: IngestionQualityReport;
+  documentUnderstanding?: DocumentUnderstandingQuality;
   parseAdapter?: {
     id: string;
     version: number;
@@ -250,6 +252,58 @@ function aggregateIngestionQuality(items: KnowledgeAutoMetadata[], parseQuality?
       ...(parseQuality?.warnings ?? []),
       thinSource ? "thin_source" : "",
     ], 24),
+  };
+}
+
+function readDocumentUnderstandingQuality(value: unknown): DocumentUnderstandingQuality | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Partial<DocumentUnderstandingQuality>;
+  if (record.version !== 1) return undefined;
+  if (record.answerReadiness !== "ready" && record.answerReadiness !== "partial" && record.answerReadiness !== "needs_review" && record.answerReadiness !== "failed") {
+    return undefined;
+  }
+  if (typeof record.strictAnswerEligible !== "boolean") return undefined;
+  return record as DocumentUnderstandingQuality;
+}
+
+function aggregateDocumentUnderstanding(items: KnowledgeAutoMetadata[]): DocumentUnderstandingQuality | undefined {
+  const reports = items
+    .map((item) => readDocumentUnderstandingQuality(item.documentUnderstanding))
+    .filter((item): item is DocumentUnderstandingQuality => Boolean(item));
+  if (reports.length === 0) return undefined;
+  const readinessRank = { ready: 0, partial: 1, needs_review: 2, failed: 3 } as const;
+  const structureRank = { strong: 0, partial: 1, weak: 2 } as const;
+  const tableRank = { none: 0, structured: 1, text_only: 2 } as const;
+  const spreadsheetRank = { none: 0, structured: 1, partial: 2, failed: 3 } as const;
+  const ocrRank = { none: 0, usable: 1, weak: 2 } as const;
+  const maxByRank = <T extends string>(values: T[], ranks: Record<T, number>): T =>
+    values.sort((a, b) => ranks[b] - ranks[a])[0];
+  return {
+    version: 1,
+    parseQuality: reports.some((report) => report.parseQuality === "noisy")
+      ? "noisy"
+      : reports.some((report) => report.parseQuality === "usable")
+        ? "usable"
+        : "clean",
+    structureQuality: maxByRank(reports.map((report) => report.structureQuality), structureRank),
+    tableQuality: maxByRank(reports.map((report) => report.tableQuality), tableRank),
+    spreadsheetQuality: maxByRank(reports.map((report) => report.spreadsheetQuality), spreadsheetRank),
+    ocrQuality: maxByRank(reports.map((report) => report.ocrQuality), ocrRank),
+    answerReadiness: maxByRank(reports.map((report) => report.answerReadiness), readinessRank),
+    strictAnswerEligible: reports.every((report) => report.strictAnswerEligible !== false),
+    blockers: unique(reports.flatMap((report) => report.blockers), 24),
+    warnings: unique(reports.flatMap((report) => report.warnings), 32),
+    signals: {
+      artifactCount: reports.reduce((sum, report) => sum + report.signals.artifactCount, 0),
+      structuredArtifactCount: reports.reduce((sum, report) => sum + report.signals.structuredArtifactCount, 0),
+      tableCount: reports.reduce((sum, report) => sum + report.signals.tableCount, 0),
+      structuredTableCount: reports.reduce((sum, report) => sum + report.signals.structuredTableCount, 0),
+      tableCellCount: reports.reduce((sum, report) => sum + report.signals.tableCellCount, 0),
+      pageCount: reports.reduce((sum, report) => sum + (report.signals.pageCount ?? 0), 0) || undefined,
+      parserFallbackUsed: reports.some((report) => report.signals.parserFallbackUsed),
+      parseWarningCount: reports.reduce((sum, report) => sum + report.signals.parseWarningCount, 0),
+      ocrSpanCount: reports.reduce((sum, report) => sum + report.signals.ocrSpanCount, 0),
+    },
   };
 }
 
@@ -682,6 +736,7 @@ export function mergeKnowledgeAutoMetadata(
     sourceType: items.find((item) => item.sourceType)?.sourceType,
   };
   mergedBase.ingestionQuality = aggregateIngestionQuality(items, mergedBase.parseQuality);
+  mergedBase.documentUnderstanding = aggregateDocumentUnderstanding(items);
   return {
     ...mergedBase,
     profile: buildKnowledgeCollectionProfile(items, { now: opts.now, previousProfile }) ?? undefined,

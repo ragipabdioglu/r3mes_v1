@@ -12,6 +12,8 @@ import {
   type KnowledgeParserRegistryEntry,
   type KnowledgeSourceType,
 } from "./parserRegistry.js";
+import { parseCsvSpreadsheet } from "./spreadsheetKnowledgeParser.js";
+import type { StructuredDocumentArtifact } from "./structuredDocumentArtifact.js";
 
 export type {
   KnowledgeExternalParserProfile,
@@ -51,6 +53,7 @@ export interface ParsedKnowledgeDocument {
   sourceType: KnowledgeSourceType;
   text: string;
   artifacts: DocumentArtifact[];
+  structuredArtifacts?: StructuredDocumentArtifact[];
   parser: {
     id: string;
     version: number;
@@ -73,6 +76,7 @@ function parsedDocument(opts: {
   originalBytes: number;
   sourceType?: KnowledgeSourceType;
   artifacts?: DocumentArtifact[];
+  structuredArtifacts?: StructuredDocumentArtifact[];
   warnings?: string[];
 }): ParsedKnowledgeDocument {
   const sourceType = opts.sourceType ?? opts.adapter.sourceType;
@@ -84,6 +88,7 @@ function parsedDocument(opts: {
     sourceType,
     text,
     artifacts: normalizeDocumentArtifacts(opts.artifacts, text, sourceType),
+    structuredArtifacts: opts.structuredArtifacts,
     parser: {
       id: opts.adapter.id,
       version: opts.adapter.version,
@@ -346,10 +351,30 @@ const JSON_PARSER: KnowledgeParserAdapter<ParsedKnowledgeDocument> = {
     }),
 };
 
+const CSV_PARSER: KnowledgeParserAdapter<ParsedKnowledgeDocument> = {
+  id: "csv-spreadsheet-v1",
+  version: 1,
+  sourceType: "TEXT",
+  extensions: [".csv"],
+  inputMode: "utf8",
+  parse: ({ filename, buffer, raw }) => {
+    const parsed = parseCsvSpreadsheet(raw, filename);
+    return parsedDocument({
+      adapter: CSV_PARSER,
+      text: parsed.text,
+      originalBytes: buffer.length,
+      artifacts: parsed.artifacts,
+      structuredArtifacts: parsed.structuredArtifacts,
+      warnings: parsed.warnings,
+    });
+  },
+};
+
 const BUILT_IN_KNOWLEDGE_PARSERS: KnowledgeParserAdapter<ParsedKnowledgeDocument>[] = [
   TEXT_PARSER,
   MARKDOWN_PARSER,
   JSON_PARSER,
+  CSV_PARSER,
 ];
 
 function isLikelyUrlLine(line: string): boolean {
@@ -607,15 +632,17 @@ function externalDocumentParser(): KnowledgeParserAdapter<ParsedKnowledgeDocumen
           throw new Error(`External document parser failed with exit code ${result.status ?? "unknown"}; check parser logs`);
         }
         const parsedOutput = parseExternalParserOutput(String(result.stdout ?? ""), filename);
+        const warnings = [
+          ...(String(result.stderr ?? "").trim() ? ["external_parser_stderr"] : []),
+          ...parsedOutput.warnings,
+        ];
         return parsedDocument({
           adapter,
           sourceType: parsedOutput.sourceType,
           text: parsedOutput.text,
           artifacts: parsedOutput.artifacts,
           originalBytes: buffer.length,
-          warnings: String(result.stderr ?? "").trim()
-            ? ["external_parser_stderr"]
-            : [],
+          warnings,
         });
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -629,6 +656,7 @@ function parseExternalParserOutput(stdout: string, filename: string): {
   sourceType: KnowledgeSourceType;
   text: string;
   artifacts?: DocumentArtifact[];
+  warnings: string[];
 } {
   const trimmed = stdout.trim();
   const fallbackSourceType = sourceTypeForExtension(filename);
@@ -668,8 +696,15 @@ function parseExternalParserOutput(stdout: string, filename: string): {
           sourceType: sourceType === "TEXT" ? fallbackSourceType : sourceType,
           text,
           artifacts,
+          warnings: [],
         };
       }
+      return {
+        sourceType: sourceType === "TEXT" ? fallbackSourceType : sourceType,
+        text: trimmed,
+        artifacts: inferDocumentArtifactsFromText(trimmed),
+        warnings: ["external_parser_json_missing_text"],
+      };
     } catch {
       // Keep compatibility with legacy parser commands that print Markdown.
     }
@@ -678,6 +713,7 @@ function parseExternalParserOutput(stdout: string, filename: string): {
     sourceType: fallbackSourceType,
     text: trimmed,
     artifacts: inferDocumentArtifactsFromText(trimmed),
+    warnings: [],
   };
 }
 
@@ -688,30 +724,88 @@ function builtInParserEntries(): KnowledgeParserRegistryEntry<ParsedKnowledgeDoc
       id: parser.id,
       version: parser.version,
       sourceType: parser.sourceType,
+      sourceTypes: [parser.sourceType],
       extensions: [...parser.extensions],
+      mimeTypes: parser.id === "csv-spreadsheet-v1" ? ["text/csv", "application/csv", "text/plain"] : builtInParserMimeTypes(parser.sourceType),
       inputMode: parser.inputMode,
       available: true,
       kind: "built_in" as const,
       health: "ready" as const,
+      priority: parser.id === "csv-spreadsheet-v1" ? 85 : builtInParserPriority(parser.sourceType),
+      supportsTables: parser.sourceType === "MARKDOWN" || parser.id === "csv-spreadsheet-v1",
+      supportsOcr: false,
+      supportsSpreadsheets: parser.id === "csv-spreadsheet-v1",
+      outputSchemaVersion: 1,
       reason: null,
     },
   }));
 }
 
+function builtInParserMimeTypes(sourceType: KnowledgeSourceType): string[] {
+  if (sourceType === "TEXT") return ["text/plain"];
+  if (sourceType === "MARKDOWN") return ["text/markdown", "text/x-markdown"];
+  if (sourceType === "JSON") return ["application/json"];
+  return [];
+}
+
+function builtInParserPriority(sourceType: KnowledgeSourceType): number {
+  if (sourceType === "JSON") return 80;
+  if (sourceType === "MARKDOWN") return 70;
+  return 60;
+}
+
+function xlsxParserCapability(): KnowledgeParserCapability {
+  const intakeFlagEnabled = process.env.R3MES_ENABLE_XLSX_INTAKE === "1";
+  return {
+    id: "xlsx-spreadsheet-parser-v1",
+    version: 1,
+    sourceType: "TEXT",
+    sourceTypes: ["TEXT"],
+    extensions: [".xlsx"],
+    mimeTypes: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    inputMode: "binary",
+    available: false,
+    kind: "built_in",
+    health: "unavailable",
+    priority: 40,
+    supportsTables: true,
+    supportsOcr: false,
+    supportsSpreadsheets: true,
+    outputSchemaVersion: 1,
+    reason: intakeFlagEnabled
+      ? "XLSX intake validation is enabled, but no XLSX parser dependency is configured in this build."
+      : "XLSX intake is behind R3MES_ENABLE_XLSX_INTAKE and parsing is unavailable without an XLSX parser dependency.",
+  };
+}
+
 function externalParserCapability(): KnowledgeParserCapability {
   const externalConfigured = Boolean(process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim());
   const profile = externalParserProfile();
+  const sourceTypes: KnowledgeSourceType[] = ["PDF", "DOCX", "PPTX", "HTML"];
   return {
     id: "external-document-parser-v1",
     version: 1,
     sourceType: "PDF",
+    sourceTypes,
     extensions: [".pdf", ".docx", ".pptx", ".html", ".htm"],
+    mimeTypes: [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "text/html",
+      "application/xhtml+xml",
+    ],
     inputMode: "binary",
     available: externalConfigured,
     kind: "external",
     profile,
     reason: externalConfigured ? null : missingExternalParserReason(profile),
     health: externalConfigured ? "ready" : "unavailable",
+    priority: 50,
+    supportsTables: true,
+    supportsOcr: profile === "docling" || profile === "marker",
+    supportsSpreadsheets: false,
+    outputSchemaVersion: 1,
   };
 }
 
@@ -719,6 +813,10 @@ function knowledgeParserRegistry() {
   const external = externalDocumentParser();
   return createKnowledgeParserRegistry<ParsedKnowledgeDocument>([
     ...builtInParserEntries(),
+    {
+      adapter: null,
+      capability: xlsxParserCapability(),
+    },
     {
       adapter: external,
       capability: externalParserCapability(),

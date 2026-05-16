@@ -144,6 +144,22 @@ describe("knowledge ingestion processor", () => {
       expect.stringMatching(/^\[[\d.,-]+\]$/),
       "embedding_chunk_0",
     );
+    expect(prisma.knowledgeDocument.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "doc_1" },
+        data: expect.objectContaining({
+          autoMetadata: expect.objectContaining({
+            parseQuality: expect.objectContaining({ level: expect.any(String) }),
+            ingestionQuality: expect.objectContaining({ version: 1 }),
+            documentUnderstanding: expect.objectContaining({
+              version: 1,
+              answerReadiness: expect.any(String),
+              strictAnswerEligible: expect.any(Boolean),
+            }),
+          }),
+        }),
+      }),
+    );
     expect(prisma.ingestionJob.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
         where: { jobId: "job_1" },

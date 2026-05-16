@@ -103,6 +103,29 @@ export const KnowledgeIngestionQualityReportSchema = z.object({
   strictRouteEligible: z.boolean(),
   warnings: z.array(z.string()),
 });
+export const KnowledgeDocumentUnderstandingQualitySchema = z.object({
+  version: z.literal(1),
+  parseQuality: KnowledgeParseQualityLevelSchema,
+  structureQuality: z.enum(["strong", "partial", "weak"]),
+  tableQuality: z.enum(["none", "text_only", "structured"]),
+  spreadsheetQuality: z.enum(["none", "structured", "partial", "failed"]),
+  ocrQuality: z.enum(["none", "usable", "weak"]),
+  answerReadiness: z.enum(["ready", "partial", "needs_review", "failed"]),
+  strictAnswerEligible: z.boolean(),
+  blockers: z.array(z.string()),
+  warnings: z.array(z.string()),
+  signals: z.object({
+    artifactCount: z.number().int().nonnegative(),
+    structuredArtifactCount: z.number().int().nonnegative(),
+    tableCount: z.number().int().nonnegative(),
+    structuredTableCount: z.number().int().nonnegative(),
+    tableCellCount: z.number().int().nonnegative(),
+    pageCount: z.number().int().positive().optional(),
+    parserFallbackUsed: z.boolean(),
+    parseWarningCount: z.number().int().nonnegative(),
+    ocrSpanCount: z.number().int().nonnegative(),
+  }),
+});
 export const KnowledgeIndexingStateSchema = z.object({
   status: KnowledgeIndexingStatusSchema,
   vectorIndexStatus: KnowledgeIndexingStatusSchema,
@@ -163,6 +186,7 @@ export const KnowledgeDocumentListItemSchema: z.ZodType<KnowledgeDocumentListIte
   parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
   parseQualityWarnings: z.array(z.string()).optional(),
   ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
+  documentUnderstanding: KnowledgeDocumentUnderstandingQualitySchema.nullable().optional(),
   inferredTopic: z.string().nullable().optional(),
   inferredTags: z.array(z.string()).optional(),
   createdAt: z.string().min(1),
@@ -209,6 +233,7 @@ export const KnowledgeUploadAcceptedResponseSchema: z.ZodType<KnowledgeUploadAcc
   parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
   parseQualityWarnings: z.array(z.string()).optional(),
   ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
+  documentUnderstanding: KnowledgeDocumentUnderstandingQualitySchema.nullable().optional(),
 });
 
 export const KnowledgeIngestionJobStatusResponseSchema: z.ZodType<KnowledgeIngestionJobStatusResponse> = z.object({
@@ -243,6 +268,11 @@ export const KnowledgeIngestionJobStatusResponseSchema: z.ZodType<KnowledgeInges
   errorCode: z.string().nullable().optional(),
   errorMessage: z.string().nullable().optional(),
   indexingError: z.string().nullable().optional(),
+  parseQualityScore: z.number().min(0).max(100).nullable().optional(),
+  parseQualityLevel: KnowledgeParseQualityLevelSchema.nullable().optional(),
+  parseQualityWarnings: z.array(z.string()).optional(),
+  ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
+  documentUnderstanding: KnowledgeDocumentUnderstandingQualitySchema.nullable().optional(),
   startedAt: z.string().nullable().optional(),
   completedAt: z.string().nullable().optional(),
   createdAt: z.string().nullable().optional(),
