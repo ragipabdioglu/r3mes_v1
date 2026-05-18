@@ -11,6 +11,7 @@ export * from "./payloadTypes.js";
 export * from "./schemas.js";
 export * from "./contractGuards.js";
 export * from "./r3mesTestnetMock.js";
+export * from "./runtime.js";
 
 /** Geriye dönük: `packages/qa-sandbox` TS köprüsü */
 export const R3MES_SHARED_TYPES_PLACEHOLDER = true;

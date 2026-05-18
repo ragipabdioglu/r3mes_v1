@@ -35,6 +35,11 @@ def test_runtime_health_exposes_provider_configuration(client) -> None:
     body = r.json()
 
     assert body["status"] == "ok"
+    assert body["runtime_profile"]["version"] == 1
+    assert body["runtime_profile"]["name"] == "local-dev"
+    assert body["runtime_profile"]["strictness"] == "dev_fallback_allowed"
+    assert body["runtime_profile"]["lora"]["role"] == "behavior_persona_only"
+    assert body["runtime_profile"]["lora"]["budget_policy"] == "warn_continue"
     assert body["inference"]["backend"] == "llama_cpp"
     assert body["embedding"]["configured_model"] == "BAAI/bge-m3"
     assert body["embedding"]["loaded"] is False

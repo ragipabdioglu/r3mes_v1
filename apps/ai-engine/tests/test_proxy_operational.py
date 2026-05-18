@@ -326,8 +326,19 @@ async def test_stream_response_has_stable_diagnostic_headers(
 
     resp = await proxy_chat_completions(settings, state, body)
     assert resp.headers.get("X-R3MES-Inference-Stage") == "stream"
-    assert resp.headers.get("X-R3MES-Diagnostics") == "see_server_logs"
+    assert resp.headers.get("X-R3MES-Diagnostics") == "structured"
+    assert resp.headers.get("X-R3MES-Stream-Diagnostics") == "r3mes_runtime_event"
+    assert resp.headers.get("X-R3MES-Runtime-Profile") == "local-dev"
+    assert resp.headers.get("X-R3MES-Lora-Role") == "behavior_persona_only"
     assert "X-R3MES-Adapter-Cache" not in resp.headers
+
+    first_chunk = b""
+    async for chunk in resp.body_iterator:
+        first_chunk = chunk
+        break
+    assert first_chunk.startswith(b"event: r3mes_runtime\n")
+    assert b'"adapterCache":"hit"' in first_chunk
+    assert b'"loraRole":"behavior_persona_only"' in first_chunk
 
 
 @pytest.mark.asyncio
@@ -382,6 +393,8 @@ async def test_base_only_request_skips_lora_and_preserves_context(
     assert ensure_called is False
     assert post_lora_called is False
     assert resp.headers["X-R3MES-Adapter-Cache"] == "none"
+    assert resp.headers["X-R3MES-Runtime-Profile"] == "local-dev"
+    assert resp.headers["X-R3MES-Lora-Role"] == "behavior_persona_only"
     assert captured_json is not None
     assert captured_json["messages"][0] == {"role": "system", "content": "stay concise"}
     assert captured_json["messages"][1] == {"role": "system", "content": "source: adapter optional"}
@@ -443,3 +456,76 @@ def test_base_only_request_skips_lora_and_preserves_context_sync(
     assert captured_json["messages"][0] == {"role": "system", "content": "stay concise"}
     assert captured_json["messages"][1] == {"role": "system", "content": "source: adapter optional"}
     assert captured_json["messages"][2] == {"role": "user", "content": "ping"}
+
+
+@pytest.mark.asyncio
+async def test_lora_lock_budget_warns_and_continues_in_local_dev(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _fresh_lora_lock(monkeypatch)
+
+    async def fake_ensure(_s: Settings, _c: str) -> AdapterArtifact:
+        p = tmp_path / "budget-dev.gguf"
+        p.write_bytes(b"x")
+        return AdapterArtifact(p.resolve(), True, 0.0)
+
+    monkeypatch.setattr("r3mes_ai_engine.proxy_service.ensure_adapter_gguf", fake_ensure)
+    _patch_async_client(monkeypatch, _transport_ok(tmp_path))
+
+    settings = _settings_skip_llama(tmp_path).model_copy(update={"lora_max_lock_wait_ms": 1.0})
+    state = AppState()
+    body = _chat_body()
+
+    with caplog.at_level("WARNING"):
+        await proxy_module._lora_lock.acquire()
+        task = asyncio.create_task(proxy_chat_completions(settings, state, body))
+        await asyncio.sleep(0.02)
+        proxy_module._lora_lock.release()
+        resp = await task
+
+    from starlette.responses import Response
+
+    assert isinstance(resp, Response)
+    assert float(resp.headers["X-R3MES-Lock-Wait-Ms"]) > 1.0
+    assert resp.headers["X-R3MES-Adapter-Cache"] == "hit"
+    assert "r3mes_lora_lock_budget_exceeded" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_lora_lock_budget_fails_in_strict_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fresh_lora_lock(monkeypatch)
+    ensure_called = False
+
+    async def fake_ensure(_s: Settings, _c: str) -> AdapterArtifact:
+        nonlocal ensure_called
+        ensure_called = True
+        p = tmp_path / "budget-strict.gguf"
+        p.write_bytes(b"x")
+        return AdapterArtifact(p.resolve(), True, 0.0)
+
+    monkeypatch.setattr("r3mes_ai_engine.proxy_service.ensure_adapter_gguf", fake_ensure)
+    _patch_async_client(monkeypatch, _transport_ok(tmp_path))
+
+    settings = _settings_skip_llama(tmp_path).model_copy(
+        update={"runtime_profile": "pilot-rag", "lora_max_lock_wait_ms": 1.0}
+    )
+    state = AppState()
+    body = _chat_body()
+
+    await proxy_module._lora_lock.acquire()
+    task = asyncio.create_task(proxy_chat_completions(settings, state, body))
+    await asyncio.sleep(0.02)
+    proxy_module._lora_lock.release()
+
+    with pytest.raises(HTTPException) as ei:
+        await task
+
+    d = ei.value.detail
+    assert ensure_called is False
+    assert ei.value.status_code == 503
+    assert d["stage"] == "lora_lock_wait_budget"
+    assert d["runtime_profile"] == "pilot-rag"
+    assert d["adapter_disabled_reason"] == "lora_lock_wait_budget_exceeded"
+    assert d["lock_wait_ms"] > 1.0

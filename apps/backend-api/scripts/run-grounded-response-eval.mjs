@@ -190,6 +190,20 @@ const RUNTIME_PATH_ALIASES = new Map([
   ["strictRuntime", ["runtime.strictRuntime", "runtimeHealth.strictRuntime"]],
 ]);
 
+const RUNTIME_LINEAGE_PATH_ALIASES = new Map([
+  ["answerPath", ["answerPath", "answerPath.name"]],
+  ["answerPathName", ["answerPath.name", "answerPath"]],
+  ["profileName", ["profileName", "runtimeProfileName", "profile.name"]],
+  ["qwen.called", ["qwen.called", "qwenCalled"]],
+  ["qwen.validatorCalled", ["qwen.validatorCalled", "validatorCalled"]],
+  ["validatorCalled", ["qwen.validatorCalled", "validatorCalled"]],
+  ["embedding.fallbackUsed", ["embedding.fallbackUsed", "embeddingFallbackUsed"]],
+  ["embeddingFallbackUsed", ["embedding.fallbackUsed", "embeddingFallbackUsed"]],
+  ["reranker.fallbackUsed", ["reranker.fallbackUsed", "rerankerFallbackUsed"]],
+  ["rerankerFallbackUsed", ["reranker.fallbackUsed", "rerankerFallbackUsed"]],
+  ["retrieval.qdrantFallbackUsed", ["retrieval.qdrantFallbackUsed", "qdrantFallbackUsed"]],
+]);
+
 function readTracePathValue(rootValue, path, aliases = TRACE_PATH_ALIASES) {
   const candidatePaths = aliases.get(path) ?? [path];
   for (const candidatePath of candidatePaths) {
@@ -209,6 +223,148 @@ function assertExpectedPaths(label, expectations, rootValue, aliases = TRACE_PAT
       `${label}.${path}${aliasSuffix} expected ${formatAssertionValue(expected)}, got ${formatAssertionValue(value)}`,
     ];
   });
+}
+
+function readBooleanValue(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+  }
+  return null;
+}
+
+function readNumberValue(...values) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return null;
+}
+
+function readStringValue(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function stageCount(chatTrace, name) {
+  return Array.isArray(chatTrace?.stages)
+    ? chatTrace.stages.filter((stage) => stage?.name === name).length
+    : 0;
+}
+
+function firstStageCalled(chatTrace, name) {
+  return stageCount(chatTrace, name) > 0;
+}
+
+function readRuntimeLineage(response, retrievalDebug, chatTrace, safetyGate) {
+  const explicit =
+    response?.runtimeLineage ??
+    response?.runtime_lineage ??
+    chatTrace?.runtimeLineage ??
+    chatTrace?.runtime_lineage ??
+    retrievalDebug?.runtimeLineage ??
+    retrievalDebug?.runtime_lineage ??
+    null;
+  const runtime = retrievalDebug?.runtime ?? retrievalDebug?.runtimeHealth ?? {};
+  const reranker = retrievalDebug?.retrievalDiagnostics?.reranker ?? {};
+  const answerPathName = readStringValue(
+    explicit?.answerPath?.name,
+    explicit?.answerPath,
+    explicit?.answerPathName,
+    chatTrace?.answerPath?.name,
+  );
+  const aiEngineStageCount = stageCount(chatTrace, "ai_engine");
+  const qwenCallCount = readNumberValue(explicit?.qwen?.callCount, explicit?.qwenCallCount, aiEngineStageCount) ?? 0;
+  const qwenCalled = readBooleanValue(explicit?.qwen?.called, explicit?.qwenCalled) ?? qwenCallCount > 0;
+  const validatorCalled =
+    readBooleanValue(explicit?.qwen?.validatorCalled, explicit?.validatorCalled) ??
+    firstStageCalled(chatTrace, "validator");
+  const embeddingFallbackUsed = readBooleanValue(
+    explicit?.embedding?.fallbackUsed,
+    explicit?.embeddingFallbackUsed,
+    runtime?.embeddingFallbackUsed,
+    retrievalDebug?.runtimeHealth?.embeddingFallbackUsed,
+  );
+  const rerankerFallbackUsed = readBooleanValue(
+    explicit?.reranker?.fallbackUsed,
+    explicit?.rerankerFallbackUsed,
+    runtime?.rerankerFallbackUsed,
+    retrievalDebug?.runtimeHealth?.rerankerFallbackUsed,
+    reranker?.fallbackUsed,
+  );
+  const qdrantFallbackUsed = readBooleanValue(
+    explicit?.retrieval?.qdrantFallbackUsed,
+    explicit?.qdrantFallbackUsed,
+    runtime?.qdrantFallbackUsed,
+    runtime?.retrievalEngineActual === "hybrid" && runtime?.retrievalEngineRequested === "qdrant",
+  );
+
+  return {
+    version: readNumberValue(explicit?.version) ?? 1,
+    profileName: readStringValue(explicit?.profileName, explicit?.runtimeProfileName, runtime?.runtimeProfileName) ?? null,
+    answerPath: answerPathName,
+    stream: readBooleanValue(explicit?.stream, response?.stream) ?? false,
+    qwen: {
+      called: qwenCalled,
+      validatorCalled,
+      callCount: qwenCallCount,
+      runtime: readStringValue(explicit?.qwen?.runtime, runtime?.chatRuntime) ?? null,
+      model: readStringValue(explicit?.qwen?.model, response?.model) ?? null,
+    },
+    composer: {
+      deterministicUsed:
+        readBooleanValue(explicit?.composer?.deterministicUsed, explicit?.composerDeterministicUsed) ??
+        (answerPathName ? !answerPathName.startsWith("ai_engine") : null),
+      plannedComposerUsed: readBooleanValue(explicit?.composer?.plannedComposerUsed) ?? null,
+      fallbackTemplateUsed: readBooleanValue(explicit?.composer?.fallbackTemplateUsed) ?? null,
+    },
+    retrieval: {
+      mode: readStringValue(explicit?.retrieval?.mode, retrievalDebug?.retrievalMode) ?? null,
+      qdrantUsed: readBooleanValue(explicit?.retrieval?.qdrantUsed, runtime?.retrievalEngineActual === "qdrant") ?? null,
+      qdrantFallbackUsed,
+    },
+    embedding: {
+      requestedProvider: readStringValue(explicit?.embedding?.requestedProvider, runtime?.embeddingProviderRequested) ?? null,
+      actualProvider: readStringValue(explicit?.embedding?.actualProvider, runtime?.embeddingProviderActual) ?? null,
+      fallbackUsed: embeddingFallbackUsed,
+      model: readStringValue(explicit?.embedding?.model, runtime?.embeddingModel) ?? null,
+      dimension: readNumberValue(explicit?.embedding?.dimension, runtime?.embeddingDimension),
+    },
+    reranker: {
+      requestedMode: readStringValue(explicit?.reranker?.requestedMode, runtime?.rerankerModeRequested) ?? null,
+      actualMode: readStringValue(explicit?.reranker?.actualMode, runtime?.rerankerModeActual, reranker?.mode) ?? null,
+      provider: readStringValue(explicit?.reranker?.provider, reranker?.provider) ?? null,
+      fallbackUsed: rerankerFallbackUsed,
+      fallbackReason: readStringValue(explicit?.reranker?.fallbackReason, runtime?.rerankerFallbackReason, reranker?.fallbackReason) ?? null,
+    },
+    safety: {
+      fallbackMode: readStringValue(explicit?.safety?.fallbackMode, safetyGate?.fallbackMode) ?? null,
+      blockedReasonCount: readNumberValue(explicit?.safety?.blockedReasonCount, safetyGate?.blockedReasonCount) ?? 0,
+    },
+  };
+}
+
+function isStrictRuntimeProfile(profile) {
+  return ["eval", "pilot-rag", "production"].includes(String(profile ?? "").trim());
+}
+
+function runtimeFallbackFailures(testCase, runtimeLineage) {
+  const strictProfile = isStrictRuntimeProfile(
+    testCase.runtimeProfile ?? runtimeLineage?.profileName ?? process.env.R3MES_RUNTIME_PROFILE,
+  );
+  if (testCase.forbidRuntimeFallback !== true && !strictProfile) return [];
+  const failures = [];
+  if (runtimeLineage?.embedding?.fallbackUsed === true) {
+    failures.push("provider_strict_failure:embedding_fallback");
+  }
+  if (runtimeLineage?.reranker?.fallbackUsed === true) {
+    failures.push("provider_strict_failure:reranker_fallback");
+  }
+  if (runtimeLineage?.retrieval?.qdrantFallbackUsed === true) {
+    failures.push("provider_strict_failure:qdrant_fallback");
+  }
+  return failures;
 }
 
 function wordCount(value) {
@@ -388,6 +544,7 @@ function scoreCase(testCase, response) {
   }
 
   const reranker = retrievalDebug?.retrievalDiagnostics?.reranker;
+  const runtimeLineage = readRuntimeLineage(response, retrievalDebug, chatTrace, safetyGate);
   if (readBooleanEnv("R3MES_REQUIRE_REAL_RERANKER", false) && reranker?.fallbackUsed === true) {
     failures.push(`reranker_real_required_fallback:${reranker?.fallbackReason ?? reranker?.mode ?? "unknown"}`);
   }
@@ -402,7 +559,9 @@ function scoreCase(testCase, response) {
 
   failures.push(...assertExpectedPaths("expectTrace", testCase.expectTrace, retrievalDebug));
   failures.push(...assertExpectedPaths("expectRuntime", testCase.expectRuntime, retrievalDebug, RUNTIME_PATH_ALIASES));
+  failures.push(...assertExpectedPaths("expectRuntimeLineage", testCase.expectRuntimeLineage, runtimeLineage, RUNTIME_LINEAGE_PATH_ALIASES));
   failures.push(...assertExpectedPaths("expectAnswerPlan", testCase.expectAnswerPlan, answerPlan));
+  failures.push(...runtimeFallbackFailures(testCase, runtimeLineage));
 
   if (Number.isFinite(Number(testCase.minRerankerInputCandidates))) {
     const actual = Number(reranker?.inputCandidateCount ?? 0);
@@ -1018,7 +1177,14 @@ function scoreCase(testCase, response) {
         }
       : null,
     latencyMs: response?._latencyMs ?? null,
-    answerPathName: chatTrace?.answerPath?.name ?? null,
+    answerPathName: runtimeLineage.answerPath ?? null,
+    runtimeProfileName: runtimeLineage.profileName,
+    runtimeLineage,
+    qwenCalled: runtimeLineage.qwen.called,
+    validatorCalled: runtimeLineage.qwen.validatorCalled,
+    embeddingFallbackUsed: runtimeLineage.embedding.fallbackUsed,
+    rerankerFallbackUsed: runtimeLineage.reranker.fallbackUsed,
+    qdrantFallbackUsed: runtimeLineage.retrieval.qdrantFallbackUsed,
     answerPlan,
     debugContract: debugContractScore.contract,
     traceTotalDurationMs: Number.isFinite(Number(chatTrace?.totalDurationMs)) ? Number(chatTrace.totalDurationMs) : null,
@@ -1320,6 +1486,23 @@ function summarizeRerankerQuality(results) {
     inputCandidatesByBudgetMode: summarizeNumericByGroup(casesWithReranker, "budgetMode", "rerankerInputCandidateCount"),
     latencyByRerankerMode: summarizeNumericByGroup(casesWithReranker, "rerankerMode", "latencyMs"),
   };
+}
+
+function ratio(results, predicate) {
+  if (results.length === 0) return 0;
+  return Number((results.filter(predicate).length / results.length).toFixed(3));
+}
+
+function collectProviderStrictFailures(results) {
+  return results.flatMap((result) =>
+    (Array.isArray(result.failures) ? result.failures : [])
+      .filter((failure) => String(failure).startsWith("provider_strict_failure:"))
+      .map((failure) => ({
+        id: result.id,
+        bucket: result.bucket,
+        failure,
+      })),
+  );
 }
 
 function summarizeBudgetQuality(results) {
@@ -1631,11 +1814,18 @@ async function main() {
   const rerankerQuality = summarizeRerankerQuality(results);
   const answerQualityTrends = summarizeAnswerQualityTrends(results);
   const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality });
+  const providerStrictFailures = collectProviderStrictFailures(results);
   const summary = {
     total: results.length,
     passed,
     failed: results.length - passed,
     passRate: results.length === 0 ? 0 : Number((passed / results.length).toFixed(3)),
+    answerPathDistribution: results.reduce((acc, result) => increment(acc, result.answerPathName), {}),
+    qwenCallRatio: ratio(results, (result) => result.qwenCalled === true),
+    validatorCallRatio: ratio(results, (result) => result.validatorCalled === true),
+    embeddingFallbackRatio: ratio(results, (result) => result.embeddingFallbackUsed === true),
+    rerankerFallbackRatio: ratio(results, (result) => result.rerankerFallbackUsed === true),
+    providerStrictFailures,
     routeDecisionModes: results.reduce((acc, result) => {
       const key = result.routeDecisionMode ?? "missing";
       acc[key] = (acc[key] ?? 0) + 1;

@@ -24,6 +24,33 @@ describe("buildEvalDebugContract", () => {
         sourceLimitCount: 0,
       },
       sourceSelection: { selectionMode: "selected" },
+      runtimeLineage: {
+        version: 1,
+        profileName: "eval",
+        answerPath: "rag_fast_path",
+        stream: false,
+        qwen: {
+          called: false,
+          validatorCalled: false,
+          callCount: 0,
+        },
+        composer: {
+          deterministicUsed: true,
+        },
+        retrieval: {
+          mode: "true_hybrid",
+          qdrantUsed: true,
+        },
+        embedding: {
+          fallbackUsed: false,
+        },
+        reranker: {
+          fallbackUsed: false,
+        },
+        safety: {
+          blockedReasonCount: 0,
+        },
+      },
     });
 
     expect(contract.version).toBe(EVAL_DEBUG_CONTRACT_VERSION);
@@ -35,5 +62,10 @@ describe("buildEvalDebugContract", () => {
     });
     expect(contract.evidenceBundleDiagnostics?.structuredFactCount).toBe(1);
     expect(contract.sourceSelection).toEqual({ selectionMode: "selected" });
+    expect(contract.runtimeLineage).toMatchObject({
+      answerPath: "rag_fast_path",
+      qwen: { called: false },
+      embedding: { fallbackUsed: false },
+    });
   });
 });

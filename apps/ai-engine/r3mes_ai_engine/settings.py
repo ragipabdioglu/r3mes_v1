@@ -10,6 +10,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="R3MES_", env_file=".env", extra="ignore")
 
+    runtime_profile: Literal["local-dev", "eval", "pilot-rag", "production", "peft-lab"] = Field(
+        default="local-dev",
+        description="Runtime profile contract: local-dev permits fallback; eval/pilot/production are strict.",
+    )
+
     inference_backend: Literal["llama_cpp", "transformers_peft"] = Field(
         default="llama_cpp",
         description="Aktif inference backend'i. llama_cpp legacy, transformers_peft yeni ana yol.",
@@ -126,6 +131,13 @@ class Settings(BaseSettings):
     lora_copy_target_override: Path | None = Field(
         default=None,
         description="İndirilen LoRA GGUF'un yazılacağı yol (--lora ile aynı); boşsa GET /lora-adapters path",
+    )
+    lora_max_lock_wait_ms: float | None = Field(
+        default=None,
+        description=(
+            "LoRA global lock bekleme bütçesi. local-dev aşımda warn/continue; "
+            "eval/pilot/production profile'larında retryable hata."
+        ),
     )
 
 

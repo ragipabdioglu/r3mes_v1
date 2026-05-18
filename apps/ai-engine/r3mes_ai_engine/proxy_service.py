@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -17,6 +19,7 @@ from r3mes_ai_engine.gguf_adapter import AdapterArtifact, ensure_adapter_gguf
 from r3mes_ai_engine.hf_inference import hf_chat_completions
 from r3mes_ai_engine.inference_errors import classify_httpx_cause, inference_error_detail
 from r3mes_ai_engine.llama_bootstrap import llama_public_base
+from r3mes_ai_engine.runtime_profile import is_strict_runtime_profile
 from r3mes_ai_engine.schemas_openai import ChatCompletionRequest
 from r3mes_ai_engine.settings import Settings
 from r3mes_ai_engine.state import AppState
@@ -52,6 +55,41 @@ def _log_inference_line(
         artifact.resolve_ms if artifact else 0.0,
         f"{swap_ms:.1f}" if swap_ms is not None else "-",
     )
+
+
+@asynccontextmanager
+async def _lora_lock_budget(settings: Settings, adapter_label: str) -> AsyncIterator[float]:
+    wait_t0 = time.monotonic()
+    await _lora_lock.acquire()
+    lock_wait_ms = (time.monotonic() - wait_t0) * 1000.0
+    budget_ms = settings.lora_max_lock_wait_ms
+    try:
+        if budget_ms is not None and lock_wait_ms > budget_ms:
+            if is_strict_runtime_profile(settings):
+                raise HTTPException(
+                    status_code=503,
+                    detail=inference_error_detail(
+                        "lora_lock_wait_budget",
+                        "LoRA lock wait budget aşıldı; strict runtime profile isteği reddetti.",
+                        adapter_label,
+                        extra={
+                            "lock_wait_ms": round(lock_wait_ms, 2),
+                            "max_lock_wait_ms": budget_ms,
+                            "runtime_profile": settings.runtime_profile,
+                            "adapter_disabled_reason": "lora_lock_wait_budget_exceeded",
+                        },
+                    ),
+                )
+            logger.warning(
+                "r3mes_lora_lock_budget_exceeded profile=%s adapter=%s lock_wait_ms=%.1f max_lock_wait_ms=%.1f policy=warn_continue",
+                settings.runtime_profile,
+                adapter_label,
+                lock_wait_ms,
+                budget_ms,
+            )
+        yield lock_wait_ms
+    finally:
+        _lora_lock.release()
 
 
 async def _post_lora_adapter(settings: Settings, adapter_path: str, adapter_cid: str) -> float:
@@ -238,7 +276,76 @@ def _success_headers(
         "X-R3MES-Adapter-Resolve-Ms": f"{artifact.resolve_ms:.2f}",
         "X-R3MES-Lora-Swap-Ms": f"{swap_ms:.2f}",
         "X-R3MES-Lora-Slot": str(settings.lora_adapter_slot_id),
+        "X-R3MES-Runtime-Profile": settings.runtime_profile,
+        "X-R3MES-Lora-Role": "behavior_persona_only",
     }
+
+
+def _diagnostic_headers(
+    *,
+    settings: Settings,
+    adapter_cache: str,
+    lock_wait_ms: float,
+    resolve_ms: float,
+    swap_ms: float,
+    disabled_reason: str | None = None,
+) -> dict[str, str]:
+    headers = {
+        "X-R3MES-Adapter-Cache": adapter_cache,
+        "X-R3MES-Lock-Wait-Ms": f"{lock_wait_ms:.2f}",
+        "X-R3MES-Adapter-Resolve-Ms": f"{resolve_ms:.2f}",
+        "X-R3MES-Lora-Swap-Ms": f"{swap_ms:.2f}",
+        "X-R3MES-Lora-Slot": str(settings.lora_adapter_slot_id),
+        "X-R3MES-Runtime-Profile": settings.runtime_profile,
+        "X-R3MES-Lora-Role": "behavior_persona_only",
+    }
+    if disabled_reason is not None:
+        headers["X-R3MES-Lora-Disabled-Reason"] = disabled_reason
+    return headers
+
+
+def _stream_runtime_event(
+    *,
+    settings: Settings,
+    request_id: str | None,
+    adapter_cid: str | None,
+    adapter_cache: str,
+    lock_wait_ms: float,
+    resolve_ms: float,
+    swap_ms: float,
+    disabled_reason: str | None = None,
+) -> bytes:
+    payload = {
+        "version": 1,
+        "requestId": request_id,
+        "runtimeProfile": settings.runtime_profile,
+        "runtime": "llama_cpp",
+        "model": settings.default_model_name,
+        "stream": True,
+        "adapterRequested": adapter_cid is not None,
+        "adapterApplied": adapter_cache not in {"none", "disabled"},
+        "adapterCid": adapter_cid,
+        "adapterCache": adapter_cache,
+        "adapterDisabledReason": disabled_reason,
+        "loraRole": "behavior_persona_only",
+        "loraLockWaitMs": round(lock_wait_ms, 2),
+        "adapterResolveMs": round(resolve_ms, 2),
+        "loraSwapMs": round(swap_ms, 2),
+        "loraSlot": settings.lora_adapter_slot_id,
+    }
+    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
+    return f"event: r3mes_runtime\ndata: {data}\n\n".encode("utf-8")
+
+
+def _adapter_cache_label(
+    artifact: AdapterArtifact | None,
+    local_adapter_path: Path | None,
+) -> str:
+    if artifact is not None:
+        return "hit" if artifact.cache_hit else "miss"
+    if local_adapter_path is not None:
+        return "local"
+    return "none"
 
 
 async def proxy_chat_completions(
@@ -277,9 +384,8 @@ async def proxy_chat_completions(
             lock_wait_ms = 0.0
             swap_ms: float | None = None
             if adapter_cid or local_adapter_path is not None:
-                wait_t0 = time.monotonic()
-                async with _lora_lock:
-                    lock_wait_ms = (time.monotonic() - wait_t0) * 1000.0
+                async with _lora_lock_budget(settings, adapter_label) as measured_wait_ms:
+                    lock_wait_ms = measured_wait_ms
                     if local_adapter_path is not None:
                         swap_ms = await _post_lora_adapter(settings, str(local_adapter_path), adapter_label)
                     elif adapter_cid:
@@ -299,9 +405,8 @@ async def proxy_chat_completions(
 
                         swap_ms = await _post_lora_adapter(settings, str(artifact.path), adapter_cid)
             elif settings.lora_slot_path is not None:
-                wait_t0 = time.monotonic()
-                async with _lora_lock:
-                    lock_wait_ms = (time.monotonic() - wait_t0) * 1000.0
+                async with _lora_lock_budget(settings, adapter_label) as measured_wait_ms:
+                    lock_wait_ms = measured_wait_ms
                     swap_ms = await _post_lora_scale(settings, 0.0, adapter_label)
 
             _log_inference_line(
@@ -311,6 +416,17 @@ async def proxy_chat_completions(
                 artifact=artifact,
                 lock_wait_ms=lock_wait_ms,
                 swap_ms=swap_ms,
+            )
+
+            adapter_cache = _adapter_cache_label(artifact, local_adapter_path)
+            yield _stream_runtime_event(
+                settings=settings,
+                request_id=request_id,
+                adapter_cid=adapter_label if local_adapter_path is not None else adapter_cid,
+                adapter_cache=adapter_cache,
+                lock_wait_ms=lock_wait_ms,
+                resolve_ms=artifact.resolve_ms if artifact else 0.0,
+                swap_ms=swap_ms or 0.0,
             )
 
             try:
@@ -348,7 +464,10 @@ async def proxy_chat_completions(
             media_type="text/event-stream",
             headers={
                 "X-R3MES-Inference-Stage": "stream",
-                "X-R3MES-Diagnostics": "see_server_logs",
+                "X-R3MES-Diagnostics": "structured",
+                "X-R3MES-Stream-Diagnostics": "r3mes_runtime_event",
+                "X-R3MES-Runtime-Profile": settings.runtime_profile,
+                "X-R3MES-Lora-Role": "behavior_persona_only",
             },
         )
 
@@ -356,9 +475,8 @@ async def proxy_chat_completions(
     lock_wait_ms = 0.0
     swap_ms: float = 0.0
     if adapter_cid or local_adapter_path is not None:
-        wait_t0 = time.monotonic()
-        async with _lora_lock:
-            lock_wait_ms = (time.monotonic() - wait_t0) * 1000.0
+        async with _lora_lock_budget(settings, adapter_label) as measured_wait_ms:
+            lock_wait_ms = measured_wait_ms
             if local_adapter_path is not None:
                 swap_ms = await _post_lora_adapter(settings, str(local_adapter_path), adapter_label)
             elif adapter_cid:
@@ -378,9 +496,8 @@ async def proxy_chat_completions(
 
                 swap_ms = await _post_lora_adapter(settings, str(artifact.path), adapter_cid)
     elif settings.lora_slot_path is not None:
-        wait_t0 = time.monotonic()
-        async with _lora_lock:
-            lock_wait_ms = (time.monotonic() - wait_t0) * 1000.0
+        async with _lora_lock_budget(settings, adapter_label) as measured_wait_ms:
+            lock_wait_ms = measured_wait_ms
             swap_ms = await _post_lora_scale(settings, 0.0, adapter_label)
 
     _log_inference_line(
@@ -424,19 +541,19 @@ async def proxy_chat_completions(
     if artifact is not None:
         hdr = _success_headers(artifact, lock_wait_ms, swap_ms, settings)
     elif local_adapter_path is not None:
-        hdr = {
-            "X-R3MES-Adapter-Cache": "local",
-            "X-R3MES-Lock-Wait-Ms": f"{lock_wait_ms:.2f}",
-            "X-R3MES-Adapter-Resolve-Ms": "0.00",
-            "X-R3MES-Lora-Swap-Ms": f"{swap_ms:.2f}",
-            "X-R3MES-Lora-Slot": str(settings.lora_adapter_slot_id),
-        }
+        hdr = _diagnostic_headers(
+            settings=settings,
+            adapter_cache="local",
+            lock_wait_ms=lock_wait_ms,
+            resolve_ms=0.0,
+            swap_ms=swap_ms,
+        )
     else:
-        hdr = {
-            "X-R3MES-Adapter-Cache": "none",
-            "X-R3MES-Lock-Wait-Ms": f"{lock_wait_ms:.2f}",
-            "X-R3MES-Adapter-Resolve-Ms": "0.00",
-            "X-R3MES-Lora-Swap-Ms": "0.00",
-            "X-R3MES-Lora-Slot": str(settings.lora_adapter_slot_id),
-        }
+        hdr = _diagnostic_headers(
+            settings=settings,
+            adapter_cache="none",
+            lock_wait_ms=lock_wait_ms,
+            resolve_ms=0.0,
+            swap_ms=0.0,
+        )
     return Response(content=r.content, status_code=r.status_code, media_type=ct, headers=hdr)

@@ -12,6 +12,7 @@ from r3mes_ai_engine.llama_bootstrap import bootstrap_llama, stop_llama_server
 from r3mes_ai_engine.routes.chat import router as chat_router
 from r3mes_ai_engine.routes.embeddings import router as embeddings_router
 from r3mes_ai_engine.routes.rerank import router as rerank_router
+from r3mes_ai_engine.runtime_profile import runtime_profile_summary
 from r3mes_ai_engine.settings import get_settings
 from r3mes_ai_engine.state import AppState
 
@@ -63,6 +64,7 @@ def build_app() -> FastAPI:
         state = app.state.r3mes_state
         return {
             "status": "ok",
+            "runtime_profile": runtime_profile_summary(settings),
             "inference": {
                 "backend": settings.inference_backend,
                 "default_model": settings.default_model_name,

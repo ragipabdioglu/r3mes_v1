@@ -4,6 +4,7 @@ import type { HybridCandidate } from "./hybridRetrieval.js";
 import { createHash } from "node:crypto";
 import { getAlignmentConfig } from "./alignmentConfig.js";
 import { getDecisionConfig } from "./decisionConfig.js";
+import { getRuntimeFallbackPolicy } from "./runtimeFallbackPolicy.js";
 
 const AI_ENGINE_DEFAULT = "http://127.0.0.1:8000";
 
@@ -104,7 +105,8 @@ function getAiEngineBase(): string {
 }
 
 function realRerankerRequired(): boolean {
-  return getDecisionConfig().reranker.requireRealProvider;
+  return getRuntimeFallbackPolicy().failChatWhenQualityProviderFallbackUsed ||
+    getDecisionConfig().reranker.requireRealProvider;
 }
 
 function isRealRerankerProvider(provider: string | undefined): boolean {

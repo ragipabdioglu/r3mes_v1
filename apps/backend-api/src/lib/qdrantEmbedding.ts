@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { tokenizeKnowledgeText } from "./knowledgeEmbedding.js";
+import { getRuntimeFallbackPolicy } from "./runtimeFallbackPolicy.js";
 
 const AI_ENGINE_DEFAULT = "http://127.0.0.1:8000";
 const DEFAULT_QDRANT_VECTOR_SIZE = 1024;
@@ -37,8 +38,8 @@ function getAiEngineBase(): string {
   return (process.env.R3MES_AI_ENGINE_URL ?? process.env.AI_ENGINE_URL ?? AI_ENGINE_DEFAULT).replace(/\/$/, "");
 }
 
-function realEmbeddingsRequired(): boolean {
-  return process.env.R3MES_REQUIRE_REAL_EMBEDDINGS === "1" || process.env.NODE_ENV === "production";
+function deterministicEmbeddingFallbackAllowed(): boolean {
+  return getRuntimeFallbackPolicy().allowDeterministicEmbeddingFallback;
 }
 
 export function getQdrantVectorSize(): number {
@@ -103,8 +104,8 @@ async function embedWithAiEngine(texts: string[]): Promise<{ vectors: number[][]
 
 export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promise<QdrantEmbeddingResult> {
   const provider = (process.env.R3MES_EMBEDDING_PROVIDER ?? "deterministic").trim().toLowerCase();
-  const requireReal = realEmbeddingsRequired();
-  if (requireReal && provider !== "ai-engine" && provider !== "bge-m3") {
+  const allowDeterministicFallback = deterministicEmbeddingFallbackAllowed();
+  if (!allowDeterministicFallback && provider !== "ai-engine" && provider !== "bge-m3") {
     throw new Error(`real embeddings required but R3MES_EMBEDDING_PROVIDER=${provider || "deterministic"}`);
   }
   if (provider === "ai-engine" || provider === "bge-m3") {
@@ -124,7 +125,7 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
         };
       }
       console.warn("[qdrant-embedding] vector size mismatch, deterministic fallback");
-      if (requireReal) {
+      if (!allowDeterministicFallback) {
         throw new Error(`real embeddings required but ai-engine returned wrong vector size: expected=${dimension}, model=${model ?? "unknown"}`);
       }
       const fallbackVectors = texts.map((text) => embedTextDeterministicForQdrant(text));
@@ -141,7 +142,7 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (requireReal) {
+      if (!allowDeterministicFallback) {
         if (message.startsWith("real embeddings required")) {
           throw error;
         }

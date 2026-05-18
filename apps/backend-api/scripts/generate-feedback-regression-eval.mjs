@@ -125,6 +125,67 @@ function normalizeFeedbackBadAnswerPayload(metadata) {
   return payload;
 }
 
+function readBooleanValue(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+  }
+  return null;
+}
+
+function readNumberValue(...values) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return null;
+}
+
+function readRuntimeLineage(metadata) {
+  const source = metadataObject(
+    metadata.runtimeLineage ??
+    metadata.runtime_lineage ??
+    metadata.feedbackRuntimeLineage ??
+    metadata.chatTrace?.runtimeLineage,
+  );
+  if (Object.keys(source).length === 0) return null;
+  const answerPath =
+    readOptionalString(source.answerPath?.name) ??
+    readOptionalString(source.answerPath) ??
+    readOptionalString(source.answerPathName);
+  const qwenCalled = readBooleanValue(source.qwen?.called, source.qwenCalled);
+  const validatorCalled = readBooleanValue(source.qwen?.validatorCalled, source.validatorCalled);
+  const embeddingFallbackUsed = readBooleanValue(source.embedding?.fallbackUsed, source.embeddingFallbackUsed);
+  const rerankerFallbackUsed = readBooleanValue(source.reranker?.fallbackUsed, source.rerankerFallbackUsed);
+  const safetyFallbackMode = readOptionalString(source.safety?.fallbackMode) ?? readOptionalString(source.safetyFallbackMode);
+  const safetyBlockedReasonCount = readNumberValue(source.safety?.blockedReasonCount, source.safetyBlockedReasonCount) ?? 0;
+  return {
+    ...(answerPath ? { answerPath } : {}),
+    qwenCalled: qwenCalled ?? false,
+    validatorCalled: validatorCalled ?? false,
+    embeddingFallbackUsed: embeddingFallbackUsed ?? false,
+    rerankerFallbackUsed: rerankerFallbackUsed ?? false,
+    ...(safetyFallbackMode ? { safetyFallbackMode } : {}),
+    safetyBlockedReasonCount,
+  };
+}
+
+function classifyBadAnswerRuntime(runtimeLineage) {
+  if (!runtimeLineage) return null;
+  if (runtimeLineage.embeddingFallbackUsed || runtimeLineage.rerankerFallbackUsed) {
+    return "provider_fallback_bad";
+  }
+  if (runtimeLineage.safetyFallbackMode || runtimeLineage.safetyBlockedReasonCount > 0) {
+    return "safety_bad";
+  }
+  if (runtimeLineage.qwenCalled) {
+    return "qwen_bad";
+  }
+  if (runtimeLineage.answerPath || runtimeLineage.qwenCalled === false) {
+    return "composer_bad";
+  }
+  return null;
+}
+
 function resolveRepoFile(value) {
   return isAbsolute(value) ? value : resolve(repoRoot, value);
 }
@@ -322,6 +383,8 @@ function caseFromFeedback(row) {
 
   if (row.kind === "BAD_ANSWER") {
     const qualityPayload = normalizeFeedbackBadAnswerPayload(metadata);
+    const runtimeLineage = readRuntimeLineage(metadata);
+    const runtimeFailureBucket = classifyBadAnswerRuntime(runtimeLineage);
     const forbiddenBuckets = qualityPayload ? [qualityPayload.qualityBucket] : [];
     const requiredAnswerTerms = mergeUniqueStrings(
       readStringArray(metadata.requiredAnswerTerms),
@@ -347,6 +410,19 @@ function caseFromFeedback(row) {
       : null;
     return {
       ...base,
+      ...(runtimeFailureBucket ? {
+        bucket: `${base.bucket}_${runtimeFailureBucket}`,
+        runtimeFailureBucket,
+      } : {}),
+      ...(runtimeLineage ? {
+        feedbackRuntimeLineage: runtimeLineage,
+        ...(runtimeFailureBucket === "provider_fallback_bad" ? { forbidRuntimeFallback: true } : {}),
+        expectRuntimeLineage: {
+          ...(runtimeLineage.answerPath ? { answerPath: runtimeLineage.answerPath } : {}),
+          "qwen.called": runtimeLineage.qwenCalled,
+          validatorCalled: runtimeLineage.validatorCalled,
+        },
+      } : {}),
       ...(requiredAnswerTerms.length > 0 ? { requiredAnswerTerms } : {}),
       ...(forbiddenAnswerTerms.length > 0 ? { forbiddenAnswerTerms } : {}),
       ...(qualityPayload ? {

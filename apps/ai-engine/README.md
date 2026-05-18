@@ -9,7 +9,7 @@
 
 **Adapter formatı:** IPFS’ten tek dosya olarak gelen artefaktın **llama.cpp uyumlu LoRA GGUF** (`.gguf`) olması gerekir; `lora-adapters` ile yüklenebilen başka bir dosya formatı bu yol üzerinde desteklenmez.
 
-**Ürün (tek kaynak):** “Chat neden base modelle (LoRA’sız) çalışmıyor?” — **[INTEGRATION_CONTRACT §3.5.1](../../docs/api/INTEGRATION_CONTRACT.md)**. **Adapter-only** bilinçli **feature-gap**tir; **bug** olarak triage edilmez.
+**Ürün (tek kaynak):** “Chat neden base modelle (LoRA’sız) çalışmıyor?” — **[INTEGRATION_CONTRACT §3.5.1](../../docs/api/INTEGRATION_CONTRACT.md)**. **Adapter-only** bilinçli **feature-gap**tir; **bug** olarak triage edilmez. LoRA yalnız **behavior/persona** katmanıdır; RAG factual correctness, kaynak seçimi veya KAP/tablo doğruluğu için bilgi taşıyıcısı değildir.
 
 ### İstek sözleşmesi (inference surface)
 
@@ -57,25 +57,28 @@ Doğrudan bu servise giden istemciler base-only veya optional `adapter_cid` ile 
 ### Gözlemlenebilirlik
 
 - İsteğe bağlı **`X-Request-ID`** başlığı log satırındaki `request_id` ile eşleşir.
-- **Non-stream** başarılı yanıtlar: `X-R3MES-Adapter-Cache` (`hit`/`miss`), `X-R3MES-Lock-Wait-Ms`, `X-R3MES-Adapter-Resolve-Ms`, `X-R3MES-Lora-Swap-Ms`, `X-R3MES-Lora-Slot`.
-- **Stream:** tam süre başlıkta yok; aynı özet sunucu loglarında `r3mes_inference` ile yazılır (`X-R3MES-Diagnostics: see_server_logs`).
+- **`GET /health/runtime`:** `runtime_profile` summary döndürür (`name`, `strictness`, chat/embedding/reranker/stream/LoRA doctrine). `lora.role` her zaman `behavior_persona_only`; `max_lock_wait_ms` ve strict/dev budget policy burada görünür.
+- **Non-stream** başarılı yanıtlar: `X-R3MES-Adapter-Cache` (`hit`/`miss`/`local`/`none`), `X-R3MES-Lock-Wait-Ms`, `X-R3MES-Adapter-Resolve-Ms`, `X-R3MES-Lora-Swap-Ms`, `X-R3MES-Lora-Slot`, `X-R3MES-Runtime-Profile`, `X-R3MES-Lora-Role`.
+- **Stream:** `X-R3MES-Diagnostics: structured` ve `X-R3MES-Stream-Diagnostics: r3mes_runtime_event` başlıkları gelir. İlk SSE event `event: r3mes_runtime` olup `runtimeProfile`, `adapterCache`, `adapterApplied`, `adapterDisabledReason`, `loraLockWaitMs`, `adapterResolveMs`, `loraSwapMs` ve `loraRole` alanlarını taşır; token/chunk SSE formatı upstream’den geldiği gibi devam eder.
 
 Önbellek, lock ve hot-swap davranışının özeti: [docs/ADAPTER_CACHE_AND_SWAP.md](docs/ADAPTER_CACHE_AND_SWAP.md).
 
 ### Seri LoRA kullanımı
 
-Aynı anda tek istek LoRA yükleme + tamamlama yapar (`asyncio.Lock`); eşzamanlı istekler sıraya girer. Bekleme süresi log’da `lock_wait_ms` olarak görünür.
+Aynı anda tek istek LoRA yükleme + tamamlama yapar (`asyncio.Lock`); eşzamanlı istekler sıraya girer. Bekleme süresi log’da `lock_wait_ms`, header/SSE metadata’da `X-R3MES-Lock-Wait-Ms` / `loraLockWaitMs` olarak görünür. `R3MES_LORA_MAX_LOCK_WAIT_MS` ayarlanırsa `local-dev` aşımda uyarır ve devam eder; `eval`, `pilot-rag` ve `production` profilleri aşımda retryable `lora_lock_wait_budget` hatası döndürür.
 
 ## Ortam değişkenleri (özet)
 
 | Değişken | Açıklama |
 |----------|-----------|
+| `R3MES_RUNTIME_PROFILE` | `local-dev` (varsayılan), `eval`, `pilot-rag`, `production`, `peft-lab`; strict profiller kalite fallback/LoRA budget ihlallerini fail eder |
 | `R3MES_SKIP_LLAMA` | `true`: test / geliştirme; llama subprocess başlatılmaz; chat yine de şema ve route için çağrılabilir (proxy mock ile test) |
 | `R3MES_IPFS_GATEWAY` | GGUF indirme (varsayılan 9080 — 8080 çakışmasını önlemek için) |
 | `R3MES_FROZEN_CORE_CID` | Donmuş model IPFS CID |
 | `R3MES_FROZEN_CORE_HF_URL` | Varsayılan Qwen GGUF HF indirme URL’i |
 | `R3MES_LLAMA_INTERNAL_PORT` | `llama-server` portu (varsayılan 8080) |
 | `R3MES_ADAPTER_CACHE_DIR` | LoRA .gguf önbelleği |
+| `R3MES_LORA_MAX_LOCK_WAIT_MS` | LoRA lock bekleme bütçesi; local-dev warn/continue, strict profillerde fail |
 
 ## Docker
 

@@ -1,3 +1,4 @@
+import type { RuntimeLineage } from "@r3mes/shared-types";
 import type { AnswerPlan } from "./answerPlan.js";
 import type { AnswerQualityFinding } from "./answerQualityValidator.js";
 import type { EvidenceBundleDiagnostics } from "./evidenceBundle.js";
@@ -17,6 +18,7 @@ export interface EvalDebugContract {
   evidenceBundleDiagnostics?: EvidenceBundleDiagnostics | null;
   sourceSelection?: unknown;
   retrievalDebug?: unknown;
+  runtimeLineage?: RuntimeLineage;
 }
 
 export function buildEvalDebugContract(input: {
@@ -27,6 +29,7 @@ export function buildEvalDebugContract(input: {
   evidenceBundleDiagnostics?: EvidenceBundleDiagnostics | null;
   sourceSelection?: unknown;
   retrievalDebug?: unknown;
+  runtimeLineage?: RuntimeLineage;
 }): EvalDebugContract {
   const findings = input.answerQualityFindings ?? [];
   return {
@@ -41,5 +44,6 @@ export function buildEvalDebugContract(input: {
     evidenceBundleDiagnostics: input.evidenceBundleDiagnostics ?? null,
     sourceSelection: input.sourceSelection,
     retrievalDebug: input.retrievalDebug,
+    runtimeLineage: input.runtimeLineage,
   };
 }

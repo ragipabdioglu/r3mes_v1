@@ -21,6 +21,7 @@ import type { R3mesWalletAuthHeaders } from "@/lib/api/wallet-auth-types";
 import { isDevTestAdapter } from "@/lib/types/adapter-dev-test";
 import type {
   ChatRetrievalDebug,
+  ChatRuntimeLineageSummary,
   ChatSourceCitation,
   KnowledgeCollectionListItem,
 } from "@/lib/types/knowledge";
@@ -50,6 +51,7 @@ type ChatTurn = ChatMessage & {
   retrievalDebug?: ChatRetrievalDebug;
   traceId?: string;
   queryHash?: string;
+  runtimeLineage?: ChatRuntimeLineageSummary;
 };
 
 type KnowledgeDomainFilter = "auto" | "all" | "medical" | "legal" | "technical" | "education" | "finance";
@@ -93,6 +95,23 @@ function buildFeedbackMetadata(opts: {
     groundingConfidence: opts.turn.retrievalDebug?.groundingConfidence ?? null,
     sourceTitles: opts.turn.sources?.slice(0, 3).map((source) => source.title) ?? [],
   };
+  const runtimeLineage = opts.turn.runtimeLineage;
+  if (runtimeLineage) {
+    metadata.answerPathName = runtimeLineage.answerPathName ?? null;
+    metadata.qwenCalled = runtimeLineage.qwenCalled ?? null;
+    metadata.validatorCalled = runtimeLineage.validatorCalled ?? null;
+    metadata.embeddingFallbackUsed = runtimeLineage.embeddingFallbackUsed ?? null;
+    metadata.rerankerFallbackUsed = runtimeLineage.rerankerFallbackUsed ?? null;
+    metadata.runtimeProfileName = runtimeLineage.runtimeProfileName ?? null;
+    metadata.runtimeLineage = {
+      answerPathName: runtimeLineage.answerPathName ?? null,
+      qwenCalled: runtimeLineage.qwenCalled ?? null,
+      validatorCalled: runtimeLineage.validatorCalled ?? null,
+      embeddingFallbackUsed: runtimeLineage.embeddingFallbackUsed ?? null,
+      rerankerFallbackUsed: runtimeLineage.rerankerFallbackUsed ?? null,
+      runtimeProfileName: runtimeLineage.runtimeProfileName ?? null,
+    };
+  }
 
   if (getFeedbackEvalQueryEnabled()) {
     const redactedQuery = redactFeedbackEvalQuery(opts.question);
@@ -888,6 +907,7 @@ export function ChatScreen() {
             const retrievalDebug = last?.role === "assistant" ? last.retrievalDebug : undefined;
             const traceId = last?.role === "assistant" ? last.traceId : undefined;
             const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
+            const runtimeLineage = last?.role === "assistant" ? last.runtimeLineage : undefined;
             return [
               ...history,
               {
@@ -897,6 +917,7 @@ export function ChatScreen() {
                 retrievalDebug,
                 traceId,
                 queryHash,
+                runtimeLineage,
               },
             ];
           });
@@ -907,6 +928,7 @@ export function ChatScreen() {
             const sources = last?.role === "assistant" ? last.sources : [];
             const traceId = last?.role === "assistant" ? last.traceId : undefined;
             const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
+            const runtimeLineage = last?.role === "assistant" ? last.runtimeLineage : undefined;
             return [
               ...history,
               {
@@ -916,6 +938,7 @@ export function ChatScreen() {
                 retrievalDebug,
                 traceId,
                 queryHash,
+                runtimeLineage,
               },
             ];
           });
@@ -934,6 +957,7 @@ export function ChatScreen() {
                 retrievalDebug,
                 traceId: trace.traceId,
                 queryHash: trace.query?.hash,
+                runtimeLineage: trace.runtimeLineage,
               },
             ];
           });
@@ -946,9 +970,10 @@ export function ChatScreen() {
           const retrievalDebug = last?.role === "assistant" ? last.retrievalDebug : undefined;
           const traceId = last?.role === "assistant" ? last.traceId : undefined;
           const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
+          const runtimeLineage = last?.role === "assistant" ? last.runtimeLineage : undefined;
           return [
             ...history,
-            { role: "assistant", content: assistant, sources, retrievalDebug, traceId, queryHash },
+            { role: "assistant", content: assistant, sources, retrievalDebug, traceId, queryHash, runtimeLineage },
           ];
         });
       }

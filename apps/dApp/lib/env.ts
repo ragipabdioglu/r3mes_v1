@@ -107,6 +107,12 @@ export function getChatDebugEnabled(): boolean {
   return process.env.NEXT_PUBLIC_R3MES_CHAT_DEBUG === "1";
 }
 
+export type ChatTransportProductMode = "non_stream_json";
+
+export function getChatTransportProductMode(): ChatTransportProductMode {
+  return "non_stream_json";
+}
+
 /**
  * Feedback regression eval için ham sorgu saklama opt-in kalsın.
  * Kapalıyken feedback yalnız query hash + kaynak sinyali taşır.

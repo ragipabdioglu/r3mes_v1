@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ChatSourceCitation } from "@r3mes/shared-types";
+import type { AnswerPathName, ChatSourceCitation } from "@r3mes/shared-types";
 import { getConfiguredChatRuntime, normalizeAdapterPath } from "../lib/adapterRuntimeSelect.js";
 import { parseGroundedMedicalAnswer } from "../lib/answerParse.js";
 import { buildAnswerPlan } from "../lib/answerPlan.js";
@@ -42,6 +42,7 @@ import { retrieveKnowledgeContextQdrant } from "../lib/qdrantRetrieval.js";
 import { buildQueryUnderstanding, summarizeQueryUnderstandingForTrace } from "../lib/queryUnderstanding.js";
 import { renderGroundedMedicalAnswer } from "../lib/renderMedicalAnswer.js";
 import { buildRouteDecisionLogEvent } from "../lib/routeDecisionLog.js";
+import { buildRuntimeLineage } from "../lib/runtimeLineage.js";
 import { resolveRetrievalBudget } from "../lib/retrievalBudget.js";
 import { buildRetrievalPlan, summarizeRetrievalPlan, type RetrievalPlan } from "../lib/retrievalPlan.js";
 import {
@@ -135,6 +136,17 @@ interface ChatRetrievalDebug {
     hasUsableGrounding: boolean;
     composerMode?: GroundedComposerMode;
   };
+}
+
+interface ApplyRenderedAnswerOptions {
+  useFallbackTemplate?: boolean;
+  exposeDebug?: boolean;
+  chatTrace?: ChatTraceBuilder;
+  answerPath?: AnswerPathName;
+  stream?: boolean;
+  qwenCalled?: boolean;
+  validatorCalled?: boolean;
+  qwenCallCount?: number;
 }
 
 function getAiEngineBase(): string {
@@ -913,7 +925,7 @@ function applyRenderedAnswer(
   userQuery = "",
   retrievalWasUsed = false,
   retrievalDebug: ChatRetrievalDebug | null = null,
-  opts: { useFallbackTemplate?: boolean; exposeDebug?: boolean; chatTrace?: ChatTraceBuilder; answerPath?: string } = {},
+  opts: ApplyRenderedAnswerOptions = {},
 ): Record<string, unknown> {
   const cloned = structuredClone(payload) as Record<string, unknown>;
   const next = opts.exposeDebug === true ? cloned : stripChatDebugFields(cloned);
@@ -1090,6 +1102,29 @@ function applyRenderedAnswer(
   }
   next.choices = choices;
   next.sources = exposedSources;
+  const runtimeLineage = buildRuntimeLineage({
+    answerPath: opts.answerPath ?? "ai_engine",
+    stream: opts.stream ?? false,
+    qwenCalled: opts.qwenCalled,
+    validatorCalled: opts.validatorCalled,
+    qwenCallCount: opts.qwenCallCount,
+    composer: {
+      plannedComposerUsed: answerQuality.plannedComposerUsed,
+      fallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
+    },
+    retrieval: retrievalDebug
+      ? {
+          mode: retrievalDebug.retrievalMode,
+          runtime: retrievalDebug.runtime,
+          diagnostics: retrievalDebug.retrievalDiagnostics ?? null,
+        }
+      : undefined,
+    safety: {
+      fallbackMode: exposedSafetyGate.fallbackMode,
+      blockedReasons: exposedSafetyGate.blockedReasons,
+    },
+  });
+  next.runtime_lineage = runtimeLineage;
   if (opts.exposeDebug === true) {
     next.grounded_answer = exposedAnswer;
     next.debug_contract_version = EVAL_DEBUG_CONTRACT_VERSION;
@@ -1104,6 +1139,7 @@ function applyRenderedAnswer(
       evidenceSignals,
       evidenceBundleDiagnostics: evidenceBundle?.diagnostics ?? null,
       sourceSelection: retrievalDebug?.sourceSelection,
+      runtimeLineage,
       retrievalDebug: retrievalDebug
         ? {
             retrievalMode: retrievalDebug.retrievalMode,
@@ -1154,6 +1190,7 @@ function applyRenderedAnswer(
           retrievalWasUsed,
           responseMode: retrievalDebug?.responseMode ?? null,
         },
+        runtimeLineage,
         safety: {
           pass: exposedSafetyGate.pass,
           fallbackMode: exposedSafetyGate.fallbackMode,
@@ -1229,6 +1266,14 @@ function createConversationalIntentPayload(opts: {
 }): Record<string, unknown> {
   const payload = createChatCompletionPayload(opts.decision.response);
   payload.sources = [];
+  const runtimeLineage = buildRuntimeLineage({
+    answerPath: "conversational_intent",
+    stream: false,
+    safety: {
+      blockedReasons: [],
+    },
+  });
+  payload.runtime_lineage = runtimeLineage;
   if (opts.exposeDebug) {
     payload.chat_trace = opts.chatTrace.snapshot({
       sourceMode: opts.requestContext?.sourceMode ?? "conversational",
@@ -1245,6 +1290,7 @@ function createConversationalIntentPayload(opts: {
         confidence: opts.decision.confidence,
         reason: opts.decision.reason,
       },
+      runtimeLineage,
     } as Parameters<ChatTraceBuilder["snapshot"]>[0] & Record<string, unknown>);
   }
   return payload;
@@ -2417,6 +2463,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           const parsed = JSON.parse(buf.toString("utf8")) as Record<string, unknown>;
           const parsedAnswer = parseGroundedMedicalAnswer(extractAssistantContent(parsed) ?? "");
           const retrievalWasUsed = retrieval.contextText.length > 0;
+          let validatorCalled = false;
           const shouldRunValidator =
             shouldUseMiniValidator(stream, retrievalWasUsed) &&
             (
@@ -2429,6 +2476,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             const draftAnswer = extractAssistantContent(parsed);
             if (draftAnswer) {
               const validatorTrace = chatTrace.start("validator");
+              validatorCalled = true;
               const validatorPayload = buildValidatorPayload({
                 baseBody: resolved.upstreamBody,
                 draftAnswer,
@@ -2455,7 +2503,15 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                       retrievalQuery,
                       retrievalWasUsed,
                       retrievalDebug,
-                      { exposeDebug, chatTrace, answerPath: "ai_engine_validated" },
+                      {
+                        exposeDebug,
+                        chatTrace,
+                        answerPath: "ai_engine_validated",
+                        stream,
+                        qwenCalled: true,
+                        validatorCalled: true,
+                        qwenCallCount: 2,
+                      },
                     ),
                   );
                 }
@@ -2477,7 +2533,15 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 retrievalQuery,
                 retrievalWasUsed,
                 retrievalDebug,
-                { exposeDebug, chatTrace, answerPath: "ai_engine_parsed" },
+                {
+                  exposeDebug,
+                  chatTrace,
+                  answerPath: "ai_engine_parsed",
+                  stream,
+                  qwenCalled: true,
+                  validatorCalled,
+                  qwenCallCount: validatorCalled ? 2 : 1,
+                },
               ),
             );
           }
@@ -2499,7 +2563,15 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                   retrievalQuery,
                   retrievalWasUsed,
                   retrievalDebug,
-                  { exposeDebug, chatTrace, answerPath: "ai_engine_draft_wrapped" },
+                  {
+                    exposeDebug,
+                    chatTrace,
+                    answerPath: "ai_engine_draft_wrapped",
+                    stream,
+                    qwenCalled: true,
+                    validatorCalled,
+                    qwenCallCount: validatorCalled ? 2 : 1,
+                  },
                 ),
               );
             }
@@ -2516,14 +2588,51 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 retrievalQuery,
                 retrievalWasUsed,
                 retrievalDebug,
-                { exposeDebug, chatTrace, answerPath: "ai_engine_empty_wrapped" },
+                {
+                  exposeDebug,
+                  chatTrace,
+                  answerPath: "ai_engine_empty_wrapped",
+                  stream,
+                  qwenCalled: true,
+                  validatorCalled,
+                  qwenCallCount: validatorCalled ? 2 : 1,
+                },
               ),
             );
           }
           const safeParsed = exposeDebug ? parsed : stripChatDebugFields(parsed);
           safeParsed.sources = retrieval.sources;
+          const runtimeLineage = buildRuntimeLineage({
+            answerPath: "ai_engine_raw_json",
+            stream,
+            qwenCalled: true,
+            validatorCalled,
+            qwenCallCount: validatorCalled ? 2 : 1,
+            retrieval: retrievalDebug
+              ? {
+                  mode: retrievalDebug.retrievalMode,
+                  runtime: retrievalDebug.runtime,
+                  diagnostics: retrievalDebug.retrievalDiagnostics ?? null,
+                }
+              : undefined,
+            safety: {
+              blockedReasons: [],
+            },
+          });
+          safeParsed.runtime_lineage = runtimeLineage;
           if (exposeDebug && retrievalDebug) parsed.retrieval_debug = retrievalDebug;
           if (exposeDebug) {
+            safeParsed.debug_contract_version = EVAL_DEBUG_CONTRACT_VERSION;
+            safeParsed.eval_debug_contract = buildEvalDebugContract({
+              runtimeLineage,
+              sourceSelection: retrievalDebug?.sourceSelection,
+              retrievalDebug: retrievalDebug
+                ? {
+                    retrievalMode: retrievalDebug.retrievalMode,
+                    retrievalDiagnostics: retrievalDebug.retrievalDiagnostics,
+                  }
+                : undefined,
+            });
             safeParsed.chat_trace = chatTrace.snapshot({
               sourceMode: retrievalDebug?.sourceMode,
               sourceResolution: retrievalDebug
@@ -2552,6 +2661,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                 retrievalWasUsed,
                 responseMode,
               },
+              runtimeLineage,
             } as Parameters<ChatTraceBuilder["snapshot"]>[0] & Record<string, unknown>);
           }
           return reply.type(ct).send(safeParsed);

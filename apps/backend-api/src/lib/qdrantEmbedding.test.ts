@@ -113,6 +113,15 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
     );
   });
 
+  it("fails fast in pilot-rag profile when deterministic provider is selected", async () => {
+    vi.stubEnv("R3MES_RUNTIME_PROFILE", "pilot-rag");
+    vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "deterministic");
+
+    await expect(embedTextsForQdrantWithDiagnostics(["migration rollback"])).rejects.toThrow(
+      "real embeddings required",
+    );
+  });
+
   it("fails fast in production when deterministic provider is selected", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "deterministic");

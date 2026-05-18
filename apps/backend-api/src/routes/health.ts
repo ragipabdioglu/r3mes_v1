@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { Redis } from "ioredis";
+import { buildProviderReadinessReport, type ProviderReadinessMode } from "../lib/providerReadiness.js";
 import { prisma } from "../lib/prisma.js";
 
 export async function registerHealthRoutes(app: FastifyInstance) {
@@ -20,6 +21,16 @@ export async function registerHealthRoutes(app: FastifyInstance) {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  });
+
+  app.get("/ready/rag-runtime", async (req, reply) => {
+    const query = req.query && typeof req.query === "object" ? req.query as { mode?: unknown } : {};
+    const mode: ProviderReadinessMode = query.mode === "warm" ? "warm" : "summary";
+    const report = await buildProviderReadinessReport({ mode });
+    if (report.status === "fail") {
+      reply.code(503);
+    }
+    return report;
   });
 
   app.get("/v1/version", async () => ({

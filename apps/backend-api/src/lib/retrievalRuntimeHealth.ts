@@ -1,3 +1,5 @@
+import { isQualityFallbackBlocked } from "./runtimeFallbackPolicy.js";
+
 export type RetrievalEngineMode = "prisma" | "qdrant" | "hybrid";
 export type EmbeddingProviderMode = "deterministic" | "ai-engine" | "bge-m3";
 export type RerankerModeRequested = "model" | "deterministic" | "disabled";
@@ -91,9 +93,7 @@ function normalizeRerankerActual(value: unknown, fallback: RerankerModeActual): 
 }
 
 function strictRuntimeFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.NODE_ENV === "production" ||
-    env.R3MES_REQUIRE_REAL_EMBEDDINGS === "1" ||
-    env.R3MES_REQUIRE_REAL_RERANKER === "1";
+  return isQualityFallbackBlocked(env);
 }
 
 function requestedRerankerFromEnv(env: Record<string, string | undefined>): RerankerModeRequested {

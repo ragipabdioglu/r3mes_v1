@@ -10,6 +10,7 @@ import httpx
 _STAGE_META: dict[str, tuple[str, bool]] = {
     "llama_process": ("local_runtime", True),
     "adapter_download": ("artifact_fetch", True),
+    "lora_lock_wait_budget": ("local_runtime", True),
     "lora_hot_swap": ("llama_inference", True),
     "upstream_completion": ("llama_inference", True),
 }

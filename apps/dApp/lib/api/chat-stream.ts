@@ -1,14 +1,25 @@
 import type { R3mesWalletAuthHeaders } from "@/lib/api/wallet-auth-types";
-import { getBackendUrl, getChatDebugEnabled, getOptionalChatModel } from "@/lib/env";
-import type { ChatRetrievalDebug, ChatSourceCitation } from "@/lib/types/knowledge";
+import {
+  type ChatTransportProductMode,
+  getBackendUrl,
+  getChatDebugEnabled,
+  getChatTransportProductMode,
+  getOptionalChatModel,
+} from "@/lib/env";
+import type {
+  ChatRetrievalDebug,
+  ChatRuntimeLineageSummary,
+  ChatSourceCitation,
+} from "@/lib/types/knowledge";
 import { userFacingHttpMessage } from "@/lib/ui/http-messages";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 export type ChatTraceSummary = {
-  traceId: string;
+  traceId?: string;
   query?: {
     hash?: string;
   };
+  runtimeLineage?: ChatRuntimeLineageSummary;
 };
 
 function readAssistantContent(response: unknown): string {
@@ -31,12 +42,98 @@ function readRetrievalDebug(response: unknown): ChatRetrievalDebug | null {
     : null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function readNestedRecord(input: Record<string, unknown>, path: string[]): Record<string, unknown> {
+  return path.reduce<Record<string, unknown>>((current, key) => asRecord(current[key]), input);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function answerPathCallsQwen(answerPathName?: string): boolean | undefined {
+  if (!answerPathName) return undefined;
+  return answerPathName.startsWith("ai_engine") || answerPathName === "ai_engine";
+}
+
+function stageWasCalled(trace: Record<string, unknown>, stageName: string): boolean | undefined {
+  const stages = trace.stages;
+  if (!Array.isArray(stages)) return undefined;
+  return stages.some((stage) => {
+    const item = asRecord(stage);
+    return item.name === stageName && item.status !== "skipped";
+  });
+}
+
+export function summarizeChatTraceRuntimeLineage(
+  trace: Record<string, unknown>,
+): ChatRuntimeLineageSummary | undefined {
+  const explicit = asRecord(trace.runtimeLineage);
+  const qwen = asRecord(explicit.qwen);
+  const embedding = asRecord(explicit.embedding);
+  const reranker = asRecord(explicit.reranker);
+  const explicitAnswerPath = asRecord(explicit.answerPath);
+  const answerPath = asRecord(trace.answerPath);
+  const runtime = {
+    ...readNestedRecord(trace, ["retrieval", "runtime"]),
+    ...asRecord(trace.runtime),
+  };
+  const answerPathName =
+    readString(explicit.answerPathName) ??
+    readString(explicit.answerPath) ??
+    readString(explicitAnswerPath.name) ??
+    readString(answerPath.name);
+  const summary: ChatRuntimeLineageSummary = {
+    answerPathName,
+    qwenCalled:
+      readBoolean(explicit.qwenCalled) ??
+      readBoolean(qwen.called) ??
+      stageWasCalled(trace, "ai_engine") ??
+      answerPathCallsQwen(answerPathName),
+    validatorCalled:
+      readBoolean(explicit.validatorCalled) ??
+      readBoolean(qwen.validatorCalled) ??
+      stageWasCalled(trace, "validator"),
+    embeddingFallbackUsed:
+      readBoolean(explicit.embeddingFallbackUsed) ??
+      readBoolean(embedding.fallbackUsed) ??
+      readBoolean(runtime.embeddingFallbackUsed),
+    rerankerFallbackUsed:
+      readBoolean(explicit.rerankerFallbackUsed) ??
+      readBoolean(reranker.fallbackUsed) ??
+      readBoolean(runtime.rerankerFallbackUsed),
+    runtimeProfileName:
+      readString(explicit.runtimeProfileName) ??
+      readString(explicit.profileName) ??
+      readString(runtime.runtimeProfileName) ??
+      readString(runtime.profileName) ??
+      readString(asRecord(trace.runtimeProfile).name),
+  };
+  const hasLineage = Object.values(summary).some((value) => value !== undefined);
+  return hasLineage ? summary : undefined;
+}
+
 function readChatTrace(response: unknown): ChatTraceSummary | null {
-  const parsed = response as { chat_trace?: unknown };
-  const trace = parsed.chat_trace as ChatTraceSummary | undefined;
-  return trace && typeof trace === "object" && typeof trace.traceId === "string"
-    ? trace
-    : null;
+  const parsed = response as { chat_trace?: unknown; runtime_lineage?: unknown; runtimeLineage?: unknown };
+  const trace = asRecord(parsed.chat_trace);
+  const explicitRuntimeLineage = trace.runtimeLineage ?? parsed.runtimeLineage ?? parsed.runtime_lineage;
+  const runtimeLineage =
+    summarizeChatTraceRuntimeLineage({ runtimeLineage: explicitRuntimeLineage }) ??
+    summarizeChatTraceRuntimeLineage(trace);
+  if (typeof trace.traceId !== "string") {
+    return runtimeLineage ? { runtimeLineage } : null;
+  }
+  return {
+    ...(trace as ChatTraceSummary),
+    runtimeLineage,
+  };
 }
 
 function decodeSourcesHeader(value: string | null): ChatSourceCitation[] {
@@ -70,6 +167,13 @@ function getTypewriterChunkChars(): number {
 
 function getTypewriterDelayMs(): number {
   return readPositiveIntegerEnv("NEXT_PUBLIC_R3MES_TYPEWRITER_DELAY_MS", 22, 0, 250);
+}
+
+function shouldRequestBackendStream(productMode: ChatTransportProductMode): false {
+  switch (productMode) {
+    case "non_stream_json":
+      return false;
+  }
 }
 
 function waitForTypewriterDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -135,8 +239,8 @@ async function* yieldTypewriterText(text: string, signal?: AbortSignal): AsyncGe
 }
 
 /**
- * POST /v1/chat/completions — backend proxy; `adapter_id` (DB id) veya `adapter_cid` ile
- * çözüm sunucuda yapılır (INTEGRATION_CONTRACT §3.5).
+ * POST /v1/chat/completions — product chat uses non-stream JSON from backend.
+ * This remains an async generator only to drive the local typewriter UX.
  */
 export async function* streamChatCompletions(params: {
   messages: ChatMessage[];
@@ -152,13 +256,12 @@ export async function* streamChatCompletions(params: {
 }): AsyncGenerator<string, void, unknown> {
   const base = getBackendUrl();
   const url = new URL("/v1/chat/completions", base);
+  const productMode = getChatTransportProductMode();
 
   const body: Record<string, unknown> = {
     messages: params.messages,
-    // The current backend/ai-engine streaming path can hang while waiting for
-    // upstream headers. Use the stable non-stream path and yield once so the UI
-    // contract stays unchanged.
-    stream: false,
+    // Product contract: backend returns one JSON response; UI may type it out locally.
+    stream: shouldRequestBackendStream(productMode),
   };
 
   const model = getOptionalChatModel();

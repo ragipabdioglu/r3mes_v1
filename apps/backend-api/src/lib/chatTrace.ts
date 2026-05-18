@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { RuntimeLineage } from "@r3mes/shared-types";
 
 export type ChatTraceStageName =
   | "request"
@@ -47,6 +48,7 @@ export interface ChatTraceSnapshot {
   retrieval?: Record<string, unknown>;
   sourceSelection?: Record<string, unknown>;
   answerPath?: Record<string, unknown>;
+  runtimeLineage?: RuntimeLineage;
   safety?: Record<string, unknown>;
   stages: ChatTraceStage[];
 }

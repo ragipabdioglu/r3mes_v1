@@ -232,6 +232,30 @@ export type ChatSourceCitation = {
   excerpt?: string | null;
 };
 
+export type ChatAnswerPathName =
+  | "conversational_intent"
+  | "no_source_fallback"
+  | "rag_fast_path"
+  | "contradiction_fast_path"
+  | "low_confidence_evidence_fast_path"
+  | "fast_grounded_composer"
+  | "ai_engine"
+  | "ai_engine_validated"
+  | "ai_engine_parsed"
+  | "ai_engine_draft_wrapped"
+  | "ai_engine_empty_wrapped"
+  | "ai_engine_raw_json"
+  | (string & {});
+
+export type ChatRuntimeLineageSummary = {
+  answerPathName?: ChatAnswerPathName;
+  qwenCalled?: boolean;
+  validatorCalled?: boolean;
+  embeddingFallbackUsed?: boolean;
+  rerankerFallbackUsed?: boolean;
+  runtimeProfileName?: string;
+};
+
 export type ChatRetrievalDebug = {
   groundingConfidence: "high" | "medium" | "low";
   domain: "medical" | "legal" | "finance" | "technical" | "education" | "general";
