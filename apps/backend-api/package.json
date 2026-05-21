@@ -32,6 +32,8 @@
     "eval:real-world-stress": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/real-world-stress/golden.jsonl --out artifacts/evals/real-world-stress/latest.json",
     "eval:kap-pilot": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/kap-pilot/golden.jsonl --out artifacts/evals/kap-pilot/latest.json",
     "eval:answer-quality": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/answer-quality/golden.jsonl --out artifacts/evals/answer-quality/latest.json",
+    "eval:evidence-only": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/evidence-only/golden.jsonl --out artifacts/evals/evidence-only/latest.json",
+    "eval:ui-reality": "node scripts/run-grounded-response-eval.mjs --file infrastructure/evals/ui-reality/golden.jsonl --out artifacts/evals/ui-reality/latest.json",
     "eval:production-rag": "node --env-file=.env scripts/run-production-rag-eval.mjs",
     "eval:provider-readiness": "pnpm exec tsc -p tsconfig.json && node --env-file=.env scripts/run-provider-readiness.mjs",
     "ready:rag-runtime": "pnpm exec tsc -p tsconfig.json && node --env-file=.env scripts/run-provider-readiness.mjs --mode summary",

@@ -125,15 +125,58 @@ describe("queryUnderstanding", () => {
     expect(understanding.requestedFieldDetection.constraints.forbidCaution).toBe(true);
     expect(understanding.requestedFieldDetection.constraints.noRawTableDump).toBe(true);
     expect(understanding.requestedFieldDetection.constraints.format).toBe("bullets");
+    expect(understanding.queryContract).toMatchObject({
+      operation: "extract_fields",
+      requiredEvidenceType: "structured_fields",
+      outputFormat: "bullets",
+      sourceOnly: false,
+      forbiddenAdditions: expect.arrayContaining(["optional_caution", "risk_commentary", "raw_table_dump"]),
+      queryQuality: {
+        shape: understanding.quality.shape,
+        clarityScore: understanding.quality.clarityScore,
+        tokenCount: understanding.quality.tokenCount,
+      },
+    });
+    expect(understanding.queryContract.requestedFields.map((field) => field.id)).toEqual(
+      expect.arrayContaining(["diger_kaynaklar", "olaganustu_yedekler"]),
+    );
+    expect(understanding.queryContract.requestedFields[0]).not.toHaveProperty("aliases");
   });
 
   it("detects generic answer tasks for newly uploaded education or technical documents", () => {
     const list = buildQueryUnderstanding("Büyük verinin 5V özelliğini sadece madde madde yaz.");
     expect(list.answerTask.taskType).toBe("list_items");
     expect(list.answerTask.outputConstraints.format).toBe("bullets");
+    expect(list.queryContract).toMatchObject({
+      operation: "list",
+      requiredEvidenceType: "source",
+      outputFormat: "bullets",
+      sourceOnly: false,
+      requestedFields: [],
+    });
 
     const compare = buildQueryUnderstanding("Web1, Web2 ve Web3 arasındaki temel fark nedir? Kaynağa göre açıkla.");
     expect(compare.answerTask.taskType).toBe("compare_concepts");
     expect(compare.answerTask.outputConstraints.sourceGroundedOnly).toBe(true);
+    expect(compare.queryContract).toMatchObject({
+      operation: "compare",
+      requiredEvidenceType: "source",
+      outputFormat: "freeform",
+      sourceOnly: true,
+      forbiddenAdditions: expect.arrayContaining(["source_external_inference"]),
+    });
+  });
+
+  it("keeps conversation turns backward-compatible while emitting a no-evidence contract", () => {
+    const understanding = buildQueryUnderstanding("merhaba");
+
+    expect(understanding.mode).toBe("conversation");
+    expect(understanding.queryContract).toMatchObject({
+      operation: "conversation",
+      requiredEvidenceType: "none",
+      outputFormat: "freeform",
+      sourceOnly: false,
+      requestedFields: [],
+    });
   });
 });

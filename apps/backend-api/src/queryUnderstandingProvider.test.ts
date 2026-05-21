@@ -19,13 +19,14 @@ describe("query understanding provider boundary", () => {
     expect(descriptor.id).toBe(HEURISTIC_TR_V1_QUERY_UNDERSTANDING_PROVIDER_ID);
     expect(descriptor.status).toBe("boundary_only");
     expect(descriptor.capabilities).toEqual(
-      expect.arrayContaining(["concept_rules", "route_rules", "requested_field_aliases"]),
+      expect.arrayContaining(["concept_rules", "route_rules", "requested_field_aliases", "query_contract"]),
     );
     expect(summarizeQueryUnderstandingProviderDescriptor(descriptor)).toMatchObject({
       id: "heuristic-tr-v1",
       locale: "tr",
       implementation: "heuristic",
       status: "boundary_only",
+      capabilities: expect.arrayContaining(["query_contract"]),
     });
   });
 

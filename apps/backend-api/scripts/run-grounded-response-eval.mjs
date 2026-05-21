@@ -4,7 +4,9 @@ import { dirname, resolve } from "node:path";
 
 import { detectAnswerQualityFindings } from "./eval-scorers/answer-quality.mjs";
 import { scoreDebugContract } from "./eval-scorers/debug-contract.mjs";
+import { scoreEvidenceOnly } from "./eval-scorers/evidence-only.mjs";
 import { summarizeAnswerQualityTrends } from "./eval-scorers/trend-summary.mjs";
+import { adaptEvalCasesForRunner } from "./eval-core/index.mjs";
 
 const root = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 const defaultSet = resolve(root, "infrastructure/evals/grounded-response/golden.jsonl");
@@ -446,6 +448,8 @@ function scoreCase(testCase, response) {
   const failures = [];
   const debugContractScore = scoreDebugContract(testCase, response);
   failures.push(...debugContractScore.failures);
+  const evidenceOnlyScore = scoreEvidenceOnly(testCase, response);
+  failures.push(...evidenceOnlyScore.failures.map((failure) => `evidence_only:${failure}`));
   const minSources = acceptsSourceSuggestionAlternative
     ? 0
     : Number(testCase.minSources ?? (testCase.mustHaveSources ? 1 : 0));
@@ -1187,6 +1191,15 @@ function scoreCase(testCase, response) {
     qdrantFallbackUsed: runtimeLineage.retrieval.qdrantFallbackUsed,
     answerPlan,
     debugContract: debugContractScore.contract,
+    evidenceOnly: {
+      ok: evidenceOnlyScore.ok,
+      findings: evidenceOnlyScore.findings,
+      observed: {
+        sourceCount: evidenceOnlyScore.observed?.sourceCount ?? null,
+        evidenceItemCount: evidenceOnlyScore.observed?.evidenceItemCount ?? null,
+        evidenceTypes: evidenceOnlyScore.observed?.evidenceTypes ?? [],
+      },
+    },
     traceTotalDurationMs: Number.isFinite(Number(chatTrace?.totalDurationMs)) ? Number(chatTrace.totalDurationMs) : null,
     traceStageDurations: Array.isArray(chatTrace?.stages)
       ? chatTrace.stages.map((stage) => ({
@@ -1204,11 +1217,11 @@ function scoreCase(testCase, response) {
 
 async function loadCases(file, limit) {
   const raw = await readFile(file, "utf8");
-  const rows = raw
+  const rows = adaptEvalCasesForRunner(raw
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => JSON.parse(line));
+    .map((line) => JSON.parse(line)));
   return limit > 0 ? rows.slice(0, limit) : rows;
 }
 
@@ -1568,6 +1581,46 @@ function summarizeCompiledEvidenceQuality(results) {
   };
 }
 
+function summarizeEvidenceOnlyQuality(results) {
+  const casesWithEvidenceOnlyExpectations = results.filter((result) => {
+    const evidenceOnly = result.evidenceOnly;
+    return evidenceOnly && (
+      (Array.isArray(evidenceOnly.findings) && evidenceOnly.findings.length > 0) ||
+      Number.isFinite(Number(evidenceOnly.observed?.sourceCount)) ||
+      Number.isFinite(Number(evidenceOnly.observed?.evidenceItemCount))
+    );
+  });
+  const findings = casesWithEvidenceOnlyExpectations.flatMap((result) =>
+    (Array.isArray(result.evidenceOnly?.findings) ? result.evidenceOnly.findings : [])
+      .map((finding) => ({
+        id: result.id,
+        bucket: result.bucket,
+        class: finding.class ?? "missing",
+        code: finding.code ?? "missing",
+        severity: finding.severity ?? "fail",
+      })),
+  );
+  const blockingFindings = findings.filter((finding) => finding.severity === "fail");
+  return {
+    observedCases: casesWithEvidenceOnlyExpectations.length,
+    failedCases: casesWithEvidenceOnlyExpectations.filter((result) => result.evidenceOnly?.ok === false).length,
+    failureClasses: blockingFindings.reduce((acc, finding) => increment(acc, finding.class), {}),
+    findingCodes: findings.reduce((acc, finding) => increment(acc, finding.code), {}),
+    averageSources: averageField(
+      casesWithEvidenceOnlyExpectations.map((result) => ({
+        value: result.evidenceOnly?.observed?.sourceCount,
+      })),
+      "value",
+    ),
+    averageEvidenceItems: averageField(
+      casesWithEvidenceOnlyExpectations.map((result) => ({
+        value: result.evidenceOnly?.observed?.evidenceItemCount,
+      })),
+      "value",
+    ),
+  };
+}
+
 function buildEvalGuardrails(opts) {
   const strict = readBooleanEnv("R3MES_EVAL_GUARDRAILS_STRICT", false);
   const thresholds = {
@@ -1813,6 +1866,7 @@ async function main() {
   const compiledEvidenceQuality = summarizeCompiledEvidenceQuality(results);
   const rerankerQuality = summarizeRerankerQuality(results);
   const answerQualityTrends = summarizeAnswerQualityTrends(results);
+  const evidenceOnlyQuality = summarizeEvidenceOnlyQuality(results);
   const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality });
   const providerStrictFailures = collectProviderStrictFailures(results);
   const summary = {
@@ -1835,6 +1889,7 @@ async function main() {
     budgetQuality,
     compiledEvidenceQuality,
     rerankerQuality,
+    evidenceOnlyQuality,
     answerQualityTrends,
     evalGuardrails,
     shadowRuntime: {

@@ -1,3 +1,5 @@
+import type { QueryContract } from "@r3mes/shared-types";
+
 import type { DomainLexiconPackSummary } from "./domainLexiconPack.js";
 import type { QueryUnderstanding } from "./queryUnderstanding.js";
 
@@ -34,6 +36,7 @@ export interface QueryUnderstandingProviderTrace {
 
 export interface QueryUnderstandingProviderResult {
   understanding: QueryUnderstanding;
+  queryContract: QueryContract;
   trace: QueryUnderstandingProviderTrace;
 }
 
@@ -47,6 +50,7 @@ export type QueryUnderstandingProviderCapability =
   | "concept_rules"
   | "route_rules"
   | "requested_field_aliases"
+  | "query_contract"
   | "source_profile_expansion";
 
 export interface QueryUnderstandingProviderDescriptor {
@@ -74,10 +78,12 @@ export const HEURISTIC_TR_V1_QUERY_UNDERSTANDING_PROVIDER_DESCRIPTOR: QueryUnder
     "concept_rules",
     "route_rules",
     "requested_field_aliases",
+    "query_contract",
     "source_profile_expansion",
   ],
   notes: [
     "Descriptor for the existing buildQueryUnderstanding behavior.",
+    "Emits a generic QueryContract without domain-specific vocabulary.",
     "This boundary intentionally does not call the current implementation yet.",
   ],
 };

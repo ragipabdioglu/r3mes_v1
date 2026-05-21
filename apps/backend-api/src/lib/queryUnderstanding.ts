@@ -1,3 +1,9 @@
+import type {
+  QueryContract,
+  QueryContractOperation,
+  QueryContractRequiredEvidenceType,
+} from "@r3mes/shared-types";
+
 import { expandSurfaceConceptTerms, inferCanonicalConcepts, normalizeConceptText } from "./conceptNormalizer.js";
 import { detectConversationalIntent, type ConversationalIntentDecision } from "./conversationalIntent.js";
 import { extractQuerySignals, type QuerySignals } from "./queryRouter.js";
@@ -48,6 +54,7 @@ export interface QueryUnderstanding {
   conversationalIntent: ConversationalIntentDecision | null;
   answerTask: AnswerTaskDetection;
   requestedFieldDetection: RequestedFieldDetection;
+  queryContract: QueryContract;
   confidence: "low" | "medium" | "high";
   warnings: string[];
 }
@@ -266,6 +273,81 @@ function inferRetrievalIntent(opts: {
   return "unclear";
 }
 
+function inferContractOperation(opts: {
+  mode: QueryUnderstandingMode;
+  taskType: AnswerTaskDetection["taskType"];
+}): QueryContractOperation {
+  if (opts.mode === "conversation") return "conversation";
+  switch (opts.taskType) {
+    case "definition":
+      return "define";
+    case "list_items":
+      return "list";
+    case "compare_concepts":
+      return "compare";
+    case "summarize_opinions":
+      return "summarize";
+    case "procedure":
+      return "procedure";
+    case "field_extraction":
+      return "extract_fields";
+    case "source_grounded_explain":
+      return "explain_with_sources";
+    case "conversation":
+      return "conversation";
+    case "unknown":
+      return "unknown";
+    default:
+      return "answer";
+  }
+}
+
+function inferRequiredEvidenceType(opts: {
+  mode: QueryUnderstandingMode;
+  sourceOnly: boolean;
+  requestedFieldCount: number;
+}): QueryContractRequiredEvidenceType {
+  if (opts.mode === "conversation") return "none";
+  if (opts.sourceOnly && opts.requestedFieldCount > 0) return "source_and_structured_fields";
+  if (opts.sourceOnly) return "source";
+  if (opts.requestedFieldCount > 0) return "structured_fields";
+  return "source";
+}
+
+export function buildQueryContract(understanding: Omit<QueryUnderstanding, "queryContract">): QueryContract {
+  const sourceOnly = understanding.answerTask.outputConstraints.sourceGroundedOnly;
+  return {
+    operation: inferContractOperation({
+      mode: understanding.mode,
+      taskType: understanding.answerTask.taskType,
+    }),
+    requiredEvidenceType: inferRequiredEvidenceType({
+      mode: understanding.mode,
+      sourceOnly,
+      requestedFieldCount: understanding.requestedFieldDetection.requestedFields.length,
+    }),
+    outputFormat: understanding.answerTask.outputConstraints.format,
+    sourceOnly,
+    requestedFields: understanding.requestedFieldDetection.requestedFields.map((field) => ({
+      id: field.id,
+      label: field.label,
+      required: field.required,
+      outputHint: field.outputHint,
+      confidence: field.confidence,
+    })),
+    forbiddenAdditions: [...understanding.answerTask.forbiddenAdditions],
+    queryQuality: {
+      shape: understanding.quality.shape,
+      clarityScore: understanding.quality.clarityScore,
+      tokenCount: understanding.quality.tokenCount,
+      expandedTokenCount: understanding.quality.expandedTokenCount,
+      conceptCount: understanding.quality.conceptCount,
+      profileConceptCount: understanding.quality.profileConceptCount,
+      weakSignalCount: understanding.quality.weakSignalCount,
+    },
+  };
+}
+
 export function buildQueryUnderstanding(query: string, opts?: QueryUnderstandingOptions): QueryUnderstanding {
   const baseNormalized = normalizeTurkishQuery(query);
   const profileConcepts = profileTermsMatchingQuery(baseNormalized, optionProfileTerms(opts));
@@ -311,7 +393,7 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
     routeConfidence: signals.routeHints.confidence,
   });
 
-  return {
+  const understandingWithoutContract: Omit<QueryUnderstanding, "queryContract"> = {
     original: query,
     normalized,
     signals,
@@ -325,6 +407,11 @@ export function buildQueryUnderstanding(query: string, opts?: QueryUnderstanding
     requestedFieldDetection,
     confidence,
     warnings,
+  };
+
+  return {
+    ...understandingWithoutContract,
+    queryContract: buildQueryContract(understandingWithoutContract),
   };
 }
 
@@ -361,6 +448,7 @@ export function summarizeQueryUnderstandingForTrace(
       confidence: field.confidence,
     })),
     outputConstraints: understanding.answerTask.outputConstraints,
+    queryContract: understanding.queryContract,
     language: understanding.signals.language,
     intent: understanding.signals.intent,
     routeDomain: understanding.signals.routeHints.domain,

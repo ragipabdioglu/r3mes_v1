@@ -1,0 +1,1 @@
+{"id":"evidence_only_contract_smoke","bucket":"evidence_only","messages":[{"role":"user","content":"Merhaba"}],"collectionIds":[],"includePublic":false,"mustHaveSources":false,"maxSources":0,"evalModes":["evidence"],"evidenceOnlyExpectations":{"minEvidenceFacts":0},"answerExpectations":{"maxWords":120}}

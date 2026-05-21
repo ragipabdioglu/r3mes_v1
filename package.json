@@ -40,6 +40,8 @@
     "eval:parse-quality": "pnpm --filter @r3mes/backend-api run eval:parse-quality",
     "eval:adaptive-rag": "pnpm --filter @r3mes/backend-api run eval:adaptive-rag",
     "eval:realistic-rag": "pnpm --filter @r3mes/backend-api run eval:realistic-rag",
+    "eval:evidence-only": "pnpm --filter @r3mes/backend-api run eval:evidence-only",
+    "eval:ui-reality": "pnpm --filter @r3mes/backend-api run eval:ui-reality",
     "eval:collection-smoke": "pnpm --filter @r3mes/backend-api run eval:collection-smoke",
     "knowledge:quality-refresh": "pnpm --filter @r3mes/backend-api run knowledge:quality-refresh",
     "smoke:document-parser": "pnpm --filter @r3mes/backend-api run smoke:document-parser"
