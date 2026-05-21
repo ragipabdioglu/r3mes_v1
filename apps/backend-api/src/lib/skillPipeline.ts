@@ -1379,7 +1379,8 @@ export function buildDeterministicEvidenceExtraction(
     facts: unique([...rankedDirectFacts, ...rankedUsableFacts, ...supportingContext]),
     sourceIds: finalSourceIds,
   });
-  const requestedFieldIds = detectAnswerTask(input.userQuery).requestedFields.map((field) => field.id);
+  const taskDetection = detectAnswerTask(input.userQuery);
+  const requestedFieldIds = taskDetection.requestedFields.map((field) => field.id);
   const evidenceBundle = buildEvidenceBundle({
     userQuery: input.userQuery,
     textFacts: unique([...finalDirectAnswerFacts, ...finalUsableFacts, ...finalSupportingContext]),
@@ -1388,6 +1389,7 @@ export function buildDeterministicEvidenceExtraction(
     structuredFacts,
     sourceIds: finalSourceIds,
     requestedFieldIds,
+    taskType: taskDetection.taskType,
   });
 
   return {

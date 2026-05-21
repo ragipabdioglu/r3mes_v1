@@ -1,7 +1,12 @@
+import type { AnswerTaskType } from "./answerTaskDetector.js";
 import type { StructuredFact } from "./structuredFact.js";
 
 export type EvidenceItemKind =
   | "text_fact"
+  | "definition"
+  | "list_item"
+  | "comparison_point"
+  | "code_fact"
   | "table_fact"
   | "numeric_fact"
   | "procedure_step"
@@ -9,6 +14,13 @@ export type EvidenceItemKind =
   | "contradiction";
 
 export type EvidenceItemConfidence = "low" | "medium" | "high";
+export type TextEvidenceItemKind =
+  | "text_fact"
+  | "definition"
+  | "list_item"
+  | "comparison_point"
+  | "code_fact"
+  | "procedure_step";
 
 export interface EvidenceItem {
   id: string;
@@ -54,6 +66,8 @@ export interface BuildEvidenceBundleInput {
   sourceIds?: string[];
   requestedFieldIds?: string[];
   extractor?: string;
+  taskType?: AnswerTaskType | "grounded_summary";
+  evidenceType?: TextEvidenceItemKind;
 }
 
 const CONTRADICTION_PATTERN = /(çeliş|celis|contradict|conflict|tutarsız|tutarsiz|uyuşmuyor|uyusmuyor)/i;
@@ -95,6 +109,27 @@ function evidenceKindForStructuredFact(fact: StructuredFact): EvidenceItemKind {
   if (fact.kind === "table_cell" || fact.kind === "table_row") return "table_fact";
   if (fact.kind === "numeric_value") return "numeric_fact";
   return "text_fact";
+}
+
+function evidenceKindForTaskType(taskType: BuildEvidenceBundleInput["taskType"]): TextEvidenceItemKind {
+  switch (taskType) {
+    case "definition":
+      return "definition";
+    case "list_items":
+      return "list_item";
+    case "compare_concepts":
+      return "comparison_point";
+    case "procedure":
+      return "procedure_step";
+    default:
+      return "text_fact";
+  }
+}
+
+function resolveTextEvidenceKind(input: BuildEvidenceBundleInput): TextEvidenceItemKind | undefined {
+  if (input.evidenceType) return input.evidenceType;
+  const taskKind = evidenceKindForTaskType(input.taskType);
+  return taskKind === "text_fact" ? undefined : taskKind;
 }
 
 function diagnosticsForItems(items: EvidenceItem[]): EvidenceBundleDiagnostics {
@@ -164,10 +199,12 @@ export function evidenceItemFromStructuredFact(fact: StructuredFact): EvidenceIt
 
 export function buildEvidenceBundle(input: BuildEvidenceBundleInput): EvidenceBundle {
   const fallbackSourceId = input.sourceIds?.[0] ?? "unknown-source";
+  const textEvidenceKind = resolveTextEvidenceKind(input);
   const textItems = uniqueStrings(input.textFacts).map((fact) =>
     evidenceItemFromTextFact({
       fact,
       fallbackSourceId,
+      kind: textEvidenceKind,
       extractor: input.extractor,
     }),
   );
@@ -206,6 +243,10 @@ export function buildEvidenceBundle(input: BuildEvidenceBundleInput): EvidenceBu
 
 export function hasUsableEvidenceItem(item: EvidenceItem): boolean {
   return item.kind === "text_fact" ||
+    item.kind === "definition" ||
+    item.kind === "list_item" ||
+    item.kind === "comparison_point" ||
+    item.kind === "code_fact" ||
     item.kind === "table_fact" ||
     item.kind === "numeric_fact" ||
     item.kind === "procedure_step";
