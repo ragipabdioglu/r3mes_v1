@@ -11,7 +11,7 @@ function asArray(value) {
   return [value];
 }
 
-function compactStrings(values) {
+function compactStrings(values = []) {
   return values
     .flatMap((value) => asArray(value))
     .map((value) => String(value ?? "").trim())
@@ -97,10 +97,25 @@ function evidenceItemType(item) {
   return String(item.evidenceType ?? item.type ?? item.kind ?? item.category ?? item.bucket ?? "").trim();
 }
 
+function readRetrievalDebug(response) {
+  return response?.retrieval_debug ?? response?.retrievalDebug ?? {};
+}
+
+function readCompiledEvidence(response) {
+  const retrievalDebug = readRetrievalDebug(response);
+  return retrievalDebug?.compiledEvidence ?? response?.compiledEvidence ?? {};
+}
+
+function readEvidenceBundle(response) {
+  const retrievalDebug = readRetrievalDebug(response);
+  const compiledEvidence = readCompiledEvidence(response);
+  return retrievalDebug?.evidenceBundle ?? compiledEvidence?.evidenceBundle ?? response?.evidenceBundle ?? {};
+}
+
 function collectEvidenceItems(response) {
-  const retrievalDebug = response?.retrieval_debug ?? response?.retrievalDebug ?? {};
-  const compiledEvidence = retrievalDebug?.compiledEvidence ?? response?.compiledEvidence ?? {};
-  const evidenceBundle = retrievalDebug?.evidenceBundle ?? compiledEvidence?.evidenceBundle ?? response?.evidenceBundle ?? {};
+  const retrievalDebug = readRetrievalDebug(response);
+  const compiledEvidence = readCompiledEvidence(response);
+  const evidenceBundle = readEvidenceBundle(response);
   const evidence = retrievalDebug?.evidence ?? response?.evidence ?? {};
   return [
     ...asArray(response?.evidence),
@@ -118,6 +133,19 @@ function collectEvidenceItems(response) {
     ...asArray(compiledEvidence?.contradictions),
     ...asArray(evidenceBundle?.items),
     ...asArray(evidenceBundle?.facts),
+  ].filter((item) => item !== undefined && item !== null);
+}
+
+function collectEvidenceFacts(response) {
+  const retrievalDebug = readRetrievalDebug(response);
+  const compiledEvidence = readCompiledEvidence(response);
+  const evidence = retrievalDebug?.evidence ?? response?.evidence ?? {};
+  return [
+    ...asArray(evidence?.usableFacts),
+    ...asArray(evidence?.supportingFacts),
+    ...asArray(evidence?.directFacts),
+    ...asArray(evidence?.redFlags),
+    ...asArray(compiledEvidence?.facts),
   ].filter((item) => item !== undefined && item !== null);
 }
 
@@ -147,7 +175,25 @@ function pushFinding(findings, failureClass, code, detail = {}) {
 }
 
 function readExpectations(testCase) {
-  return testCase?.evidenceOnlyExpectations ?? testCase?.evidenceExpectations ?? {};
+  const legacy = testCase?.evidenceOnlyExpectations;
+  const contract = testCase?._evalContractV2;
+  const v2Enabled = contract?.evalModes?.evidence !== false;
+  const v2 = v2Enabled ? (contract?.evidenceExpectations ?? testCase?.evidenceExpectations) : undefined;
+
+  return {
+    ...(legacy && typeof legacy === "object" ? legacy : {}),
+    ...(v2 && typeof v2 === "object" ? v2 : {}),
+  };
+}
+
+function readGroundingConfidence(response) {
+  return (
+    response?.grounded_answer?.grounding_confidence ??
+    response?.retrieval_debug?.groundingConfidence ??
+    response?.retrievalDebug?.groundingConfidence ??
+    response?.groundingConfidence ??
+    null
+  );
 }
 
 export function scoreEvidenceOnly(testCase, response) {
@@ -158,6 +204,9 @@ export function scoreEvidenceOnly(testCase, response) {
 
   const sources = asArray(response?.sources);
   const evidenceItems = collectEvidenceItems(response);
+  const evidenceFacts = collectEvidenceFacts(response);
+  const evidenceBundle = readEvidenceBundle(response);
+  const compiledEvidence = readCompiledEvidence(response);
   const sourceText = joinTextParts(sources.map(readSourceIdentity));
   const titleText = joinTextParts(sources.map(readSourceTitle));
   const contextText = readContextText(response, evidenceItems);
@@ -180,6 +229,87 @@ export function scoreEvidenceOnly(testCase, response) {
     ...asArray(expectations.expectedTitleTerms),
     ...asArray(expectations.requiredTitleTerms),
   ];
+
+  if (expectations.mustHaveSources === true && sources.length === 0) {
+    pushFinding(findings, "source_missing", "expected_sources_missing", {
+      expected: "at least one source",
+      actual: sources.length,
+      message: "expected sources but none were observed",
+    });
+  }
+
+  if (Number.isFinite(Number(expectations.minSources)) && sources.length < Number(expectations.minSources)) {
+    pushFinding(findings, "source_count_below_minimum", "min_sources_not_met", {
+      expected: Number(expectations.minSources),
+      actual: sources.length,
+      message: `source count ${sources.length} is below minimum ${Number(expectations.minSources)}`,
+    });
+  }
+
+  if (Number.isFinite(Number(expectations.maxSources)) && sources.length > Number(expectations.maxSources)) {
+    pushFinding(findings, "source_count_above_maximum", "max_sources_exceeded", {
+      expected: Number(expectations.maxSources),
+      actual: sources.length,
+      message: `source count ${sources.length} is above maximum ${Number(expectations.maxSources)}`,
+    });
+  }
+
+  if (Number.isFinite(Number(expectations.minEvidenceFacts)) && evidenceFacts.length < Number(expectations.minEvidenceFacts)) {
+    pushFinding(findings, "evidence_fact_count_below_minimum", "min_evidence_facts_not_met", {
+      expected: Number(expectations.minEvidenceFacts),
+      actual: evidenceFacts.length,
+      message: `evidence fact count ${evidenceFacts.length} is below minimum ${Number(expectations.minEvidenceFacts)}`,
+    });
+  }
+
+  const evidenceBundleItemCount = Array.isArray(evidenceBundle?.items)
+    ? evidenceBundle.items.length
+    : Number(evidenceBundle?.diagnostics?.itemCount ?? evidenceBundle?.itemCount ?? 0);
+  if (
+    Number.isFinite(Number(expectations.minEvidenceBundleItemCount)) &&
+    evidenceBundleItemCount < Number(expectations.minEvidenceBundleItemCount)
+  ) {
+    pushFinding(findings, "evidence_bundle_item_count_below_minimum", "min_evidence_bundle_items_not_met", {
+      expected: Number(expectations.minEvidenceBundleItemCount),
+      actual: evidenceBundleItemCount,
+      message: `evidence bundle item count ${evidenceBundleItemCount} is below minimum ${Number(expectations.minEvidenceBundleItemCount)}`,
+    });
+  }
+
+  const expectedConfidence = compactStrings(expectations.expectedConfidence);
+  if (expectedConfidence.length > 0) {
+    const actualConfidence = readGroundingConfidence(response);
+    if (!expectedConfidence.map(normalize).includes(normalize(actualConfidence))) {
+      pushFinding(findings, "evidence_confidence_mismatch", "expected_evidence_confidence_missing", {
+        expected: expectedConfidence,
+        actual: actualConfidence,
+        message: `expected evidence confidence not observed: ${expectedConfidence.join(", ")}`,
+      });
+    }
+  }
+
+  if (expectations.expectedCompiledEvidenceConfidence) {
+    const actualConfidence = compiledEvidence?.confidence ?? compiledEvidence?.groundingConfidence ?? null;
+    if (normalize(actualConfidence) !== normalize(expectations.expectedCompiledEvidenceConfidence)) {
+      pushFinding(findings, "compiled_evidence_confidence_mismatch", "expected_compiled_evidence_confidence_missing", {
+        expected: expectations.expectedCompiledEvidenceConfidence,
+        actual: actualConfidence,
+        message: `expected compiled evidence confidence not observed: ${expectations.expectedCompiledEvidenceConfidence}`,
+      });
+    }
+  }
+
+  const compiledContradictionCount = asArray(compiledEvidence?.contradictions).length;
+  if (
+    Number.isFinite(Number(expectations.minCompiledEvidenceContradictionCount)) &&
+    compiledContradictionCount < Number(expectations.minCompiledEvidenceContradictionCount)
+  ) {
+    pushFinding(findings, "compiled_evidence_contradiction_count_below_minimum", "min_compiled_evidence_contradictions_not_met", {
+      expected: Number(expectations.minCompiledEvidenceContradictionCount),
+      actual: compiledContradictionCount,
+      message: `compiled evidence contradiction count ${compiledContradictionCount} is below minimum ${Number(expectations.minCompiledEvidenceContradictionCount)}`,
+    });
+  }
 
   const missingSourceTerms = missingTerms(sourceText, expectedSourceTerms);
   if (missingSourceTerms.length > 0) {
@@ -217,6 +347,33 @@ export function scoreEvidenceOnly(testCase, response) {
     });
   }
 
+  const missingEvidenceTerms = missingTerms(contextText, expectations.requiredEvidenceTerms);
+  if (missingEvidenceTerms.length > 0) {
+    pushFinding(findings, "required_evidence_term_missing", "required_evidence_terms_missing", {
+      expected: missingEvidenceTerms,
+      actual: contextText,
+      message: `missing required evidence terms: ${missingEvidenceTerms.join(", ")}`,
+    });
+  }
+
+  const forbiddenEvidenceTerms = presentTerms(contextText, expectations.forbiddenEvidenceTerms);
+  if (forbiddenEvidenceTerms.length > 0) {
+    pushFinding(findings, "forbidden_evidence_term_present", "forbidden_evidence_terms_present", {
+      expected: [],
+      actual: forbiddenEvidenceTerms,
+      message: `forbidden evidence terms present: ${forbiddenEvidenceTerms.join(", ")}`,
+    });
+  }
+
+  const missingNotSupportedTerms = missingTerms(contextText, expectations.requiredNotSupportedTerms);
+  if (missingNotSupportedTerms.length > 0) {
+    pushFinding(findings, "not_supported_term_missing", "required_not_supported_terms_missing", {
+      expected: missingNotSupportedTerms,
+      actual: contextText,
+      message: `missing required not-supported terms: ${missingNotSupportedTerms.join(", ")}`,
+    });
+  }
+
   const expectedEvidenceTypes = compactStrings([
     expectations.expectedEvidenceType,
     expectations.requiredEvidenceType,
@@ -241,6 +398,9 @@ export function scoreEvidenceOnly(testCase, response) {
     observed: {
       sourceCount: sources.length,
       evidenceItemCount: evidenceItems.length,
+      evidenceFactCount: evidenceFacts.length,
+      evidenceBundleItemCount,
+      compiledEvidenceContradictionCount: compiledContradictionCount,
       evidenceTypes,
       sourceText,
       titleText,

@@ -129,6 +129,13 @@ describe("queryUnderstanding", () => {
       operation: "extract_fields",
       requiredEvidenceType: "structured_fields",
       outputFormat: "bullets",
+      outputConstraints: {
+        maxWords: 80,
+        forbidCaution: true,
+        noRawTableDump: true,
+        format: "bullets",
+        sourceGroundedOnly: false,
+      },
       sourceOnly: false,
       forbiddenAdditions: expect.arrayContaining(["optional_caution", "risk_commentary", "raw_table_dump"]),
       queryQuality: {
@@ -151,6 +158,13 @@ describe("queryUnderstanding", () => {
       operation: "list",
       requiredEvidenceType: "source",
       outputFormat: "bullets",
+      outputConstraints: {
+        maxSentencesPerBullet: undefined,
+        forbidCaution: true,
+        noRawTableDump: true,
+        format: "bullets",
+        sourceGroundedOnly: false,
+      },
       sourceOnly: false,
       requestedFields: [],
     });
@@ -162,6 +176,12 @@ describe("queryUnderstanding", () => {
       operation: "compare",
       requiredEvidenceType: "source",
       outputFormat: "freeform",
+      outputConstraints: {
+        forbidCaution: false,
+        noRawTableDump: false,
+        format: "freeform",
+        sourceGroundedOnly: true,
+      },
       sourceOnly: true,
       forbiddenAdditions: expect.arrayContaining(["source_external_inference"]),
     });
@@ -175,6 +195,12 @@ describe("queryUnderstanding", () => {
       operation: "conversation",
       requiredEvidenceType: "none",
       outputFormat: "freeform",
+      outputConstraints: {
+        forbidCaution: false,
+        noRawTableDump: false,
+        format: "freeform",
+        sourceGroundedOnly: false,
+      },
       sourceOnly: false,
       requestedFields: [],
     });

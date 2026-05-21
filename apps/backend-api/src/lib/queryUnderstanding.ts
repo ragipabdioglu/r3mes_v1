@@ -327,6 +327,14 @@ export function buildQueryContract(understanding: Omit<QueryUnderstanding, "quer
       requestedFieldCount: understanding.requestedFieldDetection.requestedFields.length,
     }),
     outputFormat: understanding.answerTask.outputConstraints.format,
+    outputConstraints: {
+      maxWords: understanding.answerTask.outputConstraints.maxWords,
+      maxSentencesPerBullet: understanding.answerTask.outputConstraints.maxSentencesPerBullet,
+      forbidCaution: understanding.answerTask.outputConstraints.forbidCaution,
+      noRawTableDump: understanding.answerTask.outputConstraints.noRawTableDump,
+      format: understanding.answerTask.outputConstraints.format,
+      sourceGroundedOnly: understanding.answerTask.outputConstraints.sourceGroundedOnly,
+    },
     sourceOnly,
     requestedFields: understanding.requestedFieldDetection.requestedFields.map((field) => ({
       id: field.id,

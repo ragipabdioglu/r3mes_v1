@@ -43,10 +43,20 @@ export interface QueryContractQuality {
   weakSignalCount: number;
 }
 
+export interface QueryContractOutputConstraints {
+  maxWords?: number;
+  maxSentencesPerBullet?: number;
+  forbidCaution: boolean;
+  noRawTableDump: boolean;
+  format: QueryContractOutputFormat;
+  sourceGroundedOnly: boolean;
+}
+
 export interface QueryContract {
   operation: QueryContractOperation;
   requiredEvidenceType: QueryContractRequiredEvidenceType;
   outputFormat: QueryContractOutputFormat;
+  outputConstraints: QueryContractOutputConstraints;
   sourceOnly: boolean;
   requestedFields: QueryContractRequestedField[];
   forbiddenAdditions: string[];

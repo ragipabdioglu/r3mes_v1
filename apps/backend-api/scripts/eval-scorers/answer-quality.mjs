@@ -77,16 +77,76 @@ function missingRequiredFields(requiredFields, answerPlan) {
   });
 }
 
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null) return [];
+  return [value];
+}
+
+function compactStrings(values) {
+  return values
+    .flatMap((value) => asArray(value))
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+}
+
+function mergeStringList(target, key, values) {
+  const merged = compactStrings([target[key], values]);
+  if (merged.length > 0) target[key] = merged;
+}
+
+function readAnswerExpectations(testCase) {
+  const legacy = testCase.qualityExpectations;
+  const contract = testCase._evalContractV2;
+  const v2Enabled = contract?.evalModes?.answer !== false;
+  const v2 = v2Enabled ? (contract?.answerExpectations ?? testCase.answerExpectations) : undefined;
+
+  if (!legacy && (!v2 || typeof v2 !== "object")) return null;
+
+  const expectations = {
+    ...(legacy && typeof legacy === "object" ? legacy : {}),
+  };
+
+  if (v2 && typeof v2 === "object") {
+    mergeStringList(expectations, "requiredConcepts", v2.requiredConcepts);
+    mergeStringList(expectations, "requiredAnswerTerms", v2.requiredAnswerTerms);
+    mergeStringList(expectations, "forbiddenAnswerTerms", v2.forbiddenAnswerTerms);
+    mergeStringList(expectations, "forbiddenTerms", v2.forbiddenTerms);
+    if (v2.maxAnswerWords !== undefined && expectations.maxWords === undefined) {
+      expectations.maxWords = v2.maxAnswerWords;
+    }
+    if (v2.maxAnswerChars !== undefined && expectations.maxChars === undefined) {
+      expectations.maxChars = v2.maxAnswerChars;
+    }
+    if (v2.mustNotUseGenericCaution === true && expectations.forbidCaution === undefined) {
+      expectations.forbidCaution = true;
+    }
+  }
+
+  return expectations;
+}
+
 export function detectAnswerQualityFindings(testCase, content, context = {}) {
-  const expectations = testCase.qualityExpectations;
+  const expectations = readAnswerExpectations(testCase);
   if (!expectations || typeof expectations !== "object") return [];
   const findings = [];
   const normalized = normalize(content);
   const words = wordCount(content);
-  const push = (bucket, severity, message) => findings.push({ bucket, severity, message });
+  const push = (bucket, severity, message) => findings.push({ bucket, class: bucket, severity, message });
 
   if (Number.isFinite(Number(expectations.maxWords)) && words > Number(expectations.maxWords)) {
     push("answer_too_long", "fail", `answer has ${words} words, max ${Number(expectations.maxWords)}`);
+  }
+
+  if (Number.isFinite(Number(expectations.maxChars)) && content.length > Number(expectations.maxChars)) {
+    push("answer_too_long", "fail", `answer has ${content.length} chars, max ${Number(expectations.maxChars)}`);
+  }
+
+  if (Array.isArray(expectations.requiredConcepts)) {
+    const missingTerms = expectations.requiredConcepts.filter((term) => !normalized.includes(normalize(term)));
+    if (missingTerms.length > 0) {
+      push("incomplete_answer", "fail", `missing required concepts: ${missingTerms.join(",")}`);
+    }
   }
 
   if (Array.isArray(expectations.requiredAnswerTerms)) {
@@ -96,8 +156,12 @@ export function detectAnswerQualityFindings(testCase, content, context = {}) {
     }
   }
 
-  if (Array.isArray(expectations.forbiddenAnswerTerms)) {
-    const forbiddenTerms = includesForbiddenAny(content, expectations.forbiddenAnswerTerms);
+  const forbiddenAnswerTerms = compactStrings([
+    expectations.forbiddenAnswerTerms,
+    expectations.forbiddenTerms,
+  ]);
+  if (forbiddenAnswerTerms.length > 0) {
+    const forbiddenTerms = includesForbiddenAny(content, forbiddenAnswerTerms);
     if (forbiddenTerms.length > 0) {
       push("template_answer", "fail", `forbidden answer terms: ${forbiddenTerms.join(",")}`);
     }
