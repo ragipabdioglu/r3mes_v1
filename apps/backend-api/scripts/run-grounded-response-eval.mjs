@@ -1198,6 +1198,7 @@ function scoreCase(testCase, response) {
         sourceCount: evidenceOnlyScore.observed?.sourceCount ?? null,
         evidenceItemCount: evidenceOnlyScore.observed?.evidenceItemCount ?? null,
         evidenceTypes: evidenceOnlyScore.observed?.evidenceTypes ?? [],
+        evidenceKindCounts: evidenceOnlyScore.observed?.evidenceKindCounts ?? {},
       },
     },
     traceTotalDurationMs: Number.isFinite(Number(chatTrace?.totalDurationMs)) ? Number(chatTrace.totalDurationMs) : null,
@@ -1601,9 +1602,19 @@ function summarizeEvidenceOnlyQuality(results) {
       })),
   );
   const blockingFindings = findings.filter((finding) => finding.severity === "fail");
+  const kindCounts = casesWithEvidenceOnlyExpectations.reduce((acc, result) => {
+    const counts = result.evidenceOnly?.observed?.evidenceKindCounts;
+    if (!counts || typeof counts !== "object" || Array.isArray(counts)) return acc;
+    for (const [kind, count] of Object.entries(counts)) {
+      const numeric = Number(count);
+      if (Number.isFinite(numeric)) increment(acc, kind, numeric);
+    }
+    return acc;
+  }, {});
   return {
     observedCases: casesWithEvidenceOnlyExpectations.length,
     failedCases: casesWithEvidenceOnlyExpectations.filter((result) => result.evidenceOnly?.ok === false).length,
+    kindCounts,
     failureClasses: blockingFindings.reduce((acc, finding) => increment(acc, finding.class), {}),
     findingCodes: findings.reduce((acc, finding) => increment(acc, finding.code), {}),
     averageSources: averageField(

@@ -13,6 +13,19 @@ export type EvidenceItemKind =
   | "source_limit"
   | "contradiction";
 
+export const EVIDENCE_ITEM_KINDS = [
+  "text_fact",
+  "definition",
+  "list_item",
+  "comparison_point",
+  "code_fact",
+  "table_fact",
+  "numeric_fact",
+  "procedure_step",
+  "source_limit",
+  "contradiction",
+] as const satisfies readonly EvidenceItemKind[];
+
 export type EvidenceItemConfidence = "low" | "medium" | "high";
 export type TextEvidenceItemKind =
   | "text_fact"
@@ -47,6 +60,7 @@ export interface EvidenceBundleDiagnostics {
   tableFactCount: number;
   contradictionCount: number;
   sourceLimitCount: number;
+  kindCounts: Record<EvidenceItemKind, number>;
 }
 
 export interface EvidenceBundle {
@@ -133,12 +147,18 @@ function resolveTextEvidenceKind(input: BuildEvidenceBundleInput): TextEvidenceI
 }
 
 function diagnosticsForItems(items: EvidenceItem[]): EvidenceBundleDiagnostics {
+  const kindCounts = Object.fromEntries(EVIDENCE_ITEM_KINDS.map((kind) => [kind, 0])) as Record<EvidenceItemKind, number>;
+  for (const item of items) {
+    kindCounts[item.kind] += 1;
+  }
+
   return {
     stringFactCount: items.filter((item) => item.kind === "text_fact").length,
     structuredFactCount: items.filter((item) => item.structuredFactId).length,
     tableFactCount: items.filter((item) => item.kind === "table_fact").length,
     contradictionCount: items.filter((item) => item.kind === "contradiction").length,
     sourceLimitCount: items.filter((item) => item.kind === "source_limit").length,
+    kindCounts,
   };
 }
 

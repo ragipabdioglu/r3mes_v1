@@ -177,6 +177,18 @@ describe("compileEvidence", () => {
       usableItemCount: 1,
       stringFactCount: 1,
       sourceLimitCount: 1,
+      kindCounts: {
+        text_fact: 1,
+        definition: 0,
+        list_item: 0,
+        comparison_point: 0,
+        code_fact: 0,
+        table_fact: 0,
+        numeric_fact: 0,
+        procedure_step: 0,
+        source_limit: 1,
+        contradiction: 0,
+      },
     });
     expect(compiled.evidenceBundle?.requestedFieldIds).toEqual(["total_amount"]);
   });

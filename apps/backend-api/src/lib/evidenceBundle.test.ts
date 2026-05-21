@@ -12,6 +12,8 @@ describe("buildEvidenceBundle", () => {
 
     expect(bundle.items).toHaveLength(1);
     expect(bundle.items[0]?.kind).toBe("contradiction");
+    expect(bundle.diagnostics.kindCounts.contradiction).toBe(1);
+    expect(bundle.diagnostics.kindCounts.text_fact).toBe(0);
     expect(countUsableEvidenceItems(bundle)).toBe(0);
   });
 
@@ -45,6 +47,10 @@ describe("buildEvidenceBundle", () => {
     expect(list.items[0]?.kind).toBe("list_item");
     expect(comparison.items[0]?.kind).toBe("comparison_point");
     expect(procedure.items[0]?.kind).toBe("procedure_step");
+    expect(definition.diagnostics.kindCounts.definition).toBe(1);
+    expect(list.diagnostics.kindCounts.list_item).toBe(1);
+    expect(comparison.diagnostics.kindCounts.comparison_point).toBe(1);
+    expect(procedure.diagnostics.kindCounts.procedure_step).toBe(1);
     expect(countUsableEvidenceItems(definition)).toBe(1);
     expect(countUsableEvidenceItems(list)).toBe(1);
     expect(countUsableEvidenceItems(comparison)).toBe(1);
@@ -63,6 +69,13 @@ describe("buildEvidenceBundle", () => {
     });
 
     expect(bundle.items.map((item) => item.kind)).toEqual(["code_fact", "text_fact", "source_limit"]);
+    expect(bundle.diagnostics.kindCounts).toMatchObject({
+      code_fact: 1,
+      text_fact: 1,
+      source_limit: 1,
+      table_fact: 0,
+      numeric_fact: 0,
+    });
     expect(countUsableEvidenceItems(bundle)).toBe(2);
   });
 });

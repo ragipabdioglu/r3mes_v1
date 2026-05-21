@@ -196,6 +196,24 @@ function readGroundingConfidence(response) {
   );
 }
 
+function increment(acc, key, amount = 1) {
+  const safeKey = String(key ?? "missing");
+  acc[safeKey] = (acc[safeKey] ?? 0) + amount;
+  return acc;
+}
+
+function readEvidenceKindCounts(evidenceBundle, evidenceTypes) {
+  const kindCounts = evidenceBundle?.diagnostics?.kindCounts;
+  if (kindCounts && typeof kindCounts === "object" && !Array.isArray(kindCounts)) {
+    return Object.fromEntries(
+      Object.entries(kindCounts)
+        .map(([key, value]) => [key, Number(value)])
+        .filter(([, value]) => Number.isFinite(value)),
+    );
+  }
+  return compactStrings(evidenceTypes).reduce((acc, kind) => increment(acc, kind), {});
+}
+
 export function scoreEvidenceOnly(testCase, response) {
   const expectations = readExpectations(testCase);
   if (!expectations || typeof expectations !== "object") {
@@ -219,6 +237,7 @@ export function scoreEvidenceOnly(testCase, response) {
     response?.retrieval_debug?.compiledEvidence?.type,
     evidenceItems.map(evidenceItemType),
   ]);
+  const evidenceKindCounts = readEvidenceKindCounts(evidenceBundle, evidenceTypes);
 
   const findings = [];
   const expectedSourceTerms = [
@@ -402,6 +421,7 @@ export function scoreEvidenceOnly(testCase, response) {
       evidenceBundleItemCount,
       compiledEvidenceContradictionCount: compiledContradictionCount,
       evidenceTypes,
+      evidenceKindCounts,
       sourceText,
       titleText,
       contextText,
