@@ -1521,6 +1521,31 @@ function collectProviderStrictFailures(results) {
   );
 }
 
+function summarizeRuntimeControlTower(results) {
+  const withLineage = results.filter((result) => result.runtimeLineage);
+  const qualityFallbackCases = results.filter((result) =>
+    result.runtimeLineage?.controlTower?.qualityFallbackUsed === true ||
+    result.embeddingFallbackUsed === true ||
+    result.rerankerFallbackUsed === true ||
+    result.qdrantFallbackUsed === true,
+  );
+  return {
+    observedCases: withLineage.length,
+    coverageRatio: results.length === 0 ? 0 : Number((withLineage.length / results.length).toFixed(3)),
+    missingCases: results
+      .filter((result) => !result.runtimeLineage)
+      .map((result) => ({ id: result.id, bucket: result.bucket })),
+    qualityFallbackCases: qualityFallbackCases.length,
+    qualityFallbackRatio: results.length === 0 ? 0 : Number((qualityFallbackCases.length / results.length).toFixed(3)),
+    answerPathDistribution: results.reduce((acc, result) => increment(acc, result.answerPathName), {}),
+    qwenCallRatio: ratio(results, (result) => result.qwenCalled === true),
+    validatorCallRatio: ratio(results, (result) => result.validatorCalled === true),
+    embeddingFallbackRatio: ratio(results, (result) => result.embeddingFallbackUsed === true),
+    rerankerFallbackRatio: ratio(results, (result) => result.rerankerFallbackUsed === true),
+    qdrantFallbackRatio: ratio(results, (result) => result.qdrantFallbackUsed === true),
+  };
+}
+
 function summarizeBudgetQuality(results) {
   const casesWithBudget = results.filter((result) => result.budgetMode);
   const expectedBudgetCases = results.filter((result) => result.expectedBudgetMode);
@@ -1644,6 +1669,8 @@ function buildEvalGuardrails(opts) {
     maxFastGroundedModelCandidateP95: readNonNegativeNumberEnv("R3MES_EVAL_MAX_FAST_GROUNDED_MODEL_CANDIDATE_P95", 3),
     maxNormalRagModelCandidateP95: readNonNegativeNumberEnv("R3MES_EVAL_MAX_NORMAL_RAG_MODEL_CANDIDATE_P95", 5),
     maxDeepRagModelCandidateP95: readNonNegativeNumberEnv("R3MES_EVAL_MAX_DEEP_RAG_MODEL_CANDIDATE_P95", 8),
+    minRuntimeLineageCoverage: readNonNegativeNumberEnv("R3MES_EVAL_MIN_RUNTIME_LINEAGE_COVERAGE", strict ? 1 : 0),
+    maxQualityFallbackRatio: readNonNegativeNumberEnv("R3MES_EVAL_MAX_QUALITY_FALLBACK_RATIO", 0),
   };
   const violations = [];
   const pushIfOver = (id, actual, max, detail) => {
@@ -1655,6 +1682,28 @@ function buildEvalGuardrails(opts) {
       detail,
     });
   };
+  const pushIfUnder = (id, actual, min, detail) => {
+    if (!Number.isFinite(Number(actual)) || Number(actual) >= min) return;
+    violations.push({
+      id,
+      actual: Number(actual),
+      min,
+      detail,
+    });
+  };
+
+  pushIfUnder(
+    "runtime_lineage_coverage",
+    opts.runtimeControlTower?.coverageRatio,
+    thresholds.minRuntimeLineageCoverage,
+    "Runtime lineage coverage Faz 0 Control Tower eşiğinin altında.",
+  );
+  pushIfOver(
+    "quality_fallback_ratio",
+    opts.runtimeControlTower?.qualityFallbackRatio,
+    thresholds.maxQualityFallbackRatio,
+    "Strict kalite profillerinde embedding/reranker/qdrant fallback görülmemeli.",
+  );
 
   pushIfOver(
     "reranker_fallback_ratio",
@@ -1880,7 +1929,8 @@ async function main() {
   const rerankerQuality = summarizeRerankerQuality(results);
   const answerQualityTrends = summarizeAnswerQualityTrends(results);
   const evidenceOnlyQuality = summarizeEvidenceOnlyQuality(results);
-  const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality });
+  const runtimeControlTower = summarizeRuntimeControlTower(results);
+  const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality, runtimeControlTower });
   const providerStrictFailures = collectProviderStrictFailures(results);
   const summary = {
     total: results.length,
@@ -1892,6 +1942,7 @@ async function main() {
     validatorCallRatio: ratio(results, (result) => result.validatorCalled === true),
     embeddingFallbackRatio: ratio(results, (result) => result.embeddingFallbackUsed === true),
     rerankerFallbackRatio: ratio(results, (result) => result.rerankerFallbackUsed === true),
+    runtimeControlTower,
     providerStrictFailures,
     routeDecisionModes: results.reduce((acc, result) => {
       const key = result.routeDecisionMode ?? "missing";
