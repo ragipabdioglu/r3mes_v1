@@ -53,6 +53,7 @@ describe("buildRuntimeLineage", () => {
     expect(lineage.composer.deterministicUsed).toBe(true);
     expect(lineage.embedding.fallbackUsed).toBe(false);
     expect(lineage.reranker.fallbackUsed).toBe(false);
+    expect(lineage.controlTower.qualityFallbackUsed).toBe(false);
   });
 
   it("classifies ai-engine validated paths with provider fallbacks", () => {
@@ -101,5 +102,6 @@ describe("buildRuntimeLineage", () => {
       fallbackMode: "privacy_safe",
       blockedReasonCount: 2,
     });
+    expect(lineage.controlTower.qualityFallbackUsed).toBe(true);
   });
 });

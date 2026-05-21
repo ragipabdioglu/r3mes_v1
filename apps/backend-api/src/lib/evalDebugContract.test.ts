@@ -50,6 +50,9 @@ describe("buildEvalDebugContract", () => {
         safety: {
           blockedReasonCount: 0,
         },
+        controlTower: {
+          qualityFallbackUsed: false,
+        },
       },
     });
 
@@ -66,6 +69,7 @@ describe("buildEvalDebugContract", () => {
       answerPath: "rag_fast_path",
       qwen: { called: false },
       embedding: { fallbackUsed: false },
+      controlTower: { qualityFallbackUsed: false },
     });
   });
 });

@@ -92,6 +92,9 @@ export interface RuntimeLineage {
     fallbackMode?: string;
     blockedReasonCount: number;
   };
+  controlTower: {
+    qualityFallbackUsed: boolean;
+  };
 }
 
 export type ReadinessStatus = "pass" | "degraded" | "fail";

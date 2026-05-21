@@ -61,6 +61,16 @@ export function readDebugContract(response) {
     "retrieval_debug.answerQuality",
     "retrieval_debug.answer_quality",
   ]);
+  const runtimeLineage = firstPresent(response, [
+    "eval_debug_contract.runtimeLineage",
+    "evalDebugContract.runtimeLineage",
+    "chat_trace.runtimeLineage",
+    "chat_trace.runtime_lineage",
+    "runtimeLineage",
+    "runtime_lineage",
+    "retrieval_debug.runtimeLineage",
+    "retrieval_debug.runtime_lineage",
+  ]);
 
   return {
     version: version.value ?? null,
@@ -71,6 +81,8 @@ export function readDebugContract(response) {
     answerPlanPath: answerPlan.value === undefined ? null : answerPlan.path,
     answerQuality: answerQuality.value ?? null,
     answerQualityPath: answerQuality.value === undefined ? null : answerQuality.path,
+    runtimeLineage: runtimeLineage.value ?? null,
+    runtimeLineagePath: runtimeLineage.value === undefined ? null : runtimeLineage.path,
   };
 }
 
@@ -82,6 +94,7 @@ export function scoreDebugContract(testCase, response) {
     if (!contract.safetyGate) failures.push("debug_contract_missing_safety_gate");
     if (!contract.answerPlan) failures.push("debug_contract_missing_answer_plan");
     if (!contract.answerQuality) failures.push("debug_contract_missing_answer_quality");
+    if (!contract.runtimeLineage) failures.push("debug_contract_missing_runtime_lineage");
     if (!contract.version) failures.push("debug_contract_version_missing");
   }
 

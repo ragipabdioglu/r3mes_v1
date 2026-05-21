@@ -1127,8 +1127,8 @@ function applyRenderedAnswer(
       blockedReasons: exposedSafetyGate.blockedReasons,
     },
   });
-  next.runtime_lineage = runtimeLineage;
   if (opts.exposeDebug === true) {
+    next.runtime_lineage = runtimeLineage;
     next.grounded_answer = exposedAnswer;
     next.debug_contract_version = EVAL_DEBUG_CONTRACT_VERSION;
     next.answer_plan = answerPlan;
@@ -1276,8 +1276,8 @@ function createConversationalIntentPayload(opts: {
       blockedReasons: [],
     },
   });
-  payload.runtime_lineage = runtimeLineage;
   if (opts.exposeDebug) {
+    payload.runtime_lineage = runtimeLineage;
     payload.chat_trace = opts.chatTrace.snapshot({
       sourceMode: opts.requestContext?.sourceMode ?? "conversational",
       retrieval: opts.requestContext
@@ -2623,9 +2623,9 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               blockedReasons: [],
             },
           });
-          safeParsed.runtime_lineage = runtimeLineage;
           if (exposeDebug && retrievalDebug) parsed.retrieval_debug = retrievalDebug;
           if (exposeDebug) {
+            safeParsed.runtime_lineage = runtimeLineage;
             safeParsed.debug_contract_version = EVAL_DEBUG_CONTRACT_VERSION;
             safeParsed.eval_debug_contract = buildEvalDebugContract({
               runtimeLineage,

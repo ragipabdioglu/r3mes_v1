@@ -8,11 +8,24 @@ describe("chat response boundary", () => {
       id: "chatcmpl_test",
       choices: [],
       sources: [],
+      debug_contract_version: "test",
+      debugContractVersion: "test",
+      eval_debug_contract: { hidden: true },
+      evalDebugContract: { hidden: true },
       grounded_answer: { hidden: true },
+      answer_plan: { hidden: true },
+      answerPlan: { hidden: true },
       safety_gate: { hidden: true },
+      safetyGate: { hidden: true },
       answer_quality: { hidden: true },
+      answerQuality: { hidden: true },
+      evidenceSignals: { hidden: true },
       retrieval_debug: { hidden: true },
+      retrievalDebug: { hidden: true },
       chat_trace: { hidden: true },
+      chatTrace: { hidden: true },
+      runtime_lineage: { hidden: true },
+      runtimeLineage: { hidden: true },
     };
 
     const stripped = stripChatDebugFields(payload);
@@ -26,11 +39,24 @@ describe("chat response boundary", () => {
 
   it("tracks every internal debug key in one place", () => {
     expect(chatDebugResponseKeys()).toEqual([
+      "debug_contract_version",
+      "debugContractVersion",
+      "eval_debug_contract",
+      "evalDebugContract",
       "grounded_answer",
+      "answer_plan",
+      "answerPlan",
       "safety_gate",
+      "safetyGate",
       "answer_quality",
+      "answerQuality",
+      "evidenceSignals",
       "retrieval_debug",
+      "retrievalDebug",
       "chat_trace",
+      "chatTrace",
+      "runtime_lineage",
+      "runtimeLineage",
     ]);
   });
 });

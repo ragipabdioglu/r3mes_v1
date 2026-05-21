@@ -93,6 +93,14 @@ export function buildRuntimeLineage(input: RuntimeLineageInput): RuntimeLineage 
   const qwenCalled = input.qwenCalled ?? inferredQwenCalled;
   const callCount = input.qwenCallCount ?? (qwenCalled ? 1 : 0) + (validatorCalled ? 1 : 0);
 
+  const embeddingFallbackUsed = Boolean(runtime.embeddingFallbackUsed);
+  const rerankerFallbackUsed = Boolean(runtime.rerankerFallbackUsed ?? readBoolean(rerankerDiagnostics.fallbackUsed));
+  const qdrantFallbackUsed = input.retrieval?.qdrantFallbackUsed ??
+    ((
+      runtime.retrievalEngineRequested === "qdrant" ||
+      runtime.retrievalEngineRequested === "hybrid"
+    ) && runtime.retrievalEngineActual === "prisma");
+
   return {
     version: 1,
     profileName: profile.name,
@@ -113,16 +121,12 @@ export function buildRuntimeLineage(input: RuntimeLineageInput): RuntimeLineage 
     retrieval: {
       mode: input.retrieval?.mode,
       qdrantUsed: qdrantWasUsed(input),
-      qdrantFallbackUsed: input.retrieval?.qdrantFallbackUsed ??
-        ((
-          runtime.retrievalEngineRequested === "qdrant" ||
-          runtime.retrievalEngineRequested === "hybrid"
-        ) && runtime.retrievalEngineActual === "prisma"),
+      qdrantFallbackUsed,
     },
     embedding: {
       requestedProvider: runtime.embeddingProviderRequested,
       actualProvider: runtime.embeddingProviderActual,
-      fallbackUsed: Boolean(runtime.embeddingFallbackUsed),
+      fallbackUsed: embeddingFallbackUsed,
       model: runtime.embeddingModel,
       dimension: runtime.embeddingDimension,
     },
@@ -130,12 +134,15 @@ export function buildRuntimeLineage(input: RuntimeLineageInput): RuntimeLineage 
       requestedMode: runtime.rerankerModeRequested,
       actualMode: runtime.rerankerModeActual,
       provider: readString(rerankerDiagnostics.provider),
-      fallbackUsed: Boolean(runtime.rerankerFallbackUsed ?? readBoolean(rerankerDiagnostics.fallbackUsed)),
+      fallbackUsed: rerankerFallbackUsed,
       fallbackReason: runtime.rerankerFallbackReason ?? readString(rerankerDiagnostics.fallbackReason),
     },
     safety: {
       fallbackMode: readString(input.safety?.fallbackMode),
       blockedReasonCount: blockedReasonCount(input.safety?.blockedReasons),
+    },
+    controlTower: {
+      qualityFallbackUsed: Boolean(embeddingFallbackUsed || rerankerFallbackUsed || qdrantFallbackUsed),
     },
   };
 }

@@ -263,6 +263,8 @@ function readRuntimeLineage(response, retrievalDebug, chatTrace, safetyGate) {
   const explicit =
     response?.runtimeLineage ??
     response?.runtime_lineage ??
+    response?.eval_debug_contract?.runtimeLineage ??
+    response?.evalDebugContract?.runtimeLineage ??
     chatTrace?.runtimeLineage ??
     chatTrace?.runtime_lineage ??
     retrievalDebug?.runtimeLineage ??
