@@ -318,10 +318,15 @@ describe("chat proxy RAG orchestration", () => {
     const body = JSON.parse(res.body) as Record<string, unknown>;
     expect(body.sources).toEqual([]);
     expect(body.grounded_answer).toBeUndefined();
+    expect(body.debug_contract_version).toBeUndefined();
+    expect(body.eval_debug_contract).toBeUndefined();
+    expect(body.answer_plan).toBeUndefined();
     expect(body.safety_gate).toBeUndefined();
     expect(body.answer_quality).toBeUndefined();
+    expect(body.evidenceSignals).toBeUndefined();
     expect(body.retrieval_debug).toBeUndefined();
     expect(body.chat_trace).toBeUndefined();
+    expect(body.runtime_lineage).toBeUndefined();
     await app.close();
   });
 
