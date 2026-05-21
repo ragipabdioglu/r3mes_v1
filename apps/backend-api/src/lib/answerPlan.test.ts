@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { QueryContract } from "@r3mes/shared-types";
 
 import { buildAnswerPlan } from "./answerPlan.js";
 import type { AnswerSpec } from "./answerSpec.js";
@@ -74,5 +75,83 @@ describe("buildAnswerPlan", () => {
 
     expect(plan.coverage).toBe("complete");
     expect(plan.requiresModelSynthesis).toBe(false);
+  });
+
+  it("aligns with an explicit QueryContract without changing legacy callers", () => {
+    const queryContract: QueryContract = {
+      operation: "extract_fields",
+      requiredEvidenceType: "source_and_structured_fields",
+      outputFormat: "table",
+      outputConstraints: {
+        maxWords: 48,
+        maxSentencesPerBullet: 1,
+        forbidCaution: true,
+        noRawTableDump: true,
+        format: "table",
+        sourceGroundedOnly: true,
+      },
+      sourceOnly: true,
+      requestedFields: [
+        {
+          id: "primary_measure",
+          label: "Primary Measure",
+          required: true,
+          outputHint: "number",
+          confidence: "high",
+        },
+        {
+          id: "secondary_measure",
+          label: "Secondary Measure",
+          required: true,
+          outputHint: "number",
+          confidence: "medium",
+        },
+      ],
+      forbiddenAdditions: ["source_external_inference", "raw_table_dump"],
+      queryQuality: {
+        shape: "normal",
+        clarityScore: 80,
+        tokenCount: 6,
+        expandedTokenCount: 6,
+        conceptCount: 0,
+        profileConceptCount: 0,
+        weakSignalCount: 2,
+      },
+    };
+
+    const plan = buildAnswerPlan(
+      baseSpec({
+        userQuery: "Kaynağa göre sadece istenen alanları tablo olarak yanıtla.",
+        structuredFacts: [
+          {
+            id: "sf-generic-1",
+            kind: "table_row",
+            sourceId: "source-generic",
+            field: "Primary Measure",
+            value: "42",
+            confidence: "high",
+            provenance: {
+              quote: "Primary Measure 42",
+              extractor: "table-numeric-v1",
+            },
+          },
+        ],
+      }),
+      { queryContract },
+    );
+
+    expect(plan.taskType).toBe("field_extraction");
+    expect(plan.outputFormat).toBe(queryContract.outputFormat);
+    expect(plan.constraints).toEqual(queryContract.outputConstraints);
+    expect(plan.requestedFields.map((field) => field.id)).toEqual(["primary_measure", "secondary_measure"]);
+    expect(plan.forbiddenAdditions).toEqual(queryContract.forbiddenAdditions);
+    expect(plan.selectedFacts.map((fact) => fact.id)).toEqual(["sf-generic-1"]);
+    expect(plan.coverage).toBe("partial");
+    expect(plan.diagnostics).toMatchObject({
+      requestedFieldCount: 2,
+      selectedFactCount: 1,
+      missingFieldIds: ["secondary_measure"],
+    });
+    expect(plan.requiresModelSynthesis).toBe(true);
   });
 });

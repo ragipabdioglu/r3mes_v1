@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AnswerPathName, ChatSourceCitation } from "@r3mes/shared-types";
+import type { AnswerPathName, ChatSourceCitation, QueryContract } from "@r3mes/shared-types";
 import { getConfiguredChatRuntime, normalizeAdapterPath } from "../lib/adapterRuntimeSelect.js";
 import { parseGroundedMedicalAnswer } from "../lib/answerParse.js";
 import { buildAnswerPlan } from "../lib/answerPlan.js";
@@ -97,6 +97,7 @@ interface ChatRetrievalDebug {
   evidence: EvidenceExtractorOutput | null;
   evidenceBundle?: EvidenceExtractorOutput["evidenceBundle"];
   compiledEvidence?: CompiledEvidence | null;
+  queryContract?: QueryContract;
   answerPlan?: ReturnType<typeof buildAnswerPlan>;
   domain: DomainPolicy["domain"];
   responseMode: "natural" | "json";
@@ -941,7 +942,9 @@ function applyRenderedAnswer(
     evidence: retrievalDebug?.evidence ?? null,
     compiledEvidence: retrievalDebug?.compiledEvidence ?? null,
   });
-  const answerPlan = buildAnswerPlan(answerSpec);
+  const answerPlan = buildAnswerPlan(answerSpec, {
+    queryContract: retrievalDebug?.queryContract,
+  });
   const evidenceBundle =
     retrievalDebug?.evidenceBundle ??
     retrievalDebug?.compiledEvidence?.evidenceBundle ??
@@ -2235,6 +2238,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             evidence: retrieval.evidence,
             evidenceBundle,
             compiledEvidence,
+            queryContract: retrievalQueryUnderstanding.queryContract,
             domain: answerDomain,
             responseMode,
             retrievalMode: retrieval.retrievalMode,

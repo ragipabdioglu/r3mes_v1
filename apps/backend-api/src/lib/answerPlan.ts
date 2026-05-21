@@ -1,3 +1,5 @@
+import type { QueryContract } from "@r3mes/shared-types";
+
 import type { AnswerDomain, AnswerIntent } from "./answerSchema.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import { detectAnswerTask, type AnswerTaskType } from "./answerTaskDetector.js";
@@ -31,6 +33,10 @@ export interface AnswerPlan {
     selectedFactCount: number;
     missingFieldIds: string[];
   };
+}
+
+export interface BuildAnswerPlanOptions {
+  queryContract?: QueryContract;
 }
 
 function normalize(value: string | undefined): string {
@@ -84,34 +90,73 @@ function coverageFor(fields: RequestedField[], selectedFacts: StructuredFact[]):
   return "partial";
 }
 
-export function buildAnswerPlan(spec: AnswerSpec): AnswerPlan {
+function requestedFieldsFromContract(queryContract: QueryContract): RequestedField[] {
+  return queryContract.requestedFields.map((field) => ({
+    ...field,
+    aliases: [],
+    matchedAliases: [],
+  }));
+}
+
+function taskTypeFromContract(queryContract: QueryContract): AnswerTaskType | "grounded_summary" | null {
+  switch (queryContract.operation) {
+    case "conversation":
+      return "conversation";
+    case "define":
+      return "definition";
+    case "list":
+      return "list_items";
+    case "compare":
+      return "compare_concepts";
+    case "summarize":
+      return "summarize_opinions";
+    case "procedure":
+      return "procedure";
+    case "extract_fields":
+      return "field_extraction";
+    case "explain_with_sources":
+      return "source_grounded_explain";
+    case "unknown":
+      return "grounded_summary";
+    case "answer":
+      return null;
+    default:
+      return null;
+  }
+}
+
+export function buildAnswerPlan(spec: AnswerSpec, opts: BuildAnswerPlanOptions = {}): AnswerPlan {
   const taskDetection = detectAnswerTask(spec.userQuery);
   const detection = taskDetection.requestedFieldDetection;
-  const selectedFacts = selectFactsForFields(spec.structuredFacts ?? [], detection.requestedFields);
-  const missingFieldIds = detection.requestedFields
+  const requestedFields = opts.queryContract ? requestedFieldsFromContract(opts.queryContract) : detection.requestedFields;
+  const outputConstraints = opts.queryContract?.outputConstraints ?? taskDetection.outputConstraints;
+  const outputFormat = opts.queryContract?.outputFormat ?? outputConstraints.format;
+  const contractTaskType = opts.queryContract ? taskTypeFromContract(opts.queryContract) : null;
+  const selectedFacts = selectFactsForFields(spec.structuredFacts ?? [], requestedFields);
+  const missingFieldIds = requestedFields
     .filter((field) => !selectedFacts.some((fact) => factMatchesField(fact, field)))
     .map((field) => field.id);
   const taskType =
-    detection.requestedFields.length > 0 ? "field_extraction" :
+    contractTaskType ?? (requestedFields.length > 0 ? "field_extraction" :
       taskDetection.taskType === "unknown" ? "grounded_summary" :
-        taskDetection.taskType;
-  const coverage = coverageFor(detection.requestedFields, selectedFacts);
+        taskDetection.taskType);
+  const coverage = coverageFor(requestedFields, selectedFacts);
 
   return {
     domain: spec.answerDomain,
     intent: spec.answerIntent,
     taskType,
-    outputFormat: taskDetection.outputConstraints.format,
-    requestedFields: detection.requestedFields,
+    outputFormat,
+    requestedFields,
     selectedFacts,
-    constraints: taskDetection.outputConstraints,
+    constraints: outputConstraints,
     coverage,
     forbiddenAdditions: [
-      ...taskDetection.forbiddenAdditions,
+      ...(opts.queryContract?.forbiddenAdditions ?? taskDetection.forbiddenAdditions),
     ],
     requiresModelSynthesis: taskType !== "field_extraction" || coverage !== "complete",
     diagnostics: {
-      requestedFieldCount: detection.requestedFields.length,
+      requestedFieldCount: requestedFields.length,
       selectedFactCount: selectedFacts.length,
       missingFieldIds,
     },
