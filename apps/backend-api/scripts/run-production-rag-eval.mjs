@@ -120,6 +120,13 @@ function runSuite([id, file]) {
     guardrailStatus: summary.evalGuardrails?.status ?? "unknown",
     guardrailStrict: summary.evalGuardrails?.strict ?? false,
     violations: summary.evalGuardrails?.violations ?? [],
+    runtimeControlTower: summary.runtimeControlTower ?? null,
+    providerStrictFailures: summary.providerStrictFailures ?? [],
+    answerPathDistribution: summary.answerPathDistribution ?? {},
+    qwenCallRatio: Number(summary.qwenCallRatio ?? 0),
+    validatorCallRatio: Number(summary.validatorCallRatio ?? 0),
+    embeddingFallbackRatio: Number(summary.embeddingFallbackRatio ?? 0),
+    rerankerFallbackRatio: Number(summary.rerankerFallbackRatio ?? 0),
     buckets: summary.buckets ?? {},
     routeDecisionModes: summary.routeDecisionModes ?? {},
   };
@@ -203,6 +210,24 @@ const expectedCases = results.reduce((sum, suite) => sum + suite.expectedCases, 
 const guardrailViolations = results.flatMap((suite) =>
   suite.violations.map((violation) => ({ suite: suite.id, ...violation })),
 );
+const providerStrictFailures = results.flatMap((suite) =>
+  (Array.isArray(suite.providerStrictFailures) ? suite.providerStrictFailures : []).map((failure) => ({
+    suite: suite.id,
+    ...failure,
+  })),
+);
+const runtimeObservedCases = results.reduce((sum, suite) => sum + Number(suite.runtimeControlTower?.observedCases ?? 0), 0);
+const runtimeSyntheticCases = results.reduce((sum, suite) => sum + Number(suite.runtimeControlTower?.syntheticCases ?? 0), 0);
+const runtimeQualityFallbackCases = results.reduce(
+  (sum, suite) => sum + Number(suite.runtimeControlTower?.qualityFallbackCases ?? 0),
+  0,
+);
+const runtimeMissingCases = results.flatMap((suite) =>
+  (Array.isArray(suite.runtimeControlTower?.missingCases) ? suite.runtimeControlTower.missingCases : []).map((item) => ({
+    suite: suite.id,
+    ...item,
+  })),
+);
 const warnSuites = results.filter((suite) => suite.guardrailStatus === "warn").map((suite) => suite.id);
 const failedSuites = results.filter((suite) => suite.status !== "ok" || suite.failed > 0).map((suite) => suite.id);
 const guardrailFailedSuites = results
@@ -233,6 +258,15 @@ const aggregate = {
   guardrailFailedSuites,
   warnSuites,
   guardrailViolations,
+  providerStrictFailures,
+  runtimeControlTower: {
+    observedCases: runtimeObservedCases,
+    syntheticCases: runtimeSyntheticCases,
+    coverageRatio: total === 0 ? 0 : Number((runtimeObservedCases / total).toFixed(3)),
+    missingCases: runtimeMissingCases,
+    qualityFallbackCases: runtimeQualityFallbackCases,
+    qualityFallbackRatio: total === 0 ? 0 : Number((runtimeQualityFallbackCases / total).toFixed(3)),
+  },
   suites: results,
 };
 
@@ -249,6 +283,8 @@ console.log(JSON.stringify({
   warnSuites,
   failedSuites,
   guardrailFailedSuites,
+  runtimeControlTower: aggregate.runtimeControlTower,
+  providerStrictFailureCount: aggregate.providerStrictFailures.length,
   out: outFile,
 }, null, 2));
 
