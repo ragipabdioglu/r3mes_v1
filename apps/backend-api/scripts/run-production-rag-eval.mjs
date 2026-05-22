@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mergeFailureTaxonomy } from "./eval-scorers/failure-taxonomy.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 const backendRoot = resolve(repoRoot, "apps/backend-api");
@@ -122,6 +123,7 @@ function runSuite([id, file]) {
     violations: summary.evalGuardrails?.violations ?? [],
     runtimeControlTower: summary.runtimeControlTower ?? null,
     providerStrictFailures: summary.providerStrictFailures ?? [],
+    failureTaxonomy: summary.failureTaxonomy ?? null,
     answerPathDistribution: summary.answerPathDistribution ?? {},
     qwenCallRatio: Number(summary.qwenCallRatio ?? 0),
     validatorCallRatio: Number(summary.validatorCallRatio ?? 0),
@@ -216,6 +218,7 @@ const providerStrictFailures = results.flatMap((suite) =>
     ...failure,
   })),
 );
+const failureTaxonomy = mergeFailureTaxonomy(results);
 const runtimeObservedCases = results.reduce((sum, suite) => sum + Number(suite.runtimeControlTower?.observedCases ?? 0), 0);
 const runtimeSyntheticCases = results.reduce((sum, suite) => sum + Number(suite.runtimeControlTower?.syntheticCases ?? 0), 0);
 const runtimeQualityFallbackCases = results.reduce(
@@ -259,6 +262,7 @@ const aggregate = {
   warnSuites,
   guardrailViolations,
   providerStrictFailures,
+  failureTaxonomy,
   runtimeControlTower: {
     observedCases: runtimeObservedCases,
     syntheticCases: runtimeSyntheticCases,
@@ -285,6 +289,7 @@ console.log(JSON.stringify({
   guardrailFailedSuites,
   runtimeControlTower: aggregate.runtimeControlTower,
   providerStrictFailureCount: aggregate.providerStrictFailures.length,
+  failureTaxonomy: aggregate.failureTaxonomy,
   out: outFile,
 }, null, 2));
 

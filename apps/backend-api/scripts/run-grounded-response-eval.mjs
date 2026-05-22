@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { detectAnswerQualityFindings } from "./eval-scorers/answer-quality.mjs";
 import { scoreDebugContract } from "./eval-scorers/debug-contract.mjs";
 import { scoreEvidenceOnly } from "./eval-scorers/evidence-only.mjs";
+import { summarizeFailureTaxonomy } from "./eval-scorers/failure-taxonomy.mjs";
 import { summarizeAnswerQualityTrends } from "./eval-scorers/trend-summary.mjs";
 import { adaptEvalCasesForRunner } from "./eval-core/index.mjs";
 
@@ -1942,6 +1943,7 @@ async function main() {
   const runtimeControlTower = summarizeRuntimeControlTower(results);
   const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality, runtimeControlTower });
   const providerStrictFailures = collectProviderStrictFailures(results);
+  const failureTaxonomy = summarizeFailureTaxonomy(results);
   const summary = {
     total: results.length,
     passed,
@@ -1954,6 +1956,7 @@ async function main() {
     rerankerFallbackRatio: ratio(results, (result) => result.rerankerFallbackUsed === true),
     runtimeControlTower,
     providerStrictFailures,
+    failureTaxonomy,
     routeDecisionModes: results.reduce((acc, result) => {
       const key = result.routeDecisionMode ?? "missing";
       acc[key] = (acc[key] ?? 0) + 1;
