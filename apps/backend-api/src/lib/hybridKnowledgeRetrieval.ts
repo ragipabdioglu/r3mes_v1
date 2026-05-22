@@ -20,6 +20,7 @@ import {
 import { embedTextForQdrantWithDiagnostics, type QdrantEmbeddingDiagnostics } from "./qdrantEmbedding.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
+import { getRuntimeFallbackPolicy } from "./runtimeFallbackPolicy.js";
 import { getEvidenceExtractorBudget, runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 import type { RetrievalBudgetMode } from "./retrievalBudget.js";
@@ -108,6 +109,9 @@ export interface HybridRetrievedKnowledgeContext {
       evidenceUsableFactCount: number;
     };
     qdrantEmbedding: QdrantEmbeddingDiagnostics | null;
+    providerFailures?: Array<{ provider: "qdrant" | "prisma" | "critical_evidence"; reason: string }>;
+    qdrantProviderFailed?: boolean;
+    qdrantFallbackUsed?: boolean;
     retrievalMode: "true_hybrid";
   };
 }
@@ -1540,15 +1544,34 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     qdrantResult.status === "fulfilled" ? qdrantResult.value.embedding : emptyQdrantEmbeddingDiagnostics();
   const prismaCandidates = prismaResult.status === "fulfilled" ? prismaResult.value : [];
   const criticalEvidenceCandidates = criticalEvidenceResult.status === "fulfilled" ? criticalEvidenceResult.value : [];
+  const providerFailures: NonNullable<HybridRetrievedKnowledgeContext["diagnostics"]["providerFailures"]> = [];
   if (qdrantResult.status === "rejected") {
+    const reason = qdrantResult.reason instanceof Error ? qdrantResult.reason.message : String(qdrantResult.reason);
+    providerFailures.push({ provider: "qdrant", reason });
+    if (!getRuntimeFallbackPolicy().allowQdrantFailSoft) {
+      throw new Error(`QDRANT_PROVIDER_UNAVAILABLE:true_hybrid:${reason}`);
+    }
     console.warn(`[hybrid-retrieval] qdrant candidate collection failed: ${qdrantResult.reason}`);
   }
   if (prismaResult.status === "rejected") {
+    const reason = prismaResult.reason instanceof Error ? prismaResult.reason.message : String(prismaResult.reason);
+    providerFailures.push({ provider: "prisma", reason });
     console.warn(`[hybrid-retrieval] prisma candidate collection failed: ${prismaResult.reason}`);
   }
   if (criticalEvidenceResult.status === "rejected") {
+    const reason =
+      criticalEvidenceResult.reason instanceof Error
+        ? criticalEvidenceResult.reason.message
+        : String(criticalEvidenceResult.reason);
+    providerFailures.push({ provider: "critical_evidence", reason });
     console.warn(`[hybrid-retrieval] critical evidence candidate collection failed: ${criticalEvidenceResult.reason}`);
   }
+  const qdrantProviderFailed = providerFailures.some((failure) => failure.provider === "qdrant");
+  const providerFailureDiagnostics = {
+    providerFailures,
+    qdrantProviderFailed,
+    qdrantFallbackUsed: qdrantProviderFailed,
+  };
 
   const deduped = dedupeHybridKnowledgeCandidates([...criticalEvidenceCandidates, ...qdrantCandidates, ...prismaCandidates]);
   if (strictRouteScope && deduped.length === 0) {
@@ -1574,6 +1597,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
     };
@@ -1611,6 +1635,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
     };
@@ -1647,6 +1672,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
     };
@@ -1674,6 +1700,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
     };
@@ -1772,6 +1799,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
     };
@@ -1885,6 +1913,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           evidence: evidenceRun.output,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
     };
@@ -1951,6 +1980,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         evidence: evidenceRun.output,
       }),
       qdrantEmbedding: qdrantEmbeddingDiagnostics,
+      ...providerFailureDiagnostics,
       retrievalMode: "true_hybrid",
     },
   };

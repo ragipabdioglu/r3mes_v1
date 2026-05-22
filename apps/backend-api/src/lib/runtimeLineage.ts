@@ -95,7 +95,10 @@ export function buildRuntimeLineage(input: RuntimeLineageInput): RuntimeLineage 
 
   const embeddingFallbackUsed = Boolean(runtime.embeddingFallbackUsed);
   const rerankerFallbackUsed = Boolean(runtime.rerankerFallbackUsed ?? readBoolean(rerankerDiagnostics.fallbackUsed));
+  const qdrantFallbackFromDiagnostics = readBoolean(diagnostics.qdrantFallbackUsed) ??
+    readBoolean(diagnostics.qdrantProviderFailed);
   const qdrantFallbackUsed = input.retrieval?.qdrantFallbackUsed ??
+    qdrantFallbackFromDiagnostics ??
     ((
       runtime.retrievalEngineRequested === "qdrant" ||
       runtime.retrievalEngineRequested === "hybrid"

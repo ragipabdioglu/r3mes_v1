@@ -1986,19 +1986,44 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           ? await (async () => {
               const engine = getRetrievalEngine();
               if (engine === "hybrid" && shouldUseTrueHybridRetrieval()) {
-                const hybridRetrieval = await retrieveKnowledgeContextTrueHybrid({
-                  query: plannedRetrievalQuery,
-                  evidenceQuery: retrievalQuery,
-                  accessibleCollectionIds: retrievalCollectionIds,
-                  routePlan: retrievalRoutePlan,
-                  limit: retrievalBudget.sourceLimit,
-                  budgetMode: retrievalBudget.mode,
-                });
-                return {
-                  ...hybridRetrieval,
-                  retrievalMode: "true_hybrid" as const,
-                  retrievalDiagnostics: hybridRetrieval.diagnostics,
-                };
+                try {
+                  const hybridRetrieval = await retrieveKnowledgeContextTrueHybrid({
+                    query: plannedRetrievalQuery,
+                    evidenceQuery: retrievalQuery,
+                    accessibleCollectionIds: retrievalCollectionIds,
+                    routePlan: retrievalRoutePlan,
+                    limit: retrievalBudget.sourceLimit,
+                    budgetMode: retrievalBudget.mode,
+                  });
+                  return {
+                    ...hybridRetrieval,
+                    retrievalMode: "true_hybrid" as const,
+                    retrievalDiagnostics: hybridRetrieval.diagnostics,
+                  };
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  if (message.startsWith("QDRANT_PROVIDER_UNAVAILABLE:true_hybrid:")) {
+                    req.log.error({ err: message }, "True hybrid retrieval failed in strict runtime");
+                    strictQdrantFailure = { message };
+                    chatTrace.recordNow("retrieval", "error", {
+                      name: "qdrant_provider_failed",
+                      reason: message,
+                      retrievalEngineRequested: engine,
+                      retrievalMode: "true_hybrid",
+                      strictRuntime: true,
+                    });
+                    return {
+                      contextText: "",
+                      sources: [] as ChatSourceCitation[],
+                      lowGroundingConfidence: true,
+                      groundingConfidence: "low" as const,
+                      evidence: null,
+                      retrievalMode: "true_hybrid" as const,
+                      retrievalDiagnostics: null,
+                    };
+                  }
+                  throw error;
+                }
               }
               if (engine === "qdrant" || engine === "hybrid") {
                 try {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   alignHybridKnowledgeCandidates,
@@ -29,6 +29,11 @@ vi.mock("./qdrantEmbedding.js", () => ({
     },
   })),
 }));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 function candidate(overrides: Partial<HybridKnowledgeCandidate> & {
   id: string;
@@ -166,6 +171,80 @@ describe("true hybrid retrieval helpers", () => {
       fallbackUsed: false,
       dimension: 3,
     });
+
+    findMany.mockRestore();
+    qdrant.mockRestore();
+  });
+
+  it("fails closed on qdrant provider failure in strict runtime", async () => {
+    vi.stubEnv("R3MES_RUNTIME_PROFILE", "eval");
+    const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue([
+      {
+        id: "doc-1",
+        documentId: "doc-1",
+        chunkIndex: 0,
+        content: "Topic: migration\nMigration öncesinde rollback planı hazırlanmalıdır.",
+        tokenCount: 10,
+        autoMetadata: { domain: "technical", keywords: ["migration", "rollback"] },
+        document: {
+          title: "migration",
+          collectionId: "kc-1",
+          autoMetadata: { domain: "technical", keywords: ["migration"] },
+        },
+        embedding: { values: [] },
+      },
+    ] as never);
+    const qdrant = vi.mocked(searchQdrantKnowledge).mockRejectedValue(new Error("qdrant unavailable"));
+
+    await expect(
+      retrieveKnowledgeContextTrueHybrid({
+        query: "Migration öncesinde ne yapılmalı?",
+        evidenceQuery: "Migration öncesinde ne yapılmalı?",
+        accessibleCollectionIds: ["kc-1"],
+        limit: 2,
+        budgetMode: "fast_grounded",
+      }),
+    ).rejects.toThrow("QDRANT_PROVIDER_UNAVAILABLE:true_hybrid:qdrant unavailable");
+
+    findMany.mockRestore();
+    qdrant.mockRestore();
+  });
+
+  it("keeps qdrant fail-soft visible in local-dev true hybrid diagnostics", async () => {
+    vi.stubEnv("R3MES_RUNTIME_PROFILE", "local-dev");
+    vi.stubEnv("R3MES_RERANKER_MODE", "deterministic");
+    vi.stubEnv("R3MES_RAG_MIN_RERANK_SCORE", "0.1");
+    const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue([
+      {
+        id: "doc-1",
+        documentId: "doc-1",
+        chunkIndex: 0,
+        content: "Topic: migration\nMigration öncesinde rollback planı hazırlanmalıdır.",
+        tokenCount: 10,
+        autoMetadata: { domain: "technical", keywords: ["migration", "rollback"] },
+        document: {
+          title: "migration",
+          collectionId: "kc-1",
+          autoMetadata: { domain: "technical", keywords: ["migration"] },
+        },
+        embedding: { values: [] },
+      },
+    ] as never);
+    const qdrant = vi.mocked(searchQdrantKnowledge).mockRejectedValue(new Error("qdrant unavailable"));
+
+    const result = await retrieveKnowledgeContextTrueHybrid({
+      query: "Migration öncesinde ne yapılmalı?",
+      evidenceQuery: "Migration öncesinde ne yapılmalı?",
+      accessibleCollectionIds: ["kc-1"],
+      limit: 1,
+      budgetMode: "fast_grounded",
+    });
+
+    expect(result.diagnostics.qdrantProviderFailed).toBe(true);
+    expect(result.diagnostics.qdrantFallbackUsed).toBe(true);
+    expect(result.diagnostics.providerFailures).toEqual([
+      { provider: "qdrant", reason: "qdrant unavailable" },
+    ]);
 
     findMany.mockRestore();
     qdrant.mockRestore();
@@ -534,6 +613,10 @@ describe("true hybrid retrieval helpers", () => {
       },
     ];
     const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue(docs as never);
+    const findDocuments = vi.spyOn(prisma.knowledgeDocument, "findMany").mockResolvedValue([
+      { title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Yılı Kar Dağıtım Tablosu.pdf" },
+      { title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Profit Distribution Table.pdf" },
+    ] as never);
     const qdrant = vi.mocked(searchQdrantKnowledge).mockResolvedValue([]);
     const query =
       "EREGL 1576833 için Türkçe kar dağıtım tablosu ile İngilizce profit distribution table aynı bildirim indeksine mi ait?";
@@ -551,6 +634,7 @@ describe("true hybrid retrieval helpers", () => {
     expect(titles).toContain("Kar Payı Dağıtım");
     expect(titles).toContain("Profit Distribution");
     findMany.mockRestore();
+    findDocuments.mockRestore();
     qdrant.mockRestore();
   });
 
