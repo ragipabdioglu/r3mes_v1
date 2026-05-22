@@ -194,6 +194,9 @@ export function validateAnswerQuality(input: ValidateAnswerQualityInput): Answer
       "Kaynakta özel alarm",
       "yatırım tavsiyesi",
       "risk koşulu",
+      "please verify with",
+      "verify with a current authoritative source",
+      "general informational purposes",
     ]);
     if (cautionTerms.length > 0) {
       pushFinding(findings, "unnecessary_warning", "fail", `unnecessary caution terms: ${cautionTerms.join(",")}`);

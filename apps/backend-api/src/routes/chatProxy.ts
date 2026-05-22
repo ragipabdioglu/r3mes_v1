@@ -1141,7 +1141,15 @@ function applyRenderedAnswer(
       answerQualityFindings: qualityFindings,
       answerPlan,
       evidenceSignals,
+      evidenceBundle,
       evidenceBundleDiagnostics: evidenceBundle?.diagnostics ?? null,
+      compiledEvidence: retrievalDebug?.compiledEvidence ?? null,
+      composerDiagnostics: {
+        plannedComposerUsed: answerQuality.plannedComposerUsed,
+        fallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
+        lowLanguageQualityDetected: answerQuality.lowLanguageQualityDetected,
+      },
+      sourceCount: exposedSources.length,
       sourceSelection: retrievalDebug?.sourceSelection,
       runtimeLineage,
       retrievalDebug: retrievalDebug

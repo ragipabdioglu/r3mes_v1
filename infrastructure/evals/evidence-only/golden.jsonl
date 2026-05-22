@@ -1,1 +1,1 @@
-{"id":"evidence_only_contract_smoke","bucket":"evidence_only","messages":[{"role":"user","content":"Merhaba"}],"collectionIds":[],"includePublic":false,"evalModes":["evidence"],"evidenceExpectations":{"mustHaveSources":false,"maxSources":0,"minEvidenceFacts":0}}
+{"id":"evidence_only_contract_smoke","bucket":"evidence_only","messages":[{"role":"user","content":"Merhaba"}],"collectionIds":[],"includePublic":false,"mustPassSafety":false,"evalModes":["evidence"],"evidenceExpectations":{"mustHaveSources":false,"maxSources":0,"minEvidenceFacts":0}}

@@ -10,6 +10,8 @@ const CHAT_DEBUG_RESPONSE_KEYS = [
   "safetyGate",
   "answer_quality",
   "answerQuality",
+  "answer_baseline",
+  "answerBaseline",
   "evidenceSignals",
   "retrieval_debug",
   "retrievalDebug",

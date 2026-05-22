@@ -2,41 +2,95 @@ import { describe, expect, it } from "vitest";
 import { validateAnswerQuality } from "./lib/answerQualityValidator.js";
 
 describe("validateAnswerQuality", () => {
-  it("flags required field values that are absent or unmapped", () => {
+  it("flags required field values that appear without their expected labels", () => {
     const findings = validateAnswerQuality({
-      answer: "511.801.109",
+      answer: "42 units",
       sourceCount: 1,
       evidenceFactCount: 1,
       expectations: {
-        requiredFieldValues: [{ fieldId: "net_donem_kari", label: "Net Dönem Kârı", value: "511.801.109" }],
+        requiredFieldValues: [{ fieldId: "item_count", label: "Item count", value: "42 units" }],
       },
     });
 
     expect(findings.map((finding) => finding.bucket)).toContain("table_field_mismatch");
   });
 
-  it("flags sourced answers that omit required values", () => {
+  it("flags source_found_but_bad_answer when sourced answers omit required values", () => {
     const findings = validateAnswerQuality({
-      answer: "Kaynakta dönem kârı var.",
+      answer: "The source describes the requested metric but does not include the final value.",
       sourceCount: 1,
       evidenceFactCount: 2,
       expectations: {
-        requiredFieldValues: [{ fieldId: "net_donem_kari", value: "511.801.109" }],
+        requiredFieldValues: [{ fieldId: "requested_metric", value: "42 units" }],
       },
     });
 
     expect(findings.some((finding) => finding.bucket === "source_found_but_bad_answer" && finding.severity === "fail")).toBe(true);
   });
 
-  it("flags over-aggressive no-source responses when evidence exists", () => {
+  it("flags over_aggressive_no_source when an answer denies available evidence", () => {
     const findings = validateAnswerQuality({
-      answer: "Kaynak bulunamad.",
+      answer: "No source was found for this request.",
       sourceCount: 1,
       evidenceBundleItemCount: 1,
       expectations: {},
     });
 
-    expect(findings.map((finding) => finding.bucket)).toContain("over_aggressive_no_source");
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        bucket: "over_aggressive_no_source",
+        severity: "fail",
+      }),
+    );
+  });
+
+  it("flags template_answer and unnecessary_warning for generic caution boilerplate", () => {
+    const findings = validateAnswerQuality({
+      answer: "This answer is for general informational purposes only. Please verify with a current authoritative source.",
+      expectations: {
+        forbidCaution: true,
+        forbiddenAnswerTerms: ["general informational purposes only"],
+      },
+    });
+
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ bucket: "template_answer", severity: "fail" }),
+        expect.objectContaining({ bucket: "unnecessary_warning", severity: "fail" }),
+      ]),
+    );
+  });
+
+  it("flags raw_table_dump for unprocessed table-like rows", () => {
+    const findings = validateAnswerQuality({
+      answer: "Metric A\t10\t20\t30\t40",
+      expectations: {
+        noRawTableDump: true,
+      },
+    });
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        bucket: "raw_table_dump",
+        severity: "fail",
+      }),
+    );
+  });
+
+  it("flags wrong_output_format when bullets are required but prose is returned", () => {
+    const findings = validateAnswerQuality({
+      answer: "The answer is written as a single prose sentence instead of a list.",
+      expectations: {
+        format: "bullets",
+      },
+    });
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        bucket: "wrong_output_format",
+        severity: "fail",
+      }),
+    );
   });
 
   it("keeps legacy presentation checks deterministic", () => {

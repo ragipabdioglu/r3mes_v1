@@ -61,6 +61,14 @@ export function readDebugContract(response) {
     "retrieval_debug.answerQuality",
     "retrieval_debug.answer_quality",
   ]);
+  const answerBaseline = firstPresent(response, [
+    "eval_debug_contract.answerBaseline",
+    "evalDebugContract.answerBaseline",
+    "answer_baseline",
+    "answerBaseline",
+    "retrieval_debug.answerBaseline",
+    "retrieval_debug.answer_baseline",
+  ]);
   const runtimeLineage = firstPresent(response, [
     "eval_debug_contract.runtimeLineage",
     "evalDebugContract.runtimeLineage",
@@ -90,6 +98,8 @@ export function readDebugContract(response) {
     answerPlanPath: answerPlan.value === undefined ? null : answerPlan.path,
     answerQuality: answerQuality.value ?? null,
     answerQualityPath: answerQuality.value === undefined ? null : answerQuality.path,
+    answerBaseline: answerBaseline.value ?? null,
+    answerBaselinePath: answerBaseline.value === undefined ? null : answerBaseline.path,
     runtimeLineage: runtimeLineage.value ?? null,
     runtimeLineagePath: runtimeLineage.value === undefined ? null : runtimeLineage.path,
     answerPath: answerPath.value ?? null,
