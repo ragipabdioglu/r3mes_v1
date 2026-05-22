@@ -1807,12 +1807,32 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
           requestedCollectionCount: requestedCollectionIds.length,
           accessibleCollectionCount: accessibleCollections.length,
         });
-        return sendApiError(
-          reply,
-          403,
-          "KNOWLEDGE_ACCESS_DENIED",
-          "İstenen knowledge collection'ların en az biri erişilebilir değil",
-        );
+        reply.code(403);
+        const errorPayload: Record<string, unknown> = {
+          error: "KNOWLEDGE_ACCESS_DENIED",
+          message: "İstenen knowledge collection'ların en az biri erişilebilir değil",
+        };
+        if (exposeDebug) {
+          const runtimeLineage = buildRuntimeLineage({
+            answerPath: "no_source_fallback",
+            stream,
+            safety: {
+              fallbackMode: "access_denied",
+              blockedReasons: ["KNOWLEDGE_ACCESS_DENIED"],
+            },
+          });
+          errorPayload.runtime_lineage = runtimeLineage;
+          errorPayload.eval_debug_contract = buildEvalDebugContract({ runtimeLineage });
+          errorPayload.chat_trace = chatTrace.snapshot({
+            sourceMode: "requested_private",
+            answerPath: {
+              name: "knowledge_access_denied",
+              retrievalWasUsed: false,
+            },
+            runtimeLineage,
+          } as Parameters<ChatTraceBuilder["snapshot"]>[0] & Record<string, unknown>);
+        }
+        return errorPayload;
       }
 
       const conversationalIntent = queryUnderstanding.conversationalIntent;

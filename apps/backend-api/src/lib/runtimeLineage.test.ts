@@ -43,6 +43,12 @@ describe("buildRuntimeLineage", () => {
     });
 
     expect(lineage.answerPath).toBe("rag_fast_path");
+    expect(lineage.fallbackPolicy).toEqual({
+      mode: "failClosed",
+      embedding: "failClosed",
+      reranker: "failClosed",
+      qdrant: "failClosed",
+    });
     expect(lineage.qwen).toMatchObject({
       called: false,
       validatorCalled: false,
@@ -87,6 +93,7 @@ describe("buildRuntimeLineage", () => {
       validatorCalled: true,
       callCount: 2,
     });
+    expect(lineage.fallbackPolicy.mode).toBe("failClosed");
     expect(lineage.retrieval.qdrantFallbackUsed).toBe(true);
     expect(lineage.embedding).toMatchObject({
       requestedProvider: "bge-m3",

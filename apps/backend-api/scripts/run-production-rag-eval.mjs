@@ -221,6 +221,16 @@ const providerStrictFailures = results.flatMap((suite) =>
 const failureTaxonomy = mergeFailureTaxonomy(results);
 const runtimeObservedCases = results.reduce((sum, suite) => sum + Number(suite.runtimeControlTower?.observedCases ?? 0), 0);
 const runtimeSyntheticCases = results.reduce((sum, suite) => sum + Number(suite.runtimeControlTower?.syntheticCases ?? 0), 0);
+const runtimeSkippedPublicBoundaryCases = results.flatMap((suite) =>
+  (Array.isArray(suite.runtimeControlTower?.skippedPublicBoundaryCases)
+    ? suite.runtimeControlTower.skippedPublicBoundaryCases
+    : []
+  ).map((item) => ({
+    suite: suite.id,
+    ...item,
+  })),
+);
+const runtimeExpectedCases = Math.max(0, total - runtimeSkippedPublicBoundaryCases.length);
 const runtimeQualityFallbackCases = results.reduce(
   (sum, suite) => sum + Number(suite.runtimeControlTower?.qualityFallbackCases ?? 0),
   0,
@@ -266,7 +276,9 @@ const aggregate = {
   runtimeControlTower: {
     observedCases: runtimeObservedCases,
     syntheticCases: runtimeSyntheticCases,
-    coverageRatio: total === 0 ? 0 : Number((runtimeObservedCases / total).toFixed(3)),
+    expectedCases: runtimeExpectedCases,
+    skippedPublicBoundaryCases: runtimeSkippedPublicBoundaryCases,
+    coverageRatio: runtimeExpectedCases === 0 ? 1 : Number((runtimeObservedCases / runtimeExpectedCases).toFixed(3)),
     missingCases: runtimeMissingCases,
     qualityFallbackCases: runtimeQualityFallbackCases,
     qualityFallbackRatio: total === 0 ? 0 : Number((runtimeQualityFallbackCases / total).toFixed(3)),

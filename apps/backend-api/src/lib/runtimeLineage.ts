@@ -1,4 +1,9 @@
-import type { AnswerPathName, RuntimeLineage, RuntimeProfile } from "@r3mes/shared-types";
+import type {
+  AnswerPathName,
+  RuntimeFallbackPolicyMode,
+  RuntimeLineage,
+  RuntimeProfile,
+} from "@r3mes/shared-types";
 
 import { resolveRuntimeProfile } from "./runtimeProfile.js";
 
@@ -82,6 +87,12 @@ function qdrantWasUsed(input: RuntimeLineageInput): boolean {
     input.retrieval?.runtime?.retrievalEngineActual === "hybrid";
 }
 
+function fallbackPolicyForProfile(profile: RuntimeProfile): RuntimeFallbackPolicyMode {
+  if (profile.strictness === "quality_fallback_blocked") return "failClosed";
+  if (profile.name === "peft-lab") return "warnOnly";
+  return "failSoft";
+}
+
 export function buildRuntimeLineage(input: RuntimeLineageInput): RuntimeLineage {
   const profile = input.profile ?? resolveRuntimeProfile();
   const runtime = input.retrieval?.runtime ?? {};
@@ -103,12 +114,19 @@ export function buildRuntimeLineage(input: RuntimeLineageInput): RuntimeLineage 
       runtime.retrievalEngineRequested === "qdrant" ||
       runtime.retrievalEngineRequested === "hybrid"
     ) && runtime.retrievalEngineActual === "prisma");
+  const fallbackPolicy = fallbackPolicyForProfile(profile);
 
   return {
     version: 1,
     profileName: profile.name,
     answerPath: input.answerPath,
     stream: input.stream,
+    fallbackPolicy: {
+      mode: fallbackPolicy,
+      embedding: profile.embedding.requiredRealProvider ? "failClosed" : fallbackPolicy,
+      reranker: profile.reranker.requiredRealProvider ? "failClosed" : fallbackPolicy,
+      qdrant: profile.qdrant.required ? "failClosed" : fallbackPolicy,
+    },
     qwen: {
       called: qwenCalled,
       validatorCalled,

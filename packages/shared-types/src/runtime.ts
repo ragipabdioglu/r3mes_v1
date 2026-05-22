@@ -1,5 +1,6 @@
 export type RuntimeProfileName = "local-dev" | "eval" | "pilot-rag" | "production" | "peft-lab";
 export type RuntimeStrictness = "dev_fallback_allowed" | "quality_fallback_blocked";
+export type RuntimeFallbackPolicyMode = "failClosed" | "failSoft" | "warnOnly" | "unavailable";
 
 export interface RuntimeProfile {
   version: 1;
@@ -57,6 +58,12 @@ export interface RuntimeLineage {
   profileName?: RuntimeProfileName;
   answerPath: AnswerPathName;
   stream: boolean;
+  fallbackPolicy: {
+    mode: RuntimeFallbackPolicyMode;
+    embedding: RuntimeFallbackPolicyMode;
+    reranker: RuntimeFallbackPolicyMode;
+    qdrant: RuntimeFallbackPolicyMode;
+  };
   qwen: {
     called: boolean;
     validatorCalled: boolean;

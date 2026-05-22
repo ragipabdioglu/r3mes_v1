@@ -312,6 +312,12 @@ function readRuntimeLineage(response, retrievalDebug, chatTrace, safetyGate) {
     profileName: readStringValue(explicit?.profileName, explicit?.runtimeProfileName, runtime?.runtimeProfileName) ?? null,
     answerPath: answerPathName,
     stream: readBooleanValue(explicit?.stream, response?.stream) ?? false,
+    fallbackPolicy: {
+      mode: readStringValue(explicit?.fallbackPolicy?.mode) ?? null,
+      embedding: readStringValue(explicit?.fallbackPolicy?.embedding) ?? null,
+      reranker: readStringValue(explicit?.fallbackPolicy?.reranker) ?? null,
+      qdrant: readStringValue(explicit?.fallbackPolicy?.qdrant) ?? null,
+    },
     qwen: {
       called: qwenCalled,
       validatorCalled,
@@ -458,6 +464,22 @@ function scoreCase(testCase, response) {
   const failures = [];
   const debugContractScore = scoreDebugContract(testCase, response);
   failures.push(...debugContractScore.failures);
+  if (testCase.forbidPublicDebugFields === true) {
+    for (const key of [
+      "runtime_lineage",
+      "runtimeLineage",
+      "chat_trace",
+      "chatTrace",
+      "retrieval_debug",
+      "retrievalDebug",
+      "safety_gate",
+      "safetyGate",
+      "eval_debug_contract",
+      "evalDebugContract",
+    ]) {
+      if (response?.[key] !== undefined) failures.push(`debug_contract_public_leak:${key}`);
+    }
+  }
   const evidenceOnlyScore = scoreEvidenceOnly(testCase, response);
   failures.push(...evidenceOnlyScore.failures.map((failure) => `evidence_only:${failure}`));
   const minSources = acceptsSourceSuggestionAlternative
@@ -1194,7 +1216,9 @@ function scoreCase(testCase, response) {
     answerPathName: runtimeLineage.answerPath ?? null,
     runtimeProfileName: runtimeLineage.profileName,
     runtimeLineage,
+    runtimeLineageExpected: testCase.debugHeader !== false,
     runtimeLineageExplicit: runtimeLineage.explicit === true,
+    fallbackPolicy: runtimeLineage.fallbackPolicy,
     qwenCalled: runtimeLineage.qwen.called,
     validatorCalled: runtimeLineage.qwen.validatorCalled,
     embeddingFallbackUsed: runtimeLineage.embedding.fallbackUsed,
@@ -1531,8 +1555,9 @@ function collectProviderStrictFailures(results) {
 }
 
 function summarizeRuntimeControlTower(results) {
-  const withLineage = results.filter((result) => result.runtimeLineageExplicit === true);
-  const syntheticLineage = results.filter((result) => result.runtimeLineage && result.runtimeLineageExplicit !== true);
+  const expectedLineageResults = results.filter((result) => result.runtimeLineageExpected !== false);
+  const withLineage = expectedLineageResults.filter((result) => result.runtimeLineageExplicit === true);
+  const syntheticLineage = expectedLineageResults.filter((result) => result.runtimeLineage && result.runtimeLineageExplicit !== true);
   const qualityFallbackCases = results.filter((result) =>
     result.runtimeLineage?.controlTower?.qualityFallbackUsed === true ||
     result.embeddingFallbackUsed === true ||
@@ -1542,8 +1567,13 @@ function summarizeRuntimeControlTower(results) {
   return {
     observedCases: withLineage.length,
     syntheticCases: syntheticLineage.length,
-    coverageRatio: results.length === 0 ? 0 : Number((withLineage.length / results.length).toFixed(3)),
-    missingCases: results
+    coverageRatio: expectedLineageResults.length === 0
+      ? 1
+      : Number((withLineage.length / expectedLineageResults.length).toFixed(3)),
+    skippedPublicBoundaryCases: results
+      .filter((result) => result.runtimeLineageExpected === false)
+      .map((result) => ({ id: result.id, bucket: result.bucket })),
+    missingCases: expectedLineageResults
       .filter((result) => result.runtimeLineageExplicit !== true)
       .map((result) => ({ id: result.id, bucket: result.bucket })),
     qualityFallbackCases: qualityFallbackCases.length,
@@ -1803,19 +1833,20 @@ async function runCase(opts, testCase) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     let response;
     try {
+      const headers = {
+        "content-type": "application/json",
+        "x-wallet-address": opts.wallet,
+        "x-message": JSON.stringify({
+          iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 900,
+          address: opts.wallet,
+        }),
+        "x-signature": "dev-eval-skip-wallet-auth",
+      };
+      if (testCase.debugHeader !== false) headers["x-r3mes-debug"] = "1";
       response = await fetch(`${opts.baseUrl.replace(/\/$/, "")}/v1/chat/completions`, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-r3mes-debug": "1",
-          "x-wallet-address": opts.wallet,
-          "x-message": JSON.stringify({
-            iat: Math.floor(Date.now() / 1000),
-            exp: Math.floor(Date.now() / 1000) + 900,
-            address: opts.wallet,
-          }),
-          "x-signature": "dev-eval-skip-wallet-auth",
-        },
+        headers,
         body: JSON.stringify(body),
       });
     } catch (error) {
@@ -1830,8 +1861,9 @@ async function runCase(opts, testCase) {
       const expectedHttpStatus = Number(testCase.expectedHttpStatus ?? 0);
       if (expectedHttpStatus === response.status) {
         let errorCode = "";
+        let parsedError = null;
         try {
-          const parsedError = JSON.parse(text);
+          parsedError = JSON.parse(text);
           errorCode = typeof parsedError?.error === "string" ? parsedError.error : "";
         } catch {
           errorCode = "";
@@ -1840,11 +1872,31 @@ async function runCase(opts, testCase) {
         const failures = expectedErrorCode && errorCode !== expectedErrorCode
           ? [`error_code:${errorCode || "missing"}`]
           : [];
+        const runtimeLineage = parsedError
+          ? readRuntimeLineage(
+              parsedError,
+              parsedError?.retrieval_debug,
+              parsedError?.chat_trace,
+              parsedError?.safety_gate,
+            )
+          : null;
+        failures.push(...runtimeFallbackFailures(testCase, runtimeLineage));
         return {
           id: testCase.id,
           bucket: testCase.bucket ?? "default",
           ok: failures.length === 0,
           failures,
+          answerPathName: runtimeLineage?.answerPath ?? null,
+          runtimeProfileName: runtimeLineage?.profileName,
+          runtimeLineage,
+          runtimeLineageExpected: testCase.debugHeader !== false,
+          runtimeLineageExplicit: runtimeLineage?.explicit === true,
+          fallbackPolicy: runtimeLineage?.fallbackPolicy ?? null,
+          qwenCalled: runtimeLineage?.qwen?.called ?? null,
+          validatorCalled: runtimeLineage?.qwen?.validatorCalled ?? null,
+          embeddingFallbackUsed: runtimeLineage?.embedding?.fallbackUsed ?? null,
+          rerankerFallbackUsed: runtimeLineage?.reranker?.fallbackUsed ?? null,
+          qdrantFallbackUsed: runtimeLineage?.retrieval?.qdrantFallbackUsed ?? null,
           confidence: null,
           sourceCount: 0,
           safetyPass: null,
