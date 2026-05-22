@@ -238,6 +238,34 @@ function scoreReadiness({ totalCases, coverage, artifacts, productionRag }) {
     productionRag.qualityProviderGate?.status === "pass" &&
     Number(productionRag.totals?.expectedCases ?? 0) >= 100 &&
     Number(productionRag.totals?.failed ?? 0) === 0;
+  const runtimeControlTower = productionRag?.runtimeControlTower ?? null;
+  const runtimeCoverageRatio = Number(runtimeControlTower?.coverageRatio ?? Number.NaN);
+  const runtimeQualityFallbackRatio = Number(runtimeControlTower?.qualityFallbackRatio ?? Number.NaN);
+  const providerStrictFailureCount = Array.isArray(productionRag?.providerStrictFailures)
+    ? productionRag.providerStrictFailures.length
+    : Number(productionRag?.providerStrictFailureCount ?? Number.NaN);
+  const productionRuntimeOk =
+    productionRag?.observed === true &&
+    runtimeControlTower != null &&
+    Number.isFinite(runtimeCoverageRatio) &&
+    runtimeCoverageRatio >= 1 &&
+    Number.isFinite(runtimeQualityFallbackRatio) &&
+    runtimeQualityFallbackRatio === 0 &&
+    Number.isFinite(providerStrictFailureCount) &&
+    providerStrictFailureCount === 0;
+  const runtimeLineageCoverageIncomplete =
+    productionRag?.observed === true &&
+    runtimeControlTower != null &&
+    (!Number.isFinite(runtimeCoverageRatio) || runtimeCoverageRatio < 1);
+  const runtimeQualityFallbackDetected =
+    productionRag?.observed === true &&
+    runtimeControlTower != null &&
+    Number.isFinite(runtimeQualityFallbackRatio) &&
+    runtimeQualityFallbackRatio > 0;
+  const providerStrictFailuresDetected =
+    productionRag?.observed === true &&
+    Number.isFinite(providerStrictFailureCount) &&
+    providerStrictFailureCount > 0;
   const passRates = artifacts
     .map((artifact) => Number(artifact.summary?.passRate ?? Number.NaN))
     .filter((value) => Number.isFinite(value));
@@ -249,7 +277,11 @@ function scoreReadiness({ totalCases, coverage, artifacts, productionRag }) {
   const artifactScore =
     artifacts.length === 0 ? 0 : Number((suitesWithArtifacts / artifacts.length).toFixed(3));
   const status =
-    missingBuckets.length === 0 && failedArtifactSuites.length === 0 && totalCases >= 100 && productionRagOk
+    missingBuckets.length === 0 &&
+    failedArtifactSuites.length === 0 &&
+    totalCases >= 100 &&
+    productionRagOk &&
+    productionRuntimeOk
       ? "ready_for_controlled_adaptive_work"
       : "baseline_has_gaps";
   const blockers = [
@@ -267,6 +299,14 @@ function scoreReadiness({ totalCases, coverage, artifacts, productionRag }) {
     ...(productionRag?.observed && Number(productionRag.totals?.failed ?? 0) > 0
       ? [`production_rag_failed:${Number(productionRag.totals?.failed ?? 0)}`]
       : []),
+    ...(productionRag?.observed && runtimeControlTower == null ? ["missing_runtime_control_tower"] : []),
+    ...(runtimeLineageCoverageIncomplete
+      ? [`runtime_lineage_coverage:${Number.isFinite(runtimeCoverageRatio) ? runtimeCoverageRatio : "missing"}<1`]
+      : []),
+    ...(runtimeQualityFallbackDetected
+      ? [`runtime_quality_fallback_ratio:${runtimeQualityFallbackRatio}>0`]
+      : []),
+    ...(providerStrictFailuresDetected ? [`provider_strict_failures:${providerStrictFailureCount}>0`] : []),
   ];
 
   return {
@@ -285,6 +325,7 @@ function scoreReadiness({ totalCases, coverage, artifacts, productionRag }) {
       passRate: artifact.summary.passRate,
     })),
     productionRagOk,
+    productionRuntimeOk,
   };
 }
 
@@ -556,6 +597,11 @@ async function readProductionRagArtifact(artifactsRoot) {
       warnSuites: parsed.warnSuites ?? [],
       guardrailFailedSuites: parsed.guardrailFailedSuites ?? [],
       qualityProviderGate: parsed.qualityProviderGate ?? null,
+      runtimeControlTower: parsed.runtimeControlTower ?? null,
+      providerStrictFailures: parsed.providerStrictFailures ?? [],
+      providerStrictFailureCount: Array.isArray(parsed.providerStrictFailures)
+        ? parsed.providerStrictFailures.length
+        : Number(parsed.providerStrictFailureCount ?? 0),
     };
   } catch {
     return {
@@ -568,6 +614,9 @@ async function readProductionRagArtifact(artifactsRoot) {
       warnSuites: [],
       guardrailFailedSuites: [],
       qualityProviderGate: null,
+      runtimeControlTower: null,
+      providerStrictFailures: [],
+      providerStrictFailureCount: 0,
     };
   }
 }
@@ -674,6 +723,9 @@ async function main() {
       productionRag.observed && productionRag.status === "pass" && Number(productionRag.totals?.expectedCases ?? 0) >= 100
         ? "Production RAG aggregate is passing with the quality-provider gate."
         : "Run pnpm run eval:production-rag to refresh the full 100+ production aggregate with provider gates.",
+      readiness.productionRuntimeOk
+        ? "Runtime Control Tower gates are clean: explicit lineage coverage is complete and quality fallbacks are zero."
+        : "Refresh/fix production-rag runtime Control Tower gates: require explicit lineage coverage 1.0, quality fallback ratio 0, and zero provider strict failures.",
     ],
   };
 
