@@ -26,6 +26,10 @@ vi.mock("./lib/prisma.js", () => ({
   },
 }));
 
+vi.mock("./lib/qdrantRetrieval.js", () => ({
+  retrieveKnowledgeContextQdrant: vi.fn(),
+}));
+
 describe("chat proxy RAG orchestration", () => {
   beforeEach(() => {
     vi.stubEnv("R3MES_DISABLE_RATE_LIMIT", "1");
@@ -366,6 +370,47 @@ describe("chat proxy RAG orchestration", () => {
     expect(prisma.knowledgeChunk.findMany).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     await app.close();
+  });
+
+  it("fails closed when strict runtime requires qdrant and qdrant retrieval is unavailable", async () => {
+    vi.stubEnv("R3MES_RUNTIME_PROFILE", "eval");
+    vi.stubEnv("R3MES_RETRIEVAL_ENGINE", "qdrant");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { prisma } = await import("./lib/prisma.js");
+    const { retrieveKnowledgeContextQdrant } = await import("./lib/qdrantRetrieval.js");
+    vi.mocked(prisma.knowledgeCollection.findMany).mockResolvedValueOnce([
+      {
+        id: "kc_1",
+        owner: {
+          walletAddress:
+            "0xd5a6f9e7dd18997ed39e1e584b1ec60d636bf295fbe43ccb09cd8a906d2c0204",
+        },
+      },
+    ] as never);
+    vi.mocked(retrieveKnowledgeContextQdrant).mockRejectedValueOnce(new Error("qdrant unavailable"));
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({
+          collectionIds: ["kc_1"],
+          messages: [{ role: "user", content: "Kaynağa göre kısa açıkla." }],
+        }),
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(res.body).toContain("QDRANT_PROVIDER_UNAVAILABLE");
+      expect(prisma.knowledgeChunk.findMany).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
   });
 
   it("preserves adaptive model wording when grounded output is natural text instead of JSON", async () => {

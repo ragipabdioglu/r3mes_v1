@@ -43,6 +43,7 @@ import { buildQueryUnderstanding, summarizeQueryUnderstandingForTrace } from "..
 import { renderGroundedMedicalAnswer } from "../lib/renderMedicalAnswer.js";
 import { buildRouteDecisionLogEvent } from "../lib/routeDecisionLog.js";
 import { buildRuntimeLineage } from "../lib/runtimeLineage.js";
+import { getRuntimeFallbackPolicy } from "../lib/runtimeFallbackPolicy.js";
 import { resolveRetrievalBudget } from "../lib/retrievalBudget.js";
 import { buildRetrievalPlan, summarizeRetrievalPlan, type RetrievalPlan } from "../lib/retrievalPlan.js";
 import {
@@ -1959,6 +1960,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         retrievalPlan: summarizeRetrievalPlan(retrievalPlanBeforeRetrieval),
       });
       const retrievalTrace = chatTrace.start("retrieval");
+      const runtimeFallbackPolicy = getRuntimeFallbackPolicy(process.env);
+      let strictQdrantFailure: { message: string } | null = null;
       const retrievalBudget = resolveRetrievalBudget({
         routePlan,
         requestedCollectionIds,
@@ -2014,6 +2017,25 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                   }
                 } catch (error) {
                   const message = error instanceof Error ? error.message : String(error);
+                  if (!runtimeFallbackPolicy.allowQdrantFailSoft) {
+                    req.log.error({ err: message }, "Qdrant retrieval failed in strict runtime");
+                    strictQdrantFailure = { message };
+                    chatTrace.recordNow("retrieval", "error", {
+                      name: "qdrant_provider_failed",
+                      reason: message,
+                      retrievalEngineRequested: engine,
+                      strictRuntime: true,
+                    });
+                    return {
+                      contextText: "",
+                      sources: [] as ChatSourceCitation[],
+                      lowGroundingConfidence: true,
+                      groundingConfidence: "low" as const,
+                      evidence: null,
+                      retrievalMode: engine === "hybrid" ? "legacy_hybrid" as const : "qdrant" as const,
+                      retrievalDiagnostics: null,
+                    };
+                  }
                   req.log.warn({ err: message }, "Qdrant retrieval failed, falling back to Prisma retrieval");
                   if (engine === "qdrant") {
                     return {
@@ -2049,6 +2071,19 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               retrievalMode: "prisma" as const,
               retrievalDiagnostics: null,
             };
+      if (strictQdrantFailure) {
+        chatTrace.finish(retrievalTrace, "error", {
+          mode: getRetrievalEngine(),
+          reason: "qdrant_provider_failed",
+          strictRuntime: true,
+        });
+        return sendApiError(
+          reply,
+          503,
+          "QDRANT_PROVIDER_UNAVAILABLE",
+          "Qdrant retrieval strict runtime için gerekli, ancak şu an kullanılamıyor. Lütfen Qdrant bağlantısını kontrol edin.",
+        );
+      }
       const retrievalEngineActual =
         retrieval.retrievalMode === "true_hybrid"
           ? "hybrid"
