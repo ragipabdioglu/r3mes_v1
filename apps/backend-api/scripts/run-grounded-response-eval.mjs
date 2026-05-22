@@ -270,6 +270,7 @@ function readRuntimeLineage(response, retrievalDebug, chatTrace, safetyGate) {
     retrievalDebug?.runtimeLineage ??
     retrievalDebug?.runtime_lineage ??
     null;
+  const explicitRuntimeLineage = explicit != null && typeof explicit === "object";
   const runtime = retrievalDebug?.runtime ?? retrievalDebug?.runtimeHealth ?? {};
   const reranker = retrievalDebug?.retrievalDiagnostics?.reranker ?? {};
   const answerPathName = readStringValue(
@@ -305,6 +306,7 @@ function readRuntimeLineage(response, retrievalDebug, chatTrace, safetyGate) {
   );
 
   return {
+    explicit: explicitRuntimeLineage,
     version: readNumberValue(explicit?.version) ?? 1,
     profileName: readStringValue(explicit?.profileName, explicit?.runtimeProfileName, runtime?.runtimeProfileName) ?? null,
     answerPath: answerPathName,
@@ -345,6 +347,11 @@ function readRuntimeLineage(response, retrievalDebug, chatTrace, safetyGate) {
     safety: {
       fallbackMode: readStringValue(explicit?.safety?.fallbackMode, safetyGate?.fallbackMode) ?? null,
       blockedReasonCount: readNumberValue(explicit?.safety?.blockedReasonCount, safetyGate?.blockedReasonCount) ?? 0,
+    },
+    controlTower: {
+      qualityFallbackUsed:
+        readBooleanValue(explicit?.controlTower?.qualityFallbackUsed) ??
+        (embeddingFallbackUsed === true || rerankerFallbackUsed === true || qdrantFallbackUsed === true),
     },
   };
 }
@@ -1186,6 +1193,7 @@ function scoreCase(testCase, response) {
     answerPathName: runtimeLineage.answerPath ?? null,
     runtimeProfileName: runtimeLineage.profileName,
     runtimeLineage,
+    runtimeLineageExplicit: runtimeLineage.explicit === true,
     qwenCalled: runtimeLineage.qwen.called,
     validatorCalled: runtimeLineage.qwen.validatorCalled,
     embeddingFallbackUsed: runtimeLineage.embedding.fallbackUsed,
@@ -1522,7 +1530,8 @@ function collectProviderStrictFailures(results) {
 }
 
 function summarizeRuntimeControlTower(results) {
-  const withLineage = results.filter((result) => result.runtimeLineage);
+  const withLineage = results.filter((result) => result.runtimeLineageExplicit === true);
+  const syntheticLineage = results.filter((result) => result.runtimeLineage && result.runtimeLineageExplicit !== true);
   const qualityFallbackCases = results.filter((result) =>
     result.runtimeLineage?.controlTower?.qualityFallbackUsed === true ||
     result.embeddingFallbackUsed === true ||
@@ -1531,9 +1540,10 @@ function summarizeRuntimeControlTower(results) {
   );
   return {
     observedCases: withLineage.length,
+    syntheticCases: syntheticLineage.length,
     coverageRatio: results.length === 0 ? 0 : Number((withLineage.length / results.length).toFixed(3)),
     missingCases: results
-      .filter((result) => !result.runtimeLineage)
+      .filter((result) => result.runtimeLineageExplicit !== true)
       .map((result) => ({ id: result.id, bucket: result.bucket })),
     qualityFallbackCases: qualityFallbackCases.length,
     qualityFallbackRatio: results.length === 0 ? 0 : Number((qualityFallbackCases.length / results.length).toFixed(3)),
