@@ -2704,8 +2704,18 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             } as Parameters<ChatTraceBuilder["snapshot"]>[0] & Record<string, unknown>);
           }
           return reply.type(ct).send(safeParsed);
-        } catch {
-          // fall through to raw buffer
+        } catch (error) {
+          chatTrace.recordNow("answer_path", "error", {
+            name: "ai_engine_json_parse_failed",
+            contentType: ct,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return sendApiError(
+            reply,
+            502,
+            "AI_ENGINE_INVALID_JSON",
+            "AI engine geçersiz JSON yanıtı döndürdü; raw upstream içerik kullanıcıya iletilmedi.",
+          );
         }
       }
       return reply.type(ct).send(buf);

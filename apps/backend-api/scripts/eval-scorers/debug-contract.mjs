@@ -71,6 +71,15 @@ export function readDebugContract(response) {
     "retrieval_debug.runtimeLineage",
     "retrieval_debug.runtime_lineage",
   ]);
+  const answerPath = firstPresent(response, [
+    "eval_debug_contract.runtimeLineage.answerPath",
+    "evalDebugContract.runtimeLineage.answerPath",
+    "runtimeLineage.answerPath",
+    "runtime_lineage.answerPath",
+    "chat_trace.runtimeLineage.answerPath",
+    "chat_trace.runtime_lineage.answerPath",
+    "chat_trace.answerPath.name",
+  ]);
 
   return {
     version: version.value ?? null,
@@ -83,6 +92,8 @@ export function readDebugContract(response) {
     answerQualityPath: answerQuality.value === undefined ? null : answerQuality.path,
     runtimeLineage: runtimeLineage.value ?? null,
     runtimeLineagePath: runtimeLineage.value === undefined ? null : runtimeLineage.path,
+    answerPath: answerPath.value ?? null,
+    answerPathPath: answerPath.value === undefined ? null : answerPath.path,
   };
 }
 
@@ -96,6 +107,12 @@ export function scoreDebugContract(testCase, response) {
     if (!contract.answerQuality) failures.push("debug_contract_missing_answer_quality");
     if (!contract.runtimeLineage) failures.push("debug_contract_missing_runtime_lineage");
     if (!contract.version) failures.push("debug_contract_version_missing");
+    if (
+      contract.answerPath === "ai_engine_raw_json" &&
+      (!contract.safetyGate || !contract.answerPlan || !contract.answerQuality)
+    ) {
+      failures.push("raw_json_fallback_missing_contract");
+    }
   }
 
   if (typeof testCase.expectDebugContractVersion === "string" && testCase.expectDebugContractVersion.trim()) {

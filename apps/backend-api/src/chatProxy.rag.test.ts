@@ -337,6 +337,78 @@ describe("chat proxy RAG orchestration", () => {
     await app.close();
   });
 
+  it("does not forward malformed upstream JSON bodies to public clients", async () => {
+    vi.stubEnv("R3MES_EXPOSE_CHAT_DEBUG", "0");
+    const fetchMock = vi.fn().mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/v1/rerank")) {
+        return new Response(JSON.stringify({ scores: [0.9] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("{\"debug\":\"raw-internal\"", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.knowledgeCollection.findMany).mockResolvedValueOnce([
+      {
+        id: "kc_1",
+        owner: {
+          walletAddress:
+            "0xd5a6f9e7dd18997ed39e1e584b1ec60d636bf295fbe43ccb09cd8a906d2c0204",
+        },
+      },
+    ] as never);
+    const chunkRows = [
+      {
+        id: "chunk_1",
+        documentId: "doc_1",
+        chunkIndex: 0,
+        content: "LoRA, büyük modelleri düşük maliyetle uyarlamaya yarayan ince ayar yaklaşımıdır.",
+        embedding: {
+          values: embedKnowledgeText("LoRA, büyük modelleri düşük maliyetle uyarlamaya yarayan ince ayar yaklaşımıdır."),
+        },
+        document: {
+          title: "LoRA Notları",
+          collectionId: "kc_1",
+          createdAt: new Date("2026-04-22T10:00:00.000Z"),
+          collection: {
+            owner: {
+              walletAddress:
+                "0xd5a6f9e7dd18997ed39e1e584b1ec60d636bf295fbe43ccb09cd8a906d2c0204",
+            },
+          },
+        },
+      },
+    ] as never;
+    vi.mocked(prisma.knowledgeChunk.findMany).mockResolvedValueOnce(chunkRows);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({
+          collectionIds: ["kc_1"],
+          messages: [{ role: "user", content: "LoRA nedir?" }],
+        }),
+      });
+
+      expect(res.statusCode).toBe(502);
+      expect(res.body).toContain("AI_ENGINE_INVALID_JSON");
+      expect(res.body).not.toContain("raw-internal");
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects mixed allowed and forbidden collection ids without partial retrieval", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
