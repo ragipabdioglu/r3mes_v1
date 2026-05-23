@@ -207,6 +207,27 @@ function actualStructuredTableCount(result) {
     ?? null;
 }
 
+function applyCaseParserEnv(caseItem) {
+  if (!caseItem.externalParserScript) return () => {};
+  const original = {
+    command: process.env.R3MES_DOCUMENT_PARSER_COMMAND,
+    args: process.env.R3MES_DOCUMENT_PARSER_ARGS,
+    profile: process.env.R3MES_DOCUMENT_PARSER_PROFILE,
+  };
+  const scriptPath = resolve(root, caseItem.externalParserScript);
+  process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+  process.env.R3MES_DOCUMENT_PARSER_ARGS = `"${scriptPath}" {input}`;
+  process.env.R3MES_DOCUMENT_PARSER_PROFILE = caseItem.externalParserProfile ?? "docling";
+  return () => {
+    if (original.command === undefined) delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
+    else process.env.R3MES_DOCUMENT_PARSER_COMMAND = original.command;
+    if (original.args === undefined) delete process.env.R3MES_DOCUMENT_PARSER_ARGS;
+    else process.env.R3MES_DOCUMENT_PARSER_ARGS = original.args;
+    if (original.profile === undefined) delete process.env.R3MES_DOCUMENT_PARSER_PROFILE;
+    else process.env.R3MES_DOCUMENT_PARSER_PROFILE = original.profile;
+  };
+}
+
 function expectationFailures(caseItem, result) {
   const failures = [];
   if (caseItem.expectedParseFailure === true && result.parseStatus !== "failed") {
@@ -256,6 +277,9 @@ function expectationFailures(caseItem, result) {
   }
   if (caseItem.expectedAnswerReadiness && result.documentUnderstanding?.answerReadiness !== caseItem.expectedAnswerReadiness) {
     failures.push(`answer_readiness:${result.documentUnderstanding?.answerReadiness ?? "missing"}!=${caseItem.expectedAnswerReadiness}`);
+  }
+  if (caseItem.expectedTableQuality && result.documentUnderstanding?.tableQuality !== caseItem.expectedTableQuality) {
+    failures.push(`table_quality:${result.documentUnderstanding?.tableQuality ?? "missing"}!=${caseItem.expectedTableQuality}`);
   }
   if (
     Array.isArray(caseItem.expectedAnswerReadinessAny) &&
@@ -316,6 +340,7 @@ async function main() {
       passed: false,
       failures: [],
     };
+    const restoreParserEnv = applyCaseParserEnv(caseItem);
 
     try {
       const buffer = await readFile(fixturePath);
@@ -370,6 +395,8 @@ async function main() {
         },
         error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      restoreParserEnv();
     }
 
     const failures = failedExpectation(caseItem, result);
