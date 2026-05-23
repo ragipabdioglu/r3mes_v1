@@ -53,6 +53,14 @@ export type AnswerPathName =
   | "ai_engine_empty_wrapped"
   | "ai_engine_raw_json";
 
+export type ComposerPathName =
+  | "planned_structured"
+  | "planned_fallback_template"
+  | "planned_quality_repair"
+  | "legacy_grounded_renderer"
+  | "safety_fallback"
+  | "qwen_synthesis";
+
 export interface RuntimeLineage {
   version: 1;
   profileName?: RuntimeProfileName;
@@ -73,6 +81,7 @@ export interface RuntimeLineage {
   };
   composer: {
     deterministicUsed: boolean;
+    path?: ComposerPathName;
     plannedComposerUsed?: boolean;
     fallbackTemplateUsed?: boolean;
   };

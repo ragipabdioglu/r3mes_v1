@@ -329,6 +329,7 @@ function readRuntimeLineage(response, retrievalDebug, chatTrace, safetyGate) {
       deterministicUsed:
         readBooleanValue(explicit?.composer?.deterministicUsed, explicit?.composerDeterministicUsed) ??
         (answerPathName ? !answerPathName.startsWith("ai_engine") : null),
+      path: readStringValue(explicit?.composer?.path, explicit?.composerPath) ?? null,
       plannedComposerUsed: readBooleanValue(explicit?.composer?.plannedComposerUsed) ?? null,
       fallbackTemplateUsed: readBooleanValue(explicit?.composer?.fallbackTemplateUsed) ?? null,
     },
@@ -1660,6 +1661,7 @@ function summarizeAnswerBaselineQuality(results) {
   const taskTypes = {};
   const outputFormats = {};
   const coverage = {};
+  const composerPaths = {};
   const confidenceReasons = {};
   const compiledEvidenceConfidences = {};
   let evidenceItemTotal = 0;
@@ -1694,6 +1696,7 @@ function summarizeAnswerBaselineQuality(results) {
     if (baseline?.composer?.fallbackTemplateUsed === true) fallbackTemplateCases += 1;
     if (baseline?.composer?.lowLanguageQualityDetected === true) lowLanguageQualityCases += 1;
 
+    increment(composerPaths, baseline?.composer?.path);
     increment(taskTypes, baseline?.answerPlan?.taskType);
     increment(outputFormats, baseline?.answerPlan?.outputFormat);
     increment(coverage, baseline?.answerPlan?.coverage);
@@ -1733,6 +1736,7 @@ function summarizeAnswerBaselineQuality(results) {
     taskTypes: Object.fromEntries(Object.entries(taskTypes).sort(([a], [b]) => a.localeCompare(b))),
     outputFormats: Object.fromEntries(Object.entries(outputFormats).sort(([a], [b]) => a.localeCompare(b))),
     coverage: Object.fromEntries(Object.entries(coverage).sort(([a], [b]) => a.localeCompare(b))),
+    composerPaths: Object.fromEntries(Object.entries(composerPaths).sort(([a], [b]) => a.localeCompare(b))),
     compiledEvidenceConfidences: Object.fromEntries(
       Object.entries(compiledEvidenceConfidences).sort(([a], [b]) => a.localeCompare(b)),
     ),

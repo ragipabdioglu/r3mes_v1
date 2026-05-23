@@ -121,6 +121,7 @@ describe("buildEvalDebugContract", () => {
         },
       },
       composerDiagnostics: {
+        path: "planned_structured",
         plannedComposerUsed: true,
         fallbackTemplateUsed: false,
         lowLanguageQualityDetected: false,
@@ -185,6 +186,7 @@ describe("buildEvalDebugContract", () => {
         missingFieldIds: ["net_deger"],
       },
       composer: {
+        path: "planned_structured",
         plannedComposerUsed: true,
         fallbackTemplateUsed: false,
         lowLanguageQualityDetected: false,

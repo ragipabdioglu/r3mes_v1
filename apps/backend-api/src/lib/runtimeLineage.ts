@@ -1,5 +1,6 @@
 import type {
   AnswerPathName,
+  ComposerPathName,
   RuntimeFallbackPolicyMode,
   RuntimeLineage,
   RuntimeProfile,
@@ -33,6 +34,7 @@ export interface RuntimeLineageInput {
   validatorCalled?: boolean;
   qwenCallCount?: number;
   composer?: {
+    path?: ComposerPathName;
     plannedComposerUsed?: boolean;
     fallbackTemplateUsed?: boolean;
   };
@@ -136,6 +138,7 @@ export function buildRuntimeLineage(input: RuntimeLineageInput): RuntimeLineage 
     },
     composer: {
       deterministicUsed: deterministicPath || Boolean(input.composer?.plannedComposerUsed || input.composer?.fallbackTemplateUsed),
+      path: input.composer?.path,
       plannedComposerUsed: input.composer?.plannedComposerUsed,
       fallbackTemplateUsed: input.composer?.fallbackTemplateUsed,
     },

@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AnswerPathName, ChatSourceCitation, QueryContract } from "@r3mes/shared-types";
+import type { AnswerPathName, ChatSourceCitation, ComposerPathName, QueryContract } from "@r3mes/shared-types";
 import { getConfiguredChatRuntime, normalizeAdapterPath } from "../lib/adapterRuntimeSelect.js";
 import { parseGroundedMedicalAnswer } from "../lib/answerParse.js";
 import { buildAnswerPlan } from "../lib/answerPlan.js";
@@ -920,6 +920,24 @@ function buildRuntimeAnswerQualityExpectations(
   };
 }
 
+function classifyComposerPath(input: {
+  qwenCalled?: boolean;
+  safetyFallbackApplied: boolean;
+  plannedComposerUsed: boolean;
+  initialFallbackTemplateUsed: boolean;
+  qualityRepairApplied: boolean;
+  selectedFactCount: number;
+}): ComposerPathName {
+  if (input.qwenCalled === true) return "qwen_synthesis";
+  if (input.safetyFallbackApplied) return "safety_fallback";
+  if (input.qualityRepairApplied) return "planned_quality_repair";
+  if (input.plannedComposerUsed && !input.initialFallbackTemplateUsed && input.selectedFactCount > 0) {
+    return "planned_structured";
+  }
+  if (input.plannedComposerUsed) return "planned_fallback_template";
+  return "legacy_grounded_renderer";
+}
+
 function applyRenderedAnswer(
   payload: Record<string, unknown>,
   answer: GroundedMedicalAnswer,
@@ -966,6 +984,7 @@ function applyRenderedAnswer(
     opts.useFallbackTemplate === true ||
     shouldUseSafeRenderedTemplate(enrichedAnswer, retrievalWasUsed);
   let plannedComposerUsed = useSafeTemplate;
+  let plannedQualityRepairApplied = false;
   let rendered =
     useSafeTemplate
       ? composePlannedAnswer(composerInput)
@@ -1005,6 +1024,7 @@ function applyRenderedAnswer(
         finalRendered = plannedRendered;
         qualityFindings = plannedFindings;
         plannedComposerUsed = true;
+        plannedQualityRepairApplied = true;
       }
     }
   }
@@ -1064,6 +1084,15 @@ function applyRenderedAnswer(
     exposedSafetyGate.fallbackMode === "privacy_safe";
   const exposedSources = shouldHideCitations ? [] : sources;
   const exposedAnswer = shouldHideCitations ? { ...enrichedAnswer, used_source_ids: [] } : enrichedAnswer;
+  const composerPath = classifyComposerPath({
+    qwenCalled: opts.qwenCalled,
+    safetyFallbackApplied: renderedSafetyFallback != null,
+    plannedComposerUsed: answerQuality.plannedComposerUsed,
+    initialFallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
+    qualityRepairApplied: plannedQualityRepairApplied,
+    selectedFactCount: answerPlan.diagnostics.selectedFactCount,
+  });
+  const answerQualityWithPath = { ...answerQuality, composerPath };
   opts.chatTrace?.recordNow("render_safety", "ok", {
     pass: exposedSafetyGate.pass,
     fallbackMode: exposedSafetyGate.fallbackMode,
@@ -1071,6 +1100,7 @@ function applyRenderedAnswer(
     exposedSourceCount: exposedSources.length,
     hiddenSourceCount: sources.length - exposedSources.length,
     fallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
+    composerPath,
     lowLanguageQualityDetected: answerQuality.lowLanguageQualityDetected,
     answerPlan: {
       taskType: answerPlan.taskType,
@@ -1113,6 +1143,7 @@ function applyRenderedAnswer(
     validatorCalled: opts.validatorCalled,
     qwenCallCount: opts.qwenCallCount,
     composer: {
+      path: composerPath,
       plannedComposerUsed: answerQuality.plannedComposerUsed,
       fallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
     },
@@ -1134,7 +1165,7 @@ function applyRenderedAnswer(
     next.debug_contract_version = EVAL_DEBUG_CONTRACT_VERSION;
     next.answer_plan = answerPlan;
     next.safety_gate = exposedSafetyGate;
-    next.answer_quality = answerQuality;
+    next.answer_quality = answerQualityWithPath;
     next.evidenceSignals = evidenceSignals;
     next.eval_debug_contract = buildEvalDebugContract({
       safetyGate: exposedSafetyGate,
@@ -1145,6 +1176,7 @@ function applyRenderedAnswer(
       evidenceBundleDiagnostics: evidenceBundle?.diagnostics ?? null,
       compiledEvidence: retrievalDebug?.compiledEvidence ?? null,
       composerDiagnostics: {
+        path: composerPath,
         plannedComposerUsed: answerQuality.plannedComposerUsed,
         fallbackTemplateUsed: answerQuality.fallbackTemplateUsed,
         lowLanguageQualityDetected: answerQuality.lowLanguageQualityDetected,

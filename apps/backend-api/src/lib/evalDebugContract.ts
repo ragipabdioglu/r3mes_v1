@@ -1,4 +1,4 @@
-import type { RuntimeLineage } from "@r3mes/shared-types";
+import type { ComposerPathName, RuntimeLineage } from "@r3mes/shared-types";
 import type { AnswerPlan } from "./answerPlan.js";
 import type { AnswerQualityFinding } from "./answerQualityValidator.js";
 import type { CompiledEvidence } from "./compiledEvidence.js";
@@ -33,6 +33,7 @@ export interface EvalAnswerBaselineDiagnostics {
     missingFieldIds: string[];
   };
   composer: {
+    path: ComposerPathName | null;
     plannedComposerUsed: boolean | null;
     fallbackTemplateUsed: boolean | null;
     lowLanguageQualityDetected: boolean | null;
@@ -65,6 +66,7 @@ export function buildEvalDebugContract(input: {
   evidenceBundleDiagnostics?: EvidenceBundleDiagnostics | null;
   compiledEvidence?: CompiledEvidence | null;
   composerDiagnostics?: {
+    path?: ComposerPathName;
     plannedComposerUsed?: boolean;
     fallbackTemplateUsed?: boolean;
     lowLanguageQualityDetected?: boolean;
@@ -114,6 +116,7 @@ export function buildEvalDebugContract(input: {
         missingFieldIds: answerPlan?.diagnostics.missingFieldIds ?? [],
       },
       composer: {
+        path: input.composerDiagnostics?.path ?? input.runtimeLineage?.composer?.path ?? null,
         plannedComposerUsed: input.composerDiagnostics?.plannedComposerUsed ?? null,
         fallbackTemplateUsed: input.composerDiagnostics?.fallbackTemplateUsed ?? null,
         lowLanguageQualityDetected: input.composerDiagnostics?.lowLanguageQualityDetected ?? null,

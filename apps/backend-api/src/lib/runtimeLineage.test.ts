@@ -18,6 +18,7 @@ describe("buildRuntimeLineage", () => {
       answerPath: "rag_fast_path",
       stream: false,
       composer: {
+        path: "planned_fallback_template",
         plannedComposerUsed: true,
         fallbackTemplateUsed: true,
       },
@@ -57,6 +58,7 @@ describe("buildRuntimeLineage", () => {
       model: "qwen-test",
     });
     expect(lineage.composer.deterministicUsed).toBe(true);
+    expect(lineage.composer.path).toBe("planned_fallback_template");
     expect(lineage.embedding.fallbackUsed).toBe(false);
     expect(lineage.reranker.fallbackUsed).toBe(false);
     expect(lineage.controlTower.qualityFallbackUsed).toBe(false);
