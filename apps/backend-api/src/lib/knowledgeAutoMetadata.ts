@@ -34,6 +34,15 @@ export interface KnowledgeAutoMetadata {
       warnings: string[];
     };
   };
+  parserRun?: {
+    id: string;
+    version: number;
+    profile: string;
+    durationMs?: number;
+    fallbackUsed: boolean;
+    outputSchemaVersion: number;
+    warnings: string[];
+  };
   sourceType?: KnowledgeSourceType;
   artifactId?: string;
   artifactKind?: DocumentArtifactKind;

@@ -48,6 +48,16 @@ export type KnowledgeDocumentUnderstandingQuality = {
   };
 };
 
+export type KnowledgeParserRunDiagnostics = {
+  id: string;
+  version: number;
+  profile: string;
+  durationMs?: number;
+  fallbackUsed: boolean;
+  outputSchemaVersion: number;
+  warnings: string[];
+};
+
 export type KnowledgeIndexingState = {
   status: KnowledgeIndexingStatus;
   vectorIndexStatus: KnowledgeIndexingStatus;
@@ -92,6 +102,7 @@ export type KnowledgeDocumentDetail = {
   storagePath?: string | null;
   parserId?: string | null;
   parserVersion?: number | null;
+  parserRun?: KnowledgeParserRunDiagnostics | null;
   scanStatus?: string | null;
   storageStatus?: string | null;
   documentVersionId?: string | null;
@@ -141,6 +152,7 @@ export type KnowledgeUploadAcceptedResponse = {
   storagePath?: string | null;
   parserId?: string | null;
   parserVersion?: number | null;
+  parserRun?: KnowledgeParserRunDiagnostics | null;
   scanStatus?: string | null;
   storageStatus?: string | null;
   documentVersionId?: string | null;
@@ -174,6 +186,7 @@ export type KnowledgeIngestionJobStatusResponse = {
   storagePath?: string | null;
   parserId?: string | null;
   parserVersion?: number | null;
+  parserRun?: KnowledgeParserRunDiagnostics | null;
   scanStatus?: string | null;
   storageStatus?: string | null;
   documentVersionId?: string | null;

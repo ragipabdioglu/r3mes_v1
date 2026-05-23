@@ -335,6 +335,15 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
       version: parsed.parser.version,
       diagnostics: parsed.diagnostics,
     };
+    documentAutoMetadata.parserRun = {
+      id: parsed.parserRun.id,
+      version: parsed.parserRun.version,
+      profile: parsed.parserRun.profile ?? "unknown",
+      ...(parsed.parserRun.durationMs !== undefined ? { durationMs: parsed.parserRun.durationMs } : {}),
+      fallbackUsed: parsed.parserRun.fallbackUsed,
+      outputSchemaVersion: parsed.parserRun.outputSchemaVersion,
+      warnings: parsed.parserRun.warnings,
+    };
     documentAutoMetadata.sourceType = parsed.sourceType;
   } catch (error) {
     return failStage({

@@ -206,6 +206,29 @@ describe("knowledge routes access control", () => {
         vectorIndexStatus: "FAILED",
         qualityStatus: "READY",
         readinessStatus: "PARTIAL_READY",
+        parserId: "external-document-parser-v1",
+        parserVersion: 1,
+        autoMetadata: {
+          domain: "general",
+          subtopics: [],
+          keywords: [],
+          entities: [],
+          documentType: "knowledge_note",
+          audience: "general_user",
+          riskLevel: "low",
+          summary: "",
+          questionsAnswered: [],
+          sourceQuality: "structured",
+          parserRun: {
+            id: "external-document-parser-v1",
+            version: 1,
+            profile: "docling",
+            durationMs: 42,
+            fallbackUsed: false,
+            outputSchemaVersion: 2,
+            warnings: [],
+          },
+        },
         _count: { chunks: 2 },
         collection: {
           id: "kc_private",
@@ -245,6 +268,12 @@ describe("knowledge routes access control", () => {
       stage: "VECTOR_INDEX",
       jobStatus: "PARTIAL_READY",
       errorCode: "QDRANT_DUAL_WRITE_FAILED",
+      parserRun: {
+        id: "external-document-parser-v1",
+        profile: "docling",
+        fallbackUsed: false,
+        outputSchemaVersion: 2,
+      },
     });
     expect(parsed.indexing).toMatchObject({
       status: "FAILED",

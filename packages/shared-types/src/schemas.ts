@@ -126,6 +126,15 @@ export const KnowledgeDocumentUnderstandingQualitySchema = z.object({
     ocrSpanCount: z.number().int().nonnegative(),
   }),
 });
+export const KnowledgeParserRunDiagnosticsSchema = z.object({
+  id: z.string().min(1),
+  version: z.number().int().positive(),
+  profile: z.string().min(1),
+  durationMs: z.number().int().nonnegative().optional(),
+  fallbackUsed: z.boolean(),
+  outputSchemaVersion: z.number().int().positive(),
+  warnings: z.array(z.string()),
+});
 export const KnowledgeIndexingStateSchema = z.object({
   status: KnowledgeIndexingStatusSchema,
   vectorIndexStatus: KnowledgeIndexingStatusSchema,
@@ -170,6 +179,7 @@ export const KnowledgeDocumentListItemSchema: z.ZodType<KnowledgeDocumentListIte
   storagePath: z.string().nullable().optional(),
   parserId: z.string().nullable().optional(),
   parserVersion: z.number().int().nonnegative().nullable().optional(),
+  parserRun: KnowledgeParserRunDiagnosticsSchema.nullable().optional(),
   scanStatus: z.string().nullable().optional(),
   storageStatus: z.string().nullable().optional(),
   documentVersionId: z.string().nullable().optional(),
@@ -219,6 +229,7 @@ export const KnowledgeUploadAcceptedResponseSchema: z.ZodType<KnowledgeUploadAcc
   storagePath: z.string().nullable().optional(),
   parserId: z.string().nullable().optional(),
   parserVersion: z.number().int().nonnegative().nullable().optional(),
+  parserRun: KnowledgeParserRunDiagnosticsSchema.nullable().optional(),
   scanStatus: z.string().nullable().optional(),
   storageStatus: z.string().nullable().optional(),
   documentVersionId: z.string().nullable().optional(),
@@ -252,6 +263,7 @@ export const KnowledgeIngestionJobStatusResponseSchema: z.ZodType<KnowledgeInges
   storagePath: z.string().nullable().optional(),
   parserId: z.string().nullable().optional(),
   parserVersion: z.number().int().nonnegative().nullable().optional(),
+  parserRun: KnowledgeParserRunDiagnosticsSchema.nullable().optional(),
   scanStatus: z.string().nullable().optional(),
   storageStatus: z.string().nullable().optional(),
   documentVersionId: z.string().nullable().optional(),

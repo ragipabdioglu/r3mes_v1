@@ -226,6 +226,7 @@ function readKnowledgeAutoMetadata(value: unknown): KnowledgeAutoMetadata | null
     ingestionQuality: readKnowledgeIngestionQuality(record.ingestionQuality),
     documentUnderstanding: readDocumentUnderstandingQuality(record.documentUnderstanding),
     parseAdapter: readKnowledgeParseAdapter(record.parseAdapter),
+    parserRun: readKnowledgeParserRun(record.parserRun),
     sourceType: typeof record.sourceType === "string" ? record.sourceType as KnowledgeAutoMetadata["sourceType"] : undefined,
     artifactId: typeof record.artifactId === "string" ? record.artifactId : undefined,
     artifactKind: typeof record.artifactKind === "string" ? record.artifactKind as KnowledgeAutoMetadata["artifactKind"] : undefined,
@@ -326,6 +327,45 @@ function readKnowledgeParseAdapter(value: unknown): KnowledgeAutoMetadata["parse
             : [],
         }
       : undefined,
+  };
+}
+
+function readKnowledgeParserRun(value: unknown): KnowledgeAutoMetadata["parserRun"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as {
+    id?: unknown;
+    version?: unknown;
+    profile?: unknown;
+    durationMs?: unknown;
+    fallbackUsed?: unknown;
+    outputSchemaVersion?: unknown;
+    warnings?: unknown;
+  };
+  if (
+    typeof record.id !== "string" ||
+    typeof record.version !== "number" ||
+    !Number.isInteger(record.version) ||
+    record.version < 1 ||
+    typeof record.profile !== "string" ||
+    typeof record.fallbackUsed !== "boolean" ||
+    typeof record.outputSchemaVersion !== "number" ||
+    !Number.isInteger(record.outputSchemaVersion) ||
+    record.outputSchemaVersion < 1
+  ) {
+    return undefined;
+  }
+  return {
+    id: record.id,
+    version: record.version,
+    profile: record.profile,
+    ...(typeof record.durationMs === "number" && Number.isFinite(record.durationMs) && record.durationMs >= 0
+      ? { durationMs: Math.round(record.durationMs) }
+      : {}),
+    fallbackUsed: record.fallbackUsed,
+    outputSchemaVersion: record.outputSchemaVersion,
+    warnings: Array.isArray(record.warnings)
+      ? record.warnings.filter((item): item is string => typeof item === "string")
+      : [],
   };
 }
 
@@ -479,6 +519,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       storagePath: job.document.storagePath,
       parserId: job.document.parserId,
       parserVersion: job.document.parserVersion,
+      parserRun: documentMetadata?.parserRun ?? null,
       scanStatus: job.document.scanStatus,
       storageStatus: job.document.storageStatus,
       documentVersionId: job.document.versions?.[0]?.id ?? null,
@@ -574,6 +615,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           storagePath: doc.storagePath,
           parserId: doc.parserId,
           parserVersion: doc.parserVersion,
+          parserRun: docMetadata?.parserRun ?? null,
           scanStatus: doc.scanStatus,
           storageStatus: doc.storageStatus,
           documentVersionId: doc.versions?.[0]?.id ?? null,
@@ -714,6 +756,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
         storagePath: existingDocument.storagePath,
         parserId: existingDocument.parserId,
         parserVersion: existingDocument.parserVersion,
+        parserRun: documentMetadata?.parserRun ?? null,
         scanStatus: existingDocument.scanStatus,
         storageStatus: existingDocument.storageStatus,
         documentVersionId: existingDocument.versions[0]?.id ?? null,
@@ -825,6 +868,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       storagePath: rawUpload.storagePath,
       parserId: null,
       parserVersion: null,
+      parserRun: null,
       scanStatus: isQuarantined ? "FAILED" : "READY",
       storageStatus: "READY",
       documentVersionId: null,

@@ -253,6 +253,140 @@ Specific target:
 - keep public chat payload clean;
 - add tests/eval only around ingestion/document detail contracts.
 
+## Implementation Slice 3 - Parser Run Diagnostics Surface
+
+Date: 2026-05-23
+
+Commit:
+
+- pending at report-write time
+
+### What Changed
+
+This slice made parser runtime lineage visible in authenticated knowledge ingestion/detail surfaces without changing chat public response, retrieval, composer, safety, embeddings, reranker, model runtime, or UI layout.
+
+Changes:
+
+- Added `KnowledgeParserRunDiagnostics` to shared API contracts.
+- Added optional `parserRun` to:
+  - `KnowledgeDocumentListItem`
+  - `KnowledgeUploadAcceptedResponse`
+  - `KnowledgeIngestionJobStatusResponse`
+- Added matching Zod validation in shared schemas.
+- Mirrored the type in dApp knowledge types.
+- Stored `ParsedKnowledgeDocument.parserRun` inside document auto metadata during ingestion.
+- Exposed sanitized `parserRun` from:
+  - upload response for existing documents,
+  - upload accepted response for new/pending documents as `null`,
+  - ingestion job status,
+  - collection detail document rows.
+- Added route/processor test coverage for parserRun propagation.
+
+### Contract Shape
+
+`KnowledgeParserRunDiagnostics`:
+
+- `id`
+- `version`
+- `profile`
+- `durationMs?`
+- `fallbackUsed`
+- `outputSchemaVersion`
+- `warnings`
+
+Boundary behavior:
+
+- This is a knowledge-management/admin surface contract, not a chat public response contract.
+- Parser command, parser args, local executable paths, stderr text, and raw parser output are not exposed.
+- Warnings remain symbolic diagnostics such as `external_parser_structured_artifacts_not_array`.
+
+### Changed Files
+
+Shared/API contract:
+
+- `packages/shared-types/src/apiContract.ts`
+- `packages/shared-types/src/schemas.ts`
+
+Backend:
+
+- `apps/backend-api/src/lib/knowledgeAutoMetadata.ts`
+- `apps/backend-api/src/lib/knowledgeIngestionProcessor.ts`
+- `apps/backend-api/src/routes/knowledge.ts`
+- `apps/backend-api/src/knowledgeRoutes.test.ts`
+- `apps/backend-api/src/lib/knowledgeIngestionProcessor.test.ts`
+
+dApp type mirror:
+
+- `apps/dApp/lib/types/knowledge.ts`
+
+### Boundary Check
+
+Touched:
+
+- Knowledge contract types
+- Ingestion metadata persistence
+- Authenticated knowledge detail/job/upload response shaping
+- Tests
+
+Not touched:
+
+- `/v1/chat/completions`
+- Chat public response shaping
+- Retrieval scoring
+- Qdrant indexing/reindex
+- Embedding provider
+- Reranker provider
+- Answer composer
+- Safety policy behavior
+- Qwen/LoRA runtime
+- UI styling/layout
+- Prisma migrations
+
+### Tests / Evals
+
+Commands run:
+
+```powershell
+pnpm --filter @r3mes/shared-types run build
+pnpm --filter @r3mes/backend-api exec tsc --noEmit
+pnpm --filter @r3mes/backend-api exec vitest run src/knowledgeRoutes.test.ts src/lib/knowledgeIngestionProcessor.test.ts
+pnpm --filter @r3mes/backend-api exec vitest run src/lib/knowledgeText.test.ts src/lib/knowledgeArtifactPersistence.test.ts src/lib/documentUnderstandingQuality.test.ts
+pnpm --filter @r3mes/backend-api run eval:ingestion-quality
+pnpm run eval:parse-quality
+```
+
+Results:
+
+- shared-types build: PASS
+- backend typecheck: PASS
+- knowledge route + ingestion processor tests: PASS, 5 tests
+- parser/artifact/document understanding tests: PASS, 31 tests
+- ingestion quality eval: PASS, 6/6
+- parse quality eval: PASS, 6/6
+
+### Quality Notes
+
+The implementation intentionally does not normalize parserRun into a new Prisma table. At this phase, storing sanitized parser lineage in auto metadata is enough to keep upload/detail/admin diagnostics observable while avoiding schema churn.
+
+This is not a provider-health feature. It answers a narrower Phase 2 question: “did this document parse through fallback or a structured parser profile, and which schema version did the parser output use?”
+
+### Remaining Risks
+
+- Parser capability health still only reports configured/unavailable; it does not yet run a smoke parse.
+- The dApp type mirror is updated, but UI does not yet present parserRun in a polished admin panel.
+- ParserRun is metadata-backed, so historical documents need reingestion to gain this field.
+
+### Next Slice Recommendation
+
+Strengthen parser capability health with an optional smoke command/result status.
+
+Specific target:
+
+- keep command/path private;
+- expose only symbolic readiness and smoke status;
+- avoid making external parsers hard dependencies in local-dev;
+- fail/warn appropriately under strict runtime profiles.
+
 ## Stop Condition Reminder
 
 Phase 2 is not complete until:
