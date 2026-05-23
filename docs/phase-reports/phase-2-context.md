@@ -120,11 +120,138 @@ Results:
 
 Recommended next implementation slices:
 
-1. Add parser output schema validation diagnostics for malformed structured artifacts.
-2. Add ingestion eval fixture for external parser structured table envelope.
-3. Strengthen parser capability health with optional smoke command/result status.
-4. Add structured artifact provenance summary to document detail/admin diagnostics.
-5. Expand CSV/table eval with row/column/cell provenance expectations.
+1. Strengthen parser capability health with optional smoke command/result status.
+2. Add structured artifact provenance summary to document detail/admin diagnostics.
+3. Expand CSV/table eval with row/column/cell provenance expectations.
+4. Add real external parser integration notes for Docling/Marker once provider runtime is selected.
+
+## Implementation Slice 2 - Parser Diagnostics And External Parser Eval
+
+Date: 2026-05-23
+
+Commits:
+
+- `77c897e Improve parser schema diagnostics`
+- `f190b4d Add external structured table ingestion eval`
+
+### What Changed
+
+This slice closed the first two recommended Phase 2 tasks without touching retrieval, composer, safety, model runtime, or UI behavior.
+
+Changes:
+
+- Malformed external parser `structuredArtifacts` now produce clearer parser diagnostics.
+- Invalid arrays report how many structured artifacts were rejected.
+- Non-array `structuredArtifacts` values report `external_parser_structured_artifacts_not_array`.
+- `parserRun.fallbackUsed` and `parserRun.outputSchemaVersion` are validated through tests.
+- Ingestion-quality eval can run a per-case external parser command without changing global developer environment.
+- A new external parser fixture emits text, markdown table artifact, and typed `structuredArtifacts`.
+- The new eval case verifies `tableQuality: structured`, `answerReadiness: ready`, and `structuredTableCount >= 1`.
+
+### Changed Files
+
+Runtime/parser diagnostics:
+
+- `apps/backend-api/src/lib/knowledgeText.ts`
+- `apps/backend-api/src/lib/knowledgeText.test.ts`
+
+Eval harness and fixtures:
+
+- `apps/backend-api/scripts/run-ingestion-quality-eval.mjs`
+- `infrastructure/evals/ingestion-quality/golden.jsonl`
+- `infrastructure/evals/ingestion-quality/fixtures/external-structured-table-parser.mjs`
+- `infrastructure/evals/ingestion-quality/fixtures/external-structured-table.pdf`
+
+### Contract Impact
+
+No public API contract changed.
+
+Internal contract behavior is now stricter and more observable:
+
+- External parser structured artifact validation failures are visible through parser diagnostics.
+- Per-case external parser eval configuration is isolated and restored after each case.
+- Structured table readiness is now checked through `documentUnderstanding.tableQuality`.
+
+Backward compatibility:
+
+- Existing text-only parser behavior remains valid.
+- Existing CSV structured table eval still passes.
+- Existing external parser behavior still falls back through the same parser bridge.
+
+### Boundary Check
+
+Touched:
+
+- Parser diagnostics
+- Parser unit tests
+- Ingestion-quality eval runner
+- Ingestion eval fixtures
+
+Not touched:
+
+- Retrieval scoring
+- Qdrant indexing/reindex
+- Embedding provider
+- Reranker provider
+- Answer composer
+- Safety policy behavior
+- Qwen/LoRA runtime
+- UI styling/layout
+- Prisma migrations
+
+### Tests / Evals
+
+Commands run:
+
+```powershell
+node --check apps/backend-api/scripts/run-ingestion-quality-eval.mjs
+pnpm --filter @r3mes/backend-api exec tsc --noEmit
+pnpm --filter @r3mes/backend-api exec vitest run src/lib/knowledgeText.test.ts src/lib/knowledgeArtifactPersistence.test.ts src/lib/documentUnderstandingQuality.test.ts
+pnpm --filter @r3mes/backend-api run eval:ingestion-quality
+pnpm run eval:parse-quality
+```
+
+Results:
+
+- JS syntax check: PASS
+- backend typecheck: PASS
+- parser/artifact/document understanding tests: PASS, 31 tests
+- ingestion quality eval: PASS, 6/6
+- parse quality eval: PASS, 6/6
+
+New eval case:
+
+- `ingestion-external-parser-structured-table`
+- parser: `external-document-parser-v1`
+- source type: `PDF`
+- `tableQuality`: `structured`
+- `answerReadiness`: `ready`
+- `structuredTableCount`: `1`
+- `strictRouteEligible`: `true`
+
+### Quality Notes
+
+The new external parser fixture is intentionally generic and synthetic. It is not a product-domain hardcode. Domain-specific terms appear only inside eval fixture content, not core runtime logic.
+
+The expectation was adjusted to `expectedLevel: usable` instead of `clean`. This is deliberate: a table-heavy, tiny one-page parser fixture should be answer-ready and structured, but it still naturally carries `single_tiny_chunk` and `table_risk_high` warnings. Treating it as `usable + structured + ready` is more honest than pretending it is a fully clean long-form document.
+
+### Remaining Risks
+
+- External parser integration is still command-based; real Docling/Marker runtime health is not deeply smoke-tested yet.
+- Structured artifacts are preserved and evaluated, but table facts are not yet extracted into answer evidence. That belongs to later Evidence Intelligence phases.
+- Structured artifacts are stored in metadata rather than normalized relational tables.
+- Visual/layout artifacts are not yet covered by this eval slice.
+
+### Next Slice Recommendation
+
+The next Phase 2 slice should inspect and strengthen how parser/document-understanding diagnostics flow into upload/detail/admin surfaces without changing retrieval or composer behavior.
+
+Specific target:
+
+- verify upload path stores `parserRun`, `structuredArtifacts`, and `documentUnderstanding` consistently;
+- add document detail/admin diagnostics if missing;
+- keep public chat payload clean;
+- add tests/eval only around ingestion/document detail contracts.
 
 ## Stop Condition Reminder
 
@@ -135,4 +262,3 @@ Phase 2 is not complete until:
 - parser/document-understanding evals include successful, partial, failed, and structured table cases;
 - no ingestion issue is hidden by retrieval/composer/safety patches;
 - phase report is written and committed.
-
