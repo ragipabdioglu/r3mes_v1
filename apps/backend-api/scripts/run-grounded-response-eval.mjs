@@ -1225,6 +1225,7 @@ function scoreCase(testCase, response) {
     rerankerFallbackUsed: runtimeLineage.reranker.fallbackUsed,
     qdrantFallbackUsed: runtimeLineage.retrieval.qdrantFallbackUsed,
     answerPlan,
+    answerBaseline: debugContractScore.contract.answerBaseline ?? null,
     debugContract: debugContractScore.contract,
     evidenceOnly: {
       ok: evidenceOnlyScore.ok,
@@ -1650,6 +1651,100 @@ function summarizeCompiledEvidenceQuality(results) {
   };
 }
 
+function summarizeAnswerBaselineQuality(results) {
+  const readBaseline = (result) => result.answerBaseline ?? result.debugContract?.answerBaseline ?? null;
+  const observed = results
+    .map((result) => ({ result, baseline: readBaseline(result) }))
+    .filter((entry) => entry.baseline && typeof entry.baseline === "object");
+  const kindCounts = {};
+  const taskTypes = {};
+  const outputFormats = {};
+  const coverage = {};
+  const confidenceReasons = {};
+  const compiledEvidenceConfidences = {};
+  let evidenceItemTotal = 0;
+  let usableEvidenceItemTotal = 0;
+  let selectedFactTotal = 0;
+  let sourceCountTotal = 0;
+  let structuredFactTotal = 0;
+  let riskFactTotal = 0;
+  let unknownTotal = 0;
+  let contradictionTotal = 0;
+  let missingFieldCases = 0;
+  let requiresModelSynthesisCases = 0;
+  let plannedComposerCases = 0;
+  let fallbackTemplateCases = 0;
+  let lowLanguageQualityCases = 0;
+
+  for (const { baseline } of observed) {
+    evidenceItemTotal += Number(baseline?.evidenceBundle?.itemCount ?? 0);
+    usableEvidenceItemTotal += Number(baseline?.evidenceBundle?.usableItemCount ?? 0);
+    selectedFactTotal += Number(baseline?.answerPlan?.selectedFactCount ?? 0);
+    sourceCountTotal += Number(baseline?.sourceCount ?? 0);
+    structuredFactTotal += Number(baseline?.compiledEvidence?.structuredFactCount ?? 0);
+    riskFactTotal += Number(baseline?.compiledEvidence?.riskFactCount ?? 0);
+    unknownTotal += Number(baseline?.compiledEvidence?.unknownCount ?? 0);
+    contradictionTotal += Number(baseline?.compiledEvidence?.contradictionCount ?? 0);
+
+    if (Array.isArray(baseline?.answerPlan?.missingFieldIds) && baseline.answerPlan.missingFieldIds.length > 0) {
+      missingFieldCases += 1;
+    }
+    if (baseline?.answerPlan?.requiresModelSynthesis === true) requiresModelSynthesisCases += 1;
+    if (baseline?.composer?.plannedComposerUsed === true) plannedComposerCases += 1;
+    if (baseline?.composer?.fallbackTemplateUsed === true) fallbackTemplateCases += 1;
+    if (baseline?.composer?.lowLanguageQualityDetected === true) lowLanguageQualityCases += 1;
+
+    increment(taskTypes, baseline?.answerPlan?.taskType);
+    increment(outputFormats, baseline?.answerPlan?.outputFormat);
+    increment(coverage, baseline?.answerPlan?.coverage);
+    increment(compiledEvidenceConfidences, baseline?.compiledEvidence?.confidence);
+    increment(confidenceReasons, baseline?.compiledEvidence?.confidenceReason);
+
+    const counts = baseline?.evidenceBundle?.kindCounts;
+    if (counts && typeof counts === "object" && !Array.isArray(counts)) {
+      for (const [kind, count] of Object.entries(counts)) {
+        const numeric = Number(count);
+        if (Number.isFinite(numeric)) increment(kindCounts, kind, numeric);
+      }
+    }
+  }
+
+  const observedCases = observed.length;
+  const average = (value) => observedCases === 0 ? 0 : Number((value / observedCases).toFixed(3));
+  const caseRatio = (value) => observedCases === 0 ? 0 : Number((value / observedCases).toFixed(3));
+
+  return {
+    observedCases,
+    coverageRatio: ratio(results, (result) => {
+      const baseline = readBaseline(result);
+      return baseline && typeof baseline === "object";
+    }),
+    averages: {
+      evidenceBundleItems: average(evidenceItemTotal),
+      usableEvidenceBundleItems: average(usableEvidenceItemTotal),
+      selectedFacts: average(selectedFactTotal),
+      sourceCount: average(sourceCountTotal),
+      structuredFacts: average(structuredFactTotal),
+      riskFacts: average(riskFactTotal),
+      unknowns: average(unknownTotal),
+      contradictions: average(contradictionTotal),
+    },
+    kindCounts: Object.fromEntries(Object.entries(kindCounts).sort(([a], [b]) => a.localeCompare(b))),
+    taskTypes: Object.fromEntries(Object.entries(taskTypes).sort(([a], [b]) => a.localeCompare(b))),
+    outputFormats: Object.fromEntries(Object.entries(outputFormats).sort(([a], [b]) => a.localeCompare(b))),
+    coverage: Object.fromEntries(Object.entries(coverage).sort(([a], [b]) => a.localeCompare(b))),
+    compiledEvidenceConfidences: Object.fromEntries(
+      Object.entries(compiledEvidenceConfidences).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+    confidenceReasons: Object.fromEntries(Object.entries(confidenceReasons).sort(([a], [b]) => a.localeCompare(b))),
+    missingFieldCaseRatio: caseRatio(missingFieldCases),
+    requiresModelSynthesisRatio: caseRatio(requiresModelSynthesisCases),
+    plannedComposerUsedRatio: caseRatio(plannedComposerCases),
+    fallbackTemplateUsedRatio: caseRatio(fallbackTemplateCases),
+    lowLanguageQualityRatio: caseRatio(lowLanguageQualityCases),
+  };
+}
+
 function summarizeEvidenceOnlyQuality(results) {
   const casesWithEvidenceOnlyExpectations = results.filter((result) => {
     const evidenceOnly = result.evidenceOnly;
@@ -1992,6 +2087,7 @@ async function main() {
   const rerankerQuality = summarizeRerankerQuality(results);
   const answerQualityTrends = summarizeAnswerQualityTrends(results);
   const evidenceOnlyQuality = summarizeEvidenceOnlyQuality(results);
+  const answerBaselineQuality = summarizeAnswerBaselineQuality(results);
   const runtimeControlTower = summarizeRuntimeControlTower(results);
   const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality, runtimeControlTower });
   const providerStrictFailures = collectProviderStrictFailures(results);
@@ -2019,6 +2115,7 @@ async function main() {
     compiledEvidenceQuality,
     rerankerQuality,
     evidenceOnlyQuality,
+    answerBaselineQuality,
     answerQualityTrends,
     evalGuardrails,
     shadowRuntime: {
