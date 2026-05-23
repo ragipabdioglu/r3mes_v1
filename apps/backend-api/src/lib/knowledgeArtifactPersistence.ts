@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { KnowledgeIngestionStepStatus, Prisma } from "@prisma/client";
 
 import type { DocumentArtifact, KnowledgeChunkDraft, ParsedKnowledgeDocument } from "./knowledgeText.js";
+import type { StructuredDocumentArtifact } from "./structuredDocumentArtifact.js";
 
 export interface KnowledgeDocumentVersionPersistenceInput {
   documentId: string;
@@ -79,10 +80,26 @@ function sanitizeInputJson(value: unknown, depth = 0): Prisma.InputJsonValue | u
   return Object.keys(out).length > 0 ? out as Prisma.InputJsonObject : undefined;
 }
 
-function artifactMetadataJson(artifact: DocumentArtifact): Prisma.InputJsonValue | undefined {
+function artifactMetadataJson(artifact: DocumentArtifact, structuredArtifacts: StructuredDocumentArtifact[] = []): Prisma.InputJsonValue | undefined {
   const metadata: Record<string, unknown> = {
     ...(artifact.metadata ?? {}),
   };
+  const artifactId = stableArtifactId(artifact);
+  const relatedStructuredArtifacts = structuredArtifacts.filter((structuredArtifact) => {
+    if (structuredArtifact.kind === "table") {
+      return structuredArtifact.provenance.artifactId === artifactId || structuredArtifact.tableId === artifactId;
+    }
+    if (structuredArtifact.kind === "key_value") {
+      return structuredArtifact.provenance?.artifactId === artifactId;
+    }
+    if (structuredArtifact.kind === "ocr_span") {
+      return false;
+    }
+    return false;
+  });
+  if (relatedStructuredArtifacts.length > 0) {
+    metadata.structuredArtifacts = relatedStructuredArtifacts;
+  }
   if (Array.isArray(artifact.items) && artifact.items.length > 0) {
     metadata.items = artifact.items;
   }
@@ -166,6 +183,7 @@ export function buildKnowledgeDocumentVersionCreateInput(
 export function buildKnowledgeArtifactCreateManyInput(
   input: KnowledgeArtifactPersistenceInput,
 ): Prisma.KnowledgeArtifactCreateManyInput[] {
+  const structuredArtifacts = input.parsed.structuredArtifacts ?? [];
   return input.parsed.artifacts.map((artifact, ordinal) => {
     const artifactId = stableArtifactId(artifact);
     const payload: Prisma.KnowledgeArtifactCreateManyInput = {
@@ -192,7 +210,7 @@ export function buildKnowledgeArtifactCreateManyInput(
     };
 
     if (input.versionId) payload.versionId = input.versionId;
-    const metadata = artifactMetadataJson(artifact);
+    const metadata = artifactMetadataJson(artifact, structuredArtifacts);
     if (metadata !== undefined) payload.metadata = metadata;
 
     return payload;

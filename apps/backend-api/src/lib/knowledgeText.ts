@@ -13,7 +13,7 @@ import {
   type KnowledgeSourceType,
 } from "./parserRegistry.js";
 import { parseCsvSpreadsheet } from "./spreadsheetKnowledgeParser.js";
-import type { StructuredDocumentArtifact } from "./structuredDocumentArtifact.js";
+import { readStructuredDocumentArtifact, type StructuredDocumentArtifact } from "./structuredDocumentArtifact.js";
 
 export type {
   KnowledgeExternalParserProfile,
@@ -50,6 +50,7 @@ export interface DocumentArtifact {
 }
 
 export interface ParsedKnowledgeDocument {
+  schemaVersion: 2;
   sourceType: KnowledgeSourceType;
   text: string;
   artifacts: DocumentArtifact[];
@@ -57,6 +58,15 @@ export interface ParsedKnowledgeDocument {
   parser: {
     id: string;
     version: number;
+  };
+  parserRun: {
+    id: string;
+    version: number;
+    profile?: KnowledgeExternalParserProfile | "built_in";
+    durationMs?: number;
+    fallbackUsed: boolean;
+    outputSchemaVersion: number;
+    warnings: string[];
   };
   diagnostics: {
     originalBytes: number;
@@ -78,13 +88,16 @@ function parsedDocument(opts: {
   artifacts?: DocumentArtifact[];
   structuredArtifacts?: StructuredDocumentArtifact[];
   warnings?: string[];
+  parserRun?: Partial<ParsedKnowledgeDocument["parserRun"]>;
 }): ParsedKnowledgeDocument {
   const sourceType = opts.sourceType ?? opts.adapter.sourceType;
   const text = normalizeParsedKnowledgeText(opts.text, sourceType).trim();
   if (!text) {
     throw new Error("Boş bilgi dosyası yüklenemez");
   }
+  const warnings = opts.warnings ?? [];
   return {
+    schemaVersion: 2,
     sourceType,
     text,
     artifacts: normalizeDocumentArtifacts(opts.artifacts, text, sourceType),
@@ -93,10 +106,19 @@ function parsedDocument(opts: {
       id: opts.adapter.id,
       version: opts.adapter.version,
     },
+    parserRun: {
+      id: opts.parserRun?.id ?? opts.adapter.id,
+      version: opts.parserRun?.version ?? opts.adapter.version,
+      profile: opts.parserRun?.profile ?? "built_in",
+      durationMs: opts.parserRun?.durationMs,
+      fallbackUsed: opts.parserRun?.fallbackUsed ?? warnings.some((warning) => warning.includes("fallback")),
+      outputSchemaVersion: opts.parserRun?.outputSchemaVersion ?? 1,
+      warnings,
+    },
     diagnostics: {
       originalBytes: opts.originalBytes,
       normalizedChars: text.length,
-      warnings: opts.warnings ?? [],
+      warnings,
     },
   };
 }
@@ -619,6 +641,7 @@ function externalDocumentParser(): KnowledgeParserAdapter<ParsedKnowledgeDocumen
       const inputPath = join(tempDir, `input${ext}`);
       try {
         writeFileSync(inputPath, buffer);
+        const startedAt = Date.now();
         const result = spawnSync(command, externalParserArgs(inputPath), {
           encoding: "utf8",
           timeout: externalParserTimeoutMs(),
@@ -636,13 +659,21 @@ function externalDocumentParser(): KnowledgeParserAdapter<ParsedKnowledgeDocumen
           ...(String(result.stderr ?? "").trim() ? ["external_parser_stderr"] : []),
           ...parsedOutput.warnings,
         ];
+        const profile = externalParserProfile();
         return parsedDocument({
           adapter,
           sourceType: parsedOutput.sourceType,
           text: parsedOutput.text,
           artifacts: parsedOutput.artifacts,
+          structuredArtifacts: parsedOutput.structuredArtifacts,
           originalBytes: buffer.length,
           warnings,
+          parserRun: {
+            profile,
+            durationMs: Math.max(0, Date.now() - startedAt),
+            fallbackUsed: warnings.some((warning) => warning.includes("fallback") || warning.includes("missing_text")),
+            outputSchemaVersion: 2,
+          },
         });
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -656,6 +687,7 @@ function parseExternalParserOutput(stdout: string, filename: string): {
   sourceType: KnowledgeSourceType;
   text: string;
   artifacts?: DocumentArtifact[];
+  structuredArtifacts?: StructuredDocumentArtifact[];
   warnings: string[];
 } {
   const trimmed = stdout.trim();
@@ -667,10 +699,12 @@ function parseExternalParserOutput(stdout: string, filename: string): {
         text?: unknown;
         markdown?: unknown;
         artifacts?: unknown;
+        structuredArtifacts?: unknown;
       };
       const sourceType = normalizeSourceType(parsed.sourceType, fallbackSourceType);
       const text = String(parsed.text ?? parsed.markdown ?? "").trim();
       const rawArtifacts = Array.isArray(parsed.artifacts) ? parsed.artifacts : [];
+      const rawStructuredArtifacts = Array.isArray(parsed.structuredArtifacts) ? parsed.structuredArtifacts : [];
       const artifacts: DocumentArtifact[] = [];
       for (const item of rawArtifacts) {
           if (!item || typeof item !== "object") continue;
@@ -691,19 +725,27 @@ function parseExternalParserOutput(stdout: string, filename: string): {
               : artifactAnswerabilityScore(normalizeArtifactKind(record.kind), textValue),
           });
       }
+      const structuredArtifacts = rawStructuredArtifacts
+        .map(readStructuredDocumentArtifact)
+        .filter((artifact): artifact is StructuredDocumentArtifact => artifact !== null);
+      const structuredWarnings = rawStructuredArtifacts.length > structuredArtifacts.length
+        ? ["external_parser_invalid_structured_artifacts"]
+        : [];
       if (text) {
         return {
           sourceType: sourceType === "TEXT" ? fallbackSourceType : sourceType,
           text,
           artifacts,
-          warnings: [],
+          structuredArtifacts,
+          warnings: structuredWarnings,
         };
       }
       return {
         sourceType: sourceType === "TEXT" ? fallbackSourceType : sourceType,
         text: trimmed,
         artifacts: inferDocumentArtifactsFromText(trimmed),
-        warnings: ["external_parser_json_missing_text"],
+        structuredArtifacts,
+        warnings: ["external_parser_json_missing_text", ...structuredWarnings],
       };
     } catch {
       // Keep compatibility with legacy parser commands that print Markdown.

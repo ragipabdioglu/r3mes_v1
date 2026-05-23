@@ -12,12 +12,21 @@ import type { KnowledgeChunkDraft, ParsedKnowledgeDocument } from "./knowledgeTe
 
 function parsedFixture(overrides: Partial<ParsedKnowledgeDocument> = {}): ParsedKnowledgeDocument {
   return {
+    schemaVersion: 2,
     sourceType: "PDF",
     text: "KAP financial table\nRevenue | 123",
     artifacts: [],
     parser: {
       id: "docling-v1",
       version: 3,
+    },
+    parserRun: {
+      id: "docling-v1",
+      version: 3,
+      profile: "docling",
+      fallbackUsed: false,
+      outputSchemaVersion: 2,
+      warnings: [],
     },
     diagnostics: {
       originalBytes: 2048,
@@ -206,6 +215,69 @@ describe("knowledgeArtifactPersistence", () => {
       artifactSplitIndex: 1,
     });
     expect(chunkPayloads[0]).not.toHaveProperty("versionId");
+  });
+
+  it("persists matching structured artifacts inside artifact metadata", () => {
+    const documentId = "doc_structured";
+    const parsed = parsedFixture({
+      artifacts: [
+        {
+          id: "artifact-table-structured",
+          kind: "table",
+          text: "Metric | Value\nRevenue | 123",
+          title: "Financials",
+          page: 2,
+          answerabilityScore: 90,
+        },
+      ],
+      structuredArtifacts: [
+        {
+          version: 1,
+          kind: "table",
+          tableId: "artifact-table-structured",
+          title: "Financials",
+          page: 2,
+          headers: [
+            { columnId: "metric", text: "Metric", normalizedText: "metric" },
+            { columnId: "value", text: "Value", normalizedText: "value" },
+          ],
+          rows: [
+            {
+              rowId: "r1",
+              label: "Revenue",
+              cells: [
+                { columnId: "metric", text: "Revenue", normalizedText: "Revenue", value: "Revenue", valueType: "string" },
+                { columnId: "value", text: "123", normalizedText: "123", value: 123, valueType: "number" },
+              ],
+            },
+          ],
+          provenance: {
+            parserId: "docling-test",
+            parserVersion: 1,
+            artifactId: "artifact-table-structured",
+          },
+        },
+      ],
+    });
+
+    const artifacts = buildKnowledgeArtifactCreateManyInput({ documentId, parsed });
+
+    expect(artifacts[0]?.metadata).toMatchObject({
+      structuredArtifacts: [
+        {
+          kind: "table",
+          tableId: "artifact-table-structured",
+          rows: [
+            {
+              rowId: "r1",
+              cells: expect.arrayContaining([
+                expect.objectContaining({ columnId: "value", value: 123, valueType: "number" }),
+              ]),
+            },
+          ],
+        },
+      ],
+    });
   });
 
   it("rejects invalid version numbers before Prisma writes", () => {

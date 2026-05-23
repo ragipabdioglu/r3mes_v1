@@ -205,9 +205,37 @@ describe("knowledge parser adapters", () => {
 
     expect(parsed.sourceType).toBe("PDF");
     expect(parsed.parser).toEqual({ id: "external-document-parser-v1", version: 1 });
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.parserRun).toMatchObject({
+      id: "external-document-parser-v1",
+      version: 1,
+      profile: "external",
+      fallbackUsed: false,
+      outputSchemaVersion: 2,
+    });
     expect(parsed.text).toContain("# Parsed document");
     expect(parsed.artifacts.length).toBeGreaterThan(0);
     expect(parsed.diagnostics.originalBytes).toBeGreaterThan(0);
+  });
+
+  it("preserves external parser structured artifacts for downstream document understanding", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(JSON.stringify({sourceType:'PDF',text:'Metric | Value\\\\nRevenue | 123',artifacts:[{id:'external-table-1',kind:'table',text:'Metric | Value\\\\nRevenue | 123',page:2,title:'Financials'}],structuredArtifacts:[{version:1,kind:'table',tableId:'external-table-1',title:'Financials',page:2,headers:[{columnId:'metric',text:'Metric',normalizedText:'metric'},{columnId:'value',text:'Value',normalizedText:'value'}],rows:[{rowId:'r1',label:'Revenue',cells:[{columnId:'metric',text:'Revenue',normalizedText:'Revenue',value:'Revenue',valueType:'string'},{columnId:'value',text:'123',normalizedText:'123',value:123,valueType:'number'}]}],provenance:{parserId:'docling-test',parserVersion:1,artifactId:'external-table-1'}}]}))\" {input}";
+
+    const parsed = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+
+    expect(parsed.structuredArtifacts).toHaveLength(1);
+    expect(parsed.structuredArtifacts?.[0]).toMatchObject({
+      kind: "table",
+      tableId: "external-table-1",
+      page: 2,
+      provenance: {
+        parserId: "docling-test",
+        parserVersion: 1,
+        artifactId: "external-table-1",
+      },
+    });
+    expect(parsed.diagnostics.warnings).not.toContain("external_parser_invalid_structured_artifacts");
   });
 
   it("keeps external parser artifact ids stable and passes artifact metadata into chunks", () => {
