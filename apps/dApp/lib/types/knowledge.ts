@@ -218,12 +218,21 @@ export type KnowledgeParserCapabilityItem = {
   id: string;
   version: number;
   sourceType: KnowledgeSourceType;
+  sourceTypes: KnowledgeSourceType[];
   extensions: string[];
+  mimeTypes: string[];
   inputMode: "utf8" | "binary";
   available: boolean;
   kind: "built_in" | "external";
-  health?: "ready" | "unavailable";
+  health?: "ready" | "degraded" | "unavailable";
+  priority: number;
+  supportsTables: boolean;
+  supportsOcr: boolean;
+  supportsSpreadsheets: boolean;
+  outputSchemaVersion: number;
   profile?: "docling" | "marker" | "external" | null;
+  smokeStatus?: "not_run" | "passed" | "failed" | "timed_out" | null;
+  smokeDurationMs?: number | null;
   reason?: string | null;
 };
 

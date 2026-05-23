@@ -3,6 +3,7 @@ import {
   parseKnowledgeDetailResponse,
   parseKnowledgeIngestionJobStatusResponse,
   parseKnowledgeListResponse,
+  safeParseKnowledgeParserCapabilitiesResponse,
 } from "@r3mes/shared-types";
 
 vi.mock("./lib/prisma.js", () => ({
@@ -280,6 +281,35 @@ describe("knowledge routes access control", () => {
       vectorIndexStatus: "FAILED",
       indexedChunkCount: null,
     });
+    await app.close();
+  });
+
+  it("GET /v1/knowledge/parsers exposes safe product capability fields", async () => {
+    vi.stubEnv("R3MES_DOCUMENT_PARSER_COMMAND", process.execPath);
+    vi.stubEnv("R3MES_DOCUMENT_PARSER_ARGS", "-e \"console.log(JSON.stringify({sourceType:'PDF',outputSchemaVersion:2,text:'Smoke parsed'}))\" {input}");
+    vi.stubEnv("R3MES_DOCUMENT_PARSER_HEALTHCHECK", "1");
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+
+    const res = await app.inject({ method: "GET", url: "/v1/knowledge/parsers" });
+
+    expect(res.statusCode).toBe(200);
+    const parsed = safeParseKnowledgeParserCapabilitiesResponse(JSON.parse(res.body));
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error("parser capability response contract failed");
+    const external = parsed.data.data.find((parser) => parser.id === "external-document-parser-v1");
+    expect(external).toMatchObject({
+      sourceTypes: ["PDF", "DOCX", "PPTX", "HTML"],
+      mimeTypes: expect.arrayContaining(["application/pdf"]),
+      health: "ready",
+      smokeStatus: "passed",
+      outputSchemaVersion: 2,
+      supportsTables: true,
+      supportsOcr: false,
+      supportsSpreadsheets: false,
+    });
+    expect(JSON.stringify(external)).not.toContain(process.execPath);
     await app.close();
   });
 });

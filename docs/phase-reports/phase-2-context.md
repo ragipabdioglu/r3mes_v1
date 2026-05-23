@@ -387,6 +387,164 @@ Specific target:
 - avoid making external parsers hard dependencies in local-dev;
 - fail/warn appropriately under strict runtime profiles.
 
+## Implementation Slice 4 - Parser Capability Smoke Health
+
+Date: 2026-05-23
+
+Commit:
+
+- pending at report-write time
+
+### System Startup Note
+
+The local system was started successfully before continuing Phase 2.
+
+Status:
+
+- backend-api: OK on `3000`
+- dApp: OK on `3001`
+- ai-engine: OK on `8000`
+- Qdrant: OK on `6333`
+- llama-server: OK on `8080`
+- IPFS gateway: OK on `9080`
+
+Startup caveat:
+
+- The configured LoRA file `C:\r3mes-lora\doctor-role-qwen3b-v3.gguf` failed llama loading with `failed to read magic`.
+- The system was restarted with a non-existing LoRA path so llama starts base Qwen2.5-3B without applying LoRA.
+- This is architecturally acceptable for RAG quality work because LoRA is not the truth/knowledge layer; it remains persona/behavior only.
+
+### What Changed
+
+Parser capability health no longer has to mean only “env command is configured”.
+
+Changes:
+
+- Added parser capability `health: ready | degraded | unavailable` to the public shared contract.
+- Added optional smoke fields:
+  - `smokeStatus: not_run | passed | failed | timed_out`
+  - `smokeDurationMs`
+- Expanded parser capability contract so product surfaces keep:
+  - `sourceTypes`
+  - `mimeTypes`
+  - `priority`
+  - `supportsTables`
+  - `supportsOcr`
+  - `supportsSpreadsheets`
+  - `outputSchemaVersion`
+- Added optional external parser smoke check behind `R3MES_DOCUMENT_PARSER_HEALTHCHECK=1`.
+- Smoke check reuses the same command/args path as real parsing but uses a tiny temporary smoke PDF.
+- Smoke results expose only symbolic status and safe reason text.
+- Command, args, executable path, temp path, raw stdout, and raw stderr are not exposed.
+- Added tests for:
+  - healthcheck disabled: configured parser returns `ready` + `not_run`;
+  - healthcheck success: `ready` + `passed`;
+  - healthcheck failure: `degraded` + `failed`;
+  - command/path details do not leak.
+
+### Contract Impact
+
+Changed shared/product parser capability contract:
+
+- `KnowledgeParserCapabilityItem.health` accepts `degraded`.
+- `KnowledgeParserCapabilityItem` now preserves richer product fields already produced by backend parser registry.
+
+Backward compatibility:
+
+- Existing consumers can ignore new optional smoke fields.
+- Health values are a strict additive expansion from `ready/unavailable` to `ready/degraded/unavailable`.
+
+### Changed Files
+
+Shared/API contract:
+
+- `packages/shared-types/src/apiContract.ts`
+- `packages/shared-types/src/schemas.ts`
+
+Backend:
+
+- `apps/backend-api/src/lib/parserRegistry.ts`
+- `apps/backend-api/src/lib/knowledgeText.ts`
+- `apps/backend-api/src/lib/knowledgeText.test.ts`
+- `apps/backend-api/src/knowledgeRoutes.test.ts`
+
+dApp type mirror:
+
+- `apps/dApp/lib/types/knowledge.ts`
+
+### Boundary Check
+
+Touched:
+
+- Parser capability contract
+- External parser capability health logic
+- Parser route tests
+- Parser unit tests
+
+Not touched:
+
+- Upload parsing behavior
+- Retrieval scoring
+- Qdrant indexing/reindex
+- Embedding provider
+- Reranker provider
+- Answer composer
+- Safety policy behavior
+- Qwen/LoRA runtime behavior
+- UI styling/layout
+- Prisma migrations
+
+### Tests / Evals
+
+Commands run:
+
+```powershell
+pnpm --filter @r3mes/shared-types run build
+pnpm --filter @r3mes/backend-api exec tsc --noEmit
+pnpm --filter @r3mes/backend-api exec vitest run src/lib/knowledgeText.test.ts src/knowledgeRoutes.test.ts
+pnpm --filter @r3mes/backend-api run eval:ingestion-quality
+pnpm run eval:parse-quality
+pnpm local:status
+```
+
+Results:
+
+- shared-types build: PASS
+- backend typecheck: PASS
+- parser + knowledge route tests: PASS, 30 tests
+- ingestion quality eval: PASS, 6/6
+- parse quality eval: PASS, 6/6
+- local status: all services OK
+
+### Quality Notes
+
+The smoke check is disabled by default to avoid blocking `/v1/knowledge/parsers` on every call. When enabled, it is still synchronous and bounded by `R3MES_DOCUMENT_PARSER_HEALTHCHECK_TIMEOUT_MS`.
+
+This gives product/admin surfaces a truthful distinction:
+
+- configured but not probed: `ready + not_run`
+- configured and smoke passed: `ready + passed`
+- configured but smoke failed: `degraded + failed/timed_out`
+- not configured: `unavailable + not_run`
+
+### Remaining Risks
+
+- There is no TTL/cache yet; repeated healthcheck-enabled calls can repeatedly run the external parser command.
+- Smoke input is a minimal synthetic PDF, not a rich OCR/layout benchmark.
+- Parser smoke status is product-visible but not yet tied into runtime strict profile gates.
+- dApp types are updated, but UI presentation for degraded parser health remains a later product layer task.
+
+### Next Slice Recommendation
+
+Add structured artifact provenance summaries to document detail/admin diagnostics.
+
+Specific target:
+
+- expose counts and safe artifact summaries, not raw parser internals;
+- keep public chat response untouched;
+- avoid dumping full structured artifacts into broad list responses;
+- add tests for artifact metadata carrying structured table provenance.
+
 ## Stop Condition Reminder
 
 Phase 2 is not complete until:

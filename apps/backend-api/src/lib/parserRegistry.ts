@@ -30,6 +30,8 @@ export interface KnowledgeParserCapability {
   supportsSpreadsheets: boolean;
   outputSchemaVersion: number;
   profile?: KnowledgeExternalParserProfile | null;
+  smokeStatus?: "not_run" | "passed" | "failed" | "timed_out" | null;
+  smokeDurationMs?: number | null;
   reason?: string | null;
 }
 

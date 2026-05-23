@@ -15,6 +15,8 @@ describe("knowledge parser adapters", () => {
   const originalParserCommand = process.env.R3MES_DOCUMENT_PARSER_COMMAND;
   const originalParserArgs = process.env.R3MES_DOCUMENT_PARSER_ARGS;
   const originalParserProfile = process.env.R3MES_DOCUMENT_PARSER_PROFILE;
+  const originalParserHealthcheck = process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK;
+  const originalParserHealthcheckTimeout = process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK_TIMEOUT_MS;
 
   afterEach(() => {
     if (originalParserCommand === undefined) delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
@@ -23,6 +25,10 @@ describe("knowledge parser adapters", () => {
     else process.env.R3MES_DOCUMENT_PARSER_ARGS = originalParserArgs;
     if (originalParserProfile === undefined) delete process.env.R3MES_DOCUMENT_PARSER_PROFILE;
     else process.env.R3MES_DOCUMENT_PARSER_PROFILE = originalParserProfile;
+    if (originalParserHealthcheck === undefined) delete process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK;
+    else process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK = originalParserHealthcheck;
+    if (originalParserHealthcheckTimeout === undefined) delete process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK_TIMEOUT_MS;
+    else process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK_TIMEOUT_MS = originalParserHealthcheckTimeout;
   });
 
   it("lists stable built-in parser adapters", () => {
@@ -104,11 +110,47 @@ describe("knowledge parser adapters", () => {
     expect(withExternal.find((parser) => parser.id === "external-document-parser-v1")).toMatchObject({
       available: true,
       health: "ready",
+      smokeStatus: "not_run",
       reason: null,
       supportsTables: true,
       supportsSpreadsheets: false,
       outputSchemaVersion: 1,
     });
+  });
+
+  it("reports external parser smoke health without exposing command or path details", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(JSON.stringify({sourceType:'PDF',outputSchemaVersion:2,text:'Smoke parsed',structuredArtifacts:[]}))\" {input}";
+    process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK = "1";
+
+    const capability = listKnowledgeParserCapabilities().find((parser) => parser.id === "external-document-parser-v1");
+
+    expect(capability).toMatchObject({
+      available: true,
+      health: "ready",
+      smokeStatus: "passed",
+      outputSchemaVersion: 2,
+      reason: null,
+    });
+    expect(capability?.smokeDurationMs).toEqual(expect.any(Number));
+    expect(JSON.stringify(capability)).not.toContain(process.execPath);
+  });
+
+  it("marks external parser capability degraded when smoke fails", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"process.exit(7)\" {input}";
+    process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK = "1";
+
+    const capability = listKnowledgeParserCapabilities().find((parser) => parser.id === "external-document-parser-v1");
+
+    expect(capability).toMatchObject({
+      available: true,
+      health: "degraded",
+      smokeStatus: "failed",
+      outputSchemaVersion: 1,
+      reason: "External parser smoke failed with exit code 7",
+    });
+    expect(JSON.stringify(capability)).not.toContain(process.execPath);
   });
 
   it("reports enriched built-in parser capabilities", () => {

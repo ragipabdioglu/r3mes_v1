@@ -604,6 +604,15 @@ function externalParserTimeoutMs(): number {
   return Number.isFinite(value) && value > 0 ? Math.min(value, 120000) : 30000;
 }
 
+function externalParserHealthcheckEnabled(): boolean {
+  return process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK === "1";
+}
+
+function externalParserHealthcheckTimeoutMs(): number {
+  const value = Number.parseInt(process.env.R3MES_DOCUMENT_PARSER_HEALTHCHECK_TIMEOUT_MS ?? "5000", 10);
+  return Number.isFinite(value) && value > 0 ? Math.min(value, 30000) : 5000;
+}
+
 function externalParserProfile(): KnowledgeExternalParserProfile {
   const raw = process.env.R3MES_DOCUMENT_PARSER_PROFILE?.trim().toLowerCase();
   if (raw === "docling" || raw === "marker") return raw;
@@ -623,6 +632,69 @@ function missingExternalParserReason(profile: KnowledgeExternalParserProfile): s
 function externalParserArgs(inputPath: string): string[] {
   const template = process.env.R3MES_DOCUMENT_PARSER_ARGS?.trim() || "{input}";
   return splitCommandLineArgs(template).map((arg) => arg.replaceAll("{input}", inputPath));
+}
+
+function externalParserSmokeResult(command: string): Pick<KnowledgeParserCapability, "health" | "smokeStatus" | "smokeDurationMs" | "reason" | "outputSchemaVersion"> {
+  if (!externalParserHealthcheckEnabled()) {
+    return {
+      health: "ready",
+      smokeStatus: "not_run",
+      outputSchemaVersion: 1,
+      reason: null,
+    };
+  }
+
+  const tempDir = mkdtempSync(join(tmpdir(), "r3mes-doc-smoke-"));
+  const inputPath = join(tempDir, "input.pdf");
+  const startedAt = Date.now();
+  try {
+    writeFileSync(inputPath, Buffer.from("%PDF-1.4\n% R3MES parser smoke fixture\n", "utf8"));
+    const result = spawnSync(command, externalParserArgs(inputPath), {
+      encoding: "utf8",
+      timeout: externalParserHealthcheckTimeoutMs(),
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+    const durationMs = Math.max(0, Date.now() - startedAt);
+    if (result.error) {
+      const timedOut = result.error && "code" in result.error && result.error.code === "ETIMEDOUT";
+      return {
+        health: "degraded",
+        smokeStatus: timedOut ? "timed_out" : "failed",
+        smokeDurationMs: durationMs,
+        outputSchemaVersion: 1,
+        reason: timedOut ? "External parser smoke timed out" : "External parser smoke could not execute",
+      };
+    }
+    if (result.status !== 0) {
+      return {
+        health: "degraded",
+        smokeStatus: "failed",
+        smokeDurationMs: durationMs,
+        outputSchemaVersion: 1,
+        reason: `External parser smoke failed with exit code ${result.status ?? "unknown"}`,
+      };
+    }
+    const parsed = parseExternalParserOutput(String(result.stdout ?? ""), inputPath);
+    if (!parsed.text.trim()) {
+      return {
+        health: "degraded",
+        smokeStatus: "failed",
+        smokeDurationMs: durationMs,
+        outputSchemaVersion: parsed.outputSchemaVersion,
+        reason: "External parser smoke produced no text",
+      };
+    }
+    return {
+      health: "ready",
+      smokeStatus: "passed",
+      smokeDurationMs: durationMs,
+      outputSchemaVersion: parsed.outputSchemaVersion,
+      reason: null,
+    };
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 function externalDocumentParser(): KnowledgeParserAdapter<ParsedKnowledgeDocument> | null {
@@ -869,6 +941,15 @@ function externalParserCapability(): KnowledgeParserCapability {
   const externalConfigured = Boolean(process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim());
   const profile = externalParserProfile();
   const sourceTypes: KnowledgeSourceType[] = ["PDF", "DOCX", "PPTX", "HTML"];
+  const smoke = externalConfigured
+    ? externalParserSmokeResult(process.env.R3MES_DOCUMENT_PARSER_COMMAND?.trim() ?? "")
+    : {
+        health: "unavailable" as const,
+        smokeStatus: "not_run" as const,
+        smokeDurationMs: null,
+        outputSchemaVersion: 1,
+        reason: missingExternalParserReason(profile),
+      };
   return {
     id: "external-document-parser-v1",
     version: 1,
@@ -886,13 +967,15 @@ function externalParserCapability(): KnowledgeParserCapability {
     available: externalConfigured,
     kind: "external",
     profile,
-    reason: externalConfigured ? null : missingExternalParserReason(profile),
-    health: externalConfigured ? "ready" : "unavailable",
+    reason: smoke.reason,
+    health: smoke.health,
     priority: 50,
     supportsTables: true,
     supportsOcr: profile === "docling" || profile === "marker",
     supportsSpreadsheets: false,
-    outputSchemaVersion: 1,
+    outputSchemaVersion: smoke.outputSchemaVersion,
+    smokeStatus: smoke.smokeStatus,
+    smokeDurationMs: smoke.smokeDurationMs,
   };
 }
 
