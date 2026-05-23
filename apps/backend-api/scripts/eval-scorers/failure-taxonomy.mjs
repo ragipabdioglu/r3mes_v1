@@ -189,6 +189,72 @@ export function classifyFailureSubtype(failure) {
   return classifyFailure(failure);
 }
 
+function isAnswerGenerationFailure(failure) {
+  const value = String(failure ?? "unknown");
+  return (
+    value.startsWith("answer_quality:") ||
+    value.startsWith("missing_answer_terms:") ||
+    value.startsWith("forbidden_answer_terms:") ||
+    value.startsWith("answer_words:") ||
+    value.startsWith("answer_chars:") ||
+    value === "low_language_quality"
+  );
+}
+
+function hasBlockingEvidenceOnlyFailure(result) {
+  const evidenceOnly = result?.evidenceOnly;
+  const findings = Array.isArray(evidenceOnly?.findings) ? evidenceOnly.findings : [];
+  return (
+    evidenceOnly?.ok === false ||
+    findings.some((finding) => finding?.severity === "fail") ||
+    (Array.isArray(result?.failures) && result.failures.some((failure) => String(failure ?? "").startsWith("evidence_only:")))
+  );
+}
+
+function hasBlockingAnswerQualityFailure(result) {
+  const findings = Array.isArray(result?.answerQualityFindings) ? result.answerQualityFindings : [];
+  return (
+    findings.some((finding) => finding?.severity === "fail") ||
+    (Array.isArray(result?.failures) && result.failures.some(isAnswerGenerationFailure))
+  );
+}
+
+function contextClasses(result) {
+  const classes = [];
+  if (hasBlockingEvidenceOnlyFailure(result)) {
+    classes.push("retrieval_or_evidence_failure");
+  }
+  if (result?.evidenceOnly?.ok === true && hasBlockingAnswerQualityFailure(result)) {
+    classes.push("composer_or_model_generation_failure");
+  }
+  return classes;
+}
+
+function contextSubtypes(result) {
+  const subtypes = [];
+  if (hasBlockingEvidenceOnlyFailure(result)) {
+    subtypes.push("retrieval_or_evidence_failure");
+  }
+  if (result?.evidenceOnly?.ok === true && hasBlockingAnswerQualityFailure(result)) {
+    subtypes.push("composer_or_model_generation_failure");
+  }
+  return subtypes;
+}
+
+function contextDiagnosis(result) {
+  const classes = contextClasses(result);
+  const subtypes = contextSubtypes(result);
+  if (classes.length === 0 && subtypes.length === 0) return null;
+  return {
+    classes,
+    subtypes,
+    evidenceOnlyOk: result?.evidenceOnly?.ok ?? null,
+    answerQualityFailCount: Array.isArray(result?.answerQualityFindings)
+      ? result.answerQualityFindings.filter((finding) => finding?.severity === "fail").length
+      : 0,
+  };
+}
+
 function increment(acc, key, amount = 1) {
   const normalized = key ?? "missing";
   acc[normalized] = (acc[normalized] ?? 0) + amount;
@@ -200,11 +266,13 @@ export function summarizeFailureTaxonomy(results) {
   const cases = failedResults.map((result) => {
     const classes = [...new Set(result.failures.map((failure) => classifyFailure(failure)))];
     const subtypes = [...new Set(result.failures.map((failure) => classifyFailureSubtype(failure)))];
+    const phaseDiagnosis = contextDiagnosis(result);
     return {
       id: result.id,
       bucket: result.bucket ?? "default",
       classes,
       subtypes,
+      phaseDiagnosis,
       failures: result.failures,
     };
   });
@@ -212,10 +280,17 @@ export function summarizeFailureTaxonomy(results) {
   const subtypes = {};
   const byBucket = {};
   const byBucketSubtypes = {};
+  const phaseDiagnosis = {
+    classes: {},
+    subtypes: {},
+    byBucket: {},
+    cases: [],
+  };
   for (const result of failedResults) {
     const bucket = result.bucket ?? "default";
     byBucket[bucket] ??= {};
     byBucketSubtypes[bucket] ??= {};
+    phaseDiagnosis.byBucket[bucket] ??= {};
     for (const failure of result.failures) {
       const failureClass = classifyFailure(failure);
       const failureSubtype = classifyFailureSubtype(failure);
@@ -223,6 +298,21 @@ export function summarizeFailureTaxonomy(results) {
       increment(subtypes, failureSubtype);
       increment(byBucket[bucket], failureClass);
       increment(byBucketSubtypes[bucket], failureSubtype);
+    }
+    const diagnosis = contextDiagnosis(result);
+    if (diagnosis) {
+      phaseDiagnosis.cases.push({
+        id: result.id,
+        bucket,
+        ...diagnosis,
+      });
+      for (const failureClass of diagnosis.classes) {
+        increment(phaseDiagnosis.classes, failureClass);
+        increment(phaseDiagnosis.byBucket[bucket], failureClass);
+      }
+      for (const failureSubtype of diagnosis.subtypes) {
+        increment(phaseDiagnosis.subtypes, failureSubtype);
+      }
     }
   }
   const blockerClasses = ["provider_failure", "runtime_fallback", "debug_contract", "boundary"];
@@ -234,6 +324,7 @@ export function summarizeFailureTaxonomy(results) {
     subtypes,
     byBucket,
     byBucketSubtypes,
+    phaseDiagnosis,
     blockers,
   };
 }
