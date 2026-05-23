@@ -37,6 +37,7 @@ import type {
   KnowledgeFeedbackProposalListResponse,
   KnowledgeFeedbackProposalReviewResponse,
   KnowledgeFeedbackSummaryResponse,
+  KnowledgeStructuredArtifactSummary,
   KnowledgeDocumentListItem,
   KnowledgeIngestionJobStatusResponse,
   KnowledgeListResponse,
@@ -126,6 +127,22 @@ export const KnowledgeDocumentUnderstandingQualitySchema = z.object({
     ocrSpanCount: z.number().int().nonnegative(),
   }),
 });
+export const KnowledgeStructuredArtifactSummarySchema: z.ZodType<KnowledgeStructuredArtifactSummary> = z.object({
+  version: z.literal(1),
+  artifactCount: z.number().int().nonnegative(),
+  structuredArtifactCount: z.number().int().nonnegative(),
+  tableCount: z.number().int().nonnegative(),
+  structuredTableCount: z.number().int().nonnegative(),
+  tableCellCount: z.number().int().nonnegative(),
+  ocrSpanCount: z.number().int().nonnegative(),
+  pageCount: z.number().int().positive().nullable().optional(),
+  parserId: z.string().nullable().optional(),
+  parserVersion: z.number().int().positive().nullable().optional(),
+  parserProfile: z.string().nullable().optional(),
+  parserFallbackUsed: z.boolean(),
+  outputSchemaVersion: z.number().int().positive().nullable().optional(),
+  warningsCount: z.number().int().nonnegative(),
+});
 export const KnowledgeParserRunDiagnosticsSchema = z.object({
   id: z.string().min(1),
   version: z.number().int().positive(),
@@ -197,6 +214,7 @@ export const KnowledgeDocumentListItemSchema: z.ZodType<KnowledgeDocumentListIte
   parseQualityWarnings: z.array(z.string()).optional(),
   ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
   documentUnderstanding: KnowledgeDocumentUnderstandingQualitySchema.nullable().optional(),
+  structuredArtifactSummary: KnowledgeStructuredArtifactSummarySchema.nullable().optional(),
   inferredTopic: z.string().nullable().optional(),
   inferredTags: z.array(z.string()).optional(),
   createdAt: z.string().min(1),
@@ -245,6 +263,7 @@ export const KnowledgeUploadAcceptedResponseSchema: z.ZodType<KnowledgeUploadAcc
   parseQualityWarnings: z.array(z.string()).optional(),
   ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
   documentUnderstanding: KnowledgeDocumentUnderstandingQualitySchema.nullable().optional(),
+  structuredArtifactSummary: KnowledgeStructuredArtifactSummarySchema.nullable().optional(),
 });
 
 export const KnowledgeIngestionJobStatusResponseSchema: z.ZodType<KnowledgeIngestionJobStatusResponse> = z.object({
@@ -285,6 +304,7 @@ export const KnowledgeIngestionJobStatusResponseSchema: z.ZodType<KnowledgeInges
   parseQualityWarnings: z.array(z.string()).optional(),
   ingestionQuality: KnowledgeIngestionQualityReportSchema.nullable().optional(),
   documentUnderstanding: KnowledgeDocumentUnderstandingQualitySchema.nullable().optional(),
+  structuredArtifactSummary: KnowledgeStructuredArtifactSummarySchema.nullable().optional(),
   startedAt: z.string().nullable().optional(),
   completedAt: z.string().nullable().optional(),
   createdAt: z.string().nullable().optional(),

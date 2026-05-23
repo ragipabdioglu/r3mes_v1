@@ -78,6 +78,23 @@ export interface KnowledgeDocumentUnderstandingQuality {
   };
 }
 
+export interface KnowledgeStructuredArtifactSummary {
+  version: 1;
+  artifactCount: number;
+  structuredArtifactCount: number;
+  tableCount: number;
+  structuredTableCount: number;
+  tableCellCount: number;
+  ocrSpanCount: number;
+  pageCount?: number | null;
+  parserId?: string | null;
+  parserVersion?: number | null;
+  parserProfile?: string | null;
+  parserFallbackUsed: boolean;
+  outputSchemaVersion?: number | null;
+  warningsCount: number;
+}
+
 export interface KnowledgeParserRunDiagnostics {
   id: string;
   version: number;
@@ -150,6 +167,7 @@ export interface KnowledgeDocumentListItem {
   parseQualityWarnings?: string[];
   ingestionQuality?: KnowledgeIngestionQualityReport | null;
   documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
+  structuredArtifactSummary?: KnowledgeStructuredArtifactSummary | null;
   inferredTopic?: string | null;
   inferredTags?: string[];
   createdAt: string;
@@ -198,6 +216,7 @@ export interface KnowledgeUploadAcceptedResponse {
   parseQualityWarnings?: string[];
   ingestionQuality?: KnowledgeIngestionQualityReport | null;
   documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
+  structuredArtifactSummary?: KnowledgeStructuredArtifactSummary | null;
 }
 
 export interface KnowledgeIngestionJobStatusResponse {
@@ -238,6 +257,7 @@ export interface KnowledgeIngestionJobStatusResponse {
   parseQualityWarnings?: string[];
   ingestionQuality?: KnowledgeIngestionQualityReport | null;
   documentUnderstanding?: KnowledgeDocumentUnderstandingQuality | null;
+  structuredArtifactSummary?: KnowledgeStructuredArtifactSummary | null;
   startedAt?: string | null;
   completedAt?: string | null;
   createdAt?: string | null;

@@ -4,6 +4,7 @@ import {
   type KnowledgeDetailResponse,
   type KnowledgeIngestionJobStatusResponse,
   type KnowledgeListResponse,
+  type KnowledgeStructuredArtifactSummary,
   type KnowledgeUploadAcceptedResponse,
   safeParseKnowledgeDetailResponse,
   safeParseKnowledgeIngestionJobStatusResponse,
@@ -369,6 +370,39 @@ function readKnowledgeParserRun(value: unknown): KnowledgeAutoMetadata["parserRu
   };
 }
 
+function buildStructuredArtifactSummary(
+  metadata: KnowledgeAutoMetadata | null | undefined,
+  persistedArtifactCount?: number | null,
+): KnowledgeStructuredArtifactSummary | null {
+  const understanding = metadata?.documentUnderstanding;
+  if (!understanding) return null;
+  const signals = understanding.signals;
+  const parserRun = metadata?.parserRun;
+  const warningsCount = new Set([
+    ...(understanding.warnings ?? []),
+    ...(metadata?.parseQuality?.warnings ?? []),
+    ...(metadata?.ingestionQuality?.warnings ?? []),
+    ...(parserRun?.warnings ?? []),
+  ]).size;
+
+  return {
+    version: 1,
+    artifactCount: Math.max(0, Math.round(persistedArtifactCount ?? signals.artifactCount ?? 0)),
+    structuredArtifactCount: Math.max(0, Math.round(signals.structuredArtifactCount ?? 0)),
+    tableCount: Math.max(0, Math.round(signals.tableCount ?? 0)),
+    structuredTableCount: Math.max(0, Math.round(signals.structuredTableCount ?? 0)),
+    tableCellCount: Math.max(0, Math.round(signals.tableCellCount ?? 0)),
+    ocrSpanCount: Math.max(0, Math.round(signals.ocrSpanCount ?? 0)),
+    pageCount: signals.pageCount ?? null,
+    parserId: parserRun?.id ?? null,
+    parserVersion: parserRun?.version ?? null,
+    parserProfile: parserRun?.profile ?? null,
+    parserFallbackUsed: Boolean(signals.parserFallbackUsed || parserRun?.fallbackUsed),
+    outputSchemaVersion: parserRun?.outputSchemaVersion ?? null,
+    warningsCount,
+  };
+}
+
 export async function registerKnowledgeRoutes(app: FastifyInstance) {
   app.get("/v1/knowledge/parsers", { preHandler: walletAuthPreHandler }, async (req, reply) => {
     const wallet = req.verifiedWalletAddress;
@@ -543,6 +577,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       parseQualityWarnings: documentMetadata?.parseQuality?.warnings ?? [],
       ingestionQuality: documentMetadata?.ingestionQuality ?? null,
       documentUnderstanding: documentMetadata?.documentUnderstanding ?? null,
+      structuredArtifactSummary: buildStructuredArtifactSummary(documentMetadata, job.document._count.artifacts),
       indexedChunkCount: indexStatus === "READY" ? job.document._count.chunks : null,
       errorCode: job.errorCode,
       errorMessage: job.errorMessage,
@@ -633,6 +668,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
           parseQualityWarnings: docMetadata?.parseQuality?.warnings ?? [],
           ingestionQuality: docMetadata?.ingestionQuality ?? null,
           documentUnderstanding: docMetadata?.documentUnderstanding ?? null,
+          structuredArtifactSummary: buildStructuredArtifactSummary(docMetadata, doc._count.artifacts),
           inferredTopic: docMetadata?.subtopics[0] ?? chunkMetadata?.subtopics[0] ?? card?.topic ?? null,
           inferredTags: [
             ...(docMetadata ? [docMetadata.domain, ...docMetadata.subtopics, ...docMetadata.keywords] : []),
@@ -780,6 +816,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
         parseQualityWarnings: documentMetadata?.parseQuality?.warnings ?? [],
         ingestionQuality: documentMetadata?.ingestionQuality ?? null,
         documentUnderstanding: documentMetadata?.documentUnderstanding ?? null,
+        structuredArtifactSummary: buildStructuredArtifactSummary(documentMetadata, existingDocument._count.artifacts),
       };
       const validated = safeParseKnowledgeUploadAcceptedResponse(payload);
       if (!validated.success) {
@@ -886,6 +923,7 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       storageCid: null,
       chunkCount: 0,
       parseQualityWarnings: enqueueMode ? [`ingestion_mode:${enqueueMode}`] : [],
+      structuredArtifactSummary: null,
     };
 
     const validated = safeParseKnowledgeUploadAcceptedResponse(payload);

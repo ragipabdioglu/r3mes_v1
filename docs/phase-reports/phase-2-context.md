@@ -545,6 +545,196 @@ Specific target:
 - avoid dumping full structured artifacts into broad list responses;
 - add tests for artifact metadata carrying structured table provenance.
 
+## Implementation Slice 5 — Safe Artifact Summary + Provenance Eval Gate
+
+Date: 2026-05-23
+
+Status: completed and pushed after verification.
+
+### Purpose
+
+Expose document-level structured artifact readiness without leaking raw parser artifacts, and make ingestion eval verify generic row/column/cell provenance for structured tables.
+
+This slice stays inside Phase 2:
+
+- Data source/file input
+- Parser/ingestion layer
+- Parse quality / ingestion quality
+- Document understanding / artifact detection
+- Contract-safe knowledge admin/detail diagnostics
+
+It does not touch retrieval, query understanding, reranker, composer, safety, Qwen, LoRA, or UI styling.
+
+### What Changed
+
+Added a safe `KnowledgeStructuredArtifactSummary` contract to shared-types and dApp mirrors.
+
+The summary includes only count/status/provenance metadata:
+
+- `artifactCount`
+- `structuredArtifactCount`
+- `tableCount`
+- `structuredTableCount`
+- `tableCellCount`
+- `ocrSpanCount`
+- `pageCount`
+- `parserId`
+- `parserVersion`
+- `parserProfile`
+- `parserFallbackUsed`
+- `outputSchemaVersion`
+- `warningsCount`
+
+It intentionally excludes:
+
+- raw structured artifact JSON
+- rows
+- cells
+- headers
+- bbox
+- parser block ids
+- raw OCR/table text
+- source previews
+
+Backend knowledge routes now derive `structuredArtifactSummary` from existing safe sources:
+
+- `documentUnderstanding.signals`
+- `parserRun`
+- persisted artifact count
+
+The ingestion-quality eval runner now inspects structured table provenance generically:
+
+- parser provenance present
+- artifact linkage present
+- header source cells present and unique
+- row source rows present and monotonic where required
+- cell source cells present and unique
+- row cell columns match header ids
+- dense rows preserve header/cell coverage
+- value types are present and type-consistent
+- normalized text is present
+- spreadsheet context is present where required
+
+The CSV fixture no longer accepts a parser-failure outcome. It must parse successfully and produce structured table provenance.
+
+### Contract Impact
+
+Added:
+
+- `KnowledgeStructuredArtifactSummary`
+
+Updated optional fields:
+
+- `KnowledgeDocumentListItem.structuredArtifactSummary`
+- `KnowledgeUploadAcceptedResponse.structuredArtifactSummary`
+- `KnowledgeIngestionJobStatusResponse.structuredArtifactSummary`
+
+Backward compatibility:
+
+- All fields are optional/null-safe.
+- Existing consumers can ignore the field.
+- Public chat response remains unchanged.
+
+### Changed Files
+
+Shared/API contract:
+
+- `packages/shared-types/src/apiContract.ts`
+- `packages/shared-types/src/schemas.ts`
+
+Backend:
+
+- `apps/backend-api/src/routes/knowledge.ts`
+- `apps/backend-api/src/knowledgeRoutes.test.ts`
+- `apps/backend-api/scripts/run-ingestion-quality-eval.mjs`
+
+dApp type mirror:
+
+- `apps/dApp/lib/types/knowledge.ts`
+
+Eval fixtures:
+
+- `infrastructure/evals/ingestion-quality/golden.jsonl`
+
+Report:
+
+- `docs/phase-reports/phase-2-context.md`
+
+### Boundary Check
+
+Touched:
+
+- Knowledge document/job/upload response contracts
+- Safe ingestion diagnostics
+- Ingestion quality eval expectations
+- Route contract tests
+
+Not touched:
+
+- Parser implementation behavior
+- Chunking behavior
+- Retrieval scoring
+- Qdrant indexing/reindex
+- Embedding provider
+- Reranker provider
+- Answer composer
+- Safety policy behavior
+- Qwen/LoRA runtime behavior
+- UI styling/layout
+- Prisma migrations
+
+### Tests / Evals
+
+Commands run:
+
+```powershell
+pnpm --filter @r3mes/shared-types run build
+pnpm --filter @r3mes/backend-api exec tsc --noEmit
+pnpm --filter @r3mes/backend-api exec vitest run src/knowledgeRoutes.test.ts
+pnpm --filter @r3mes/backend-api exec vitest run src/lib/documentUnderstandingQuality.test.ts src/lib/knowledgeArtifactPersistence.test.ts src/lib/knowledgeText.test.ts
+pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json
+pnpm --filter @r3mes/backend-api run eval:ingestion-quality
+pnpm run eval:parse-quality
+pnpm local:status
+```
+
+Results:
+
+- shared-types build: PASS
+- backend typecheck: PASS
+- backend direct dist compile: PASS
+- knowledge route tests: PASS, 5 tests
+- document understanding / artifact persistence / parser tests: PASS, 33 tests
+- ingestion quality eval: PASS, 6/6
+- parse quality eval: PASS, 6/6
+- local status: all services OK
+
+Build note:
+
+- `pnpm --filter @r3mes/backend-api run build` hit Windows `EPERM` while Prisma tried to rename `query_engine-windows.dll.node`; this is consistent with the live backend holding Prisma client files open.
+- To avoid disrupting the running system, direct TypeScript build was used for dist generation: `pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json`.
+
+### Quality Notes
+
+The new summary is intentionally safe enough for knowledge admin/detail/status surfaces, including public collection detail. It is not a source preview and does not expose document content.
+
+The provenance eval remains data-agnostic. It does not mention KAP, CheckBox, 5V, Ders, company names, or any document-specific literal in core logic.
+
+### Remaining Risks
+
+- Parser capability smoke still has no TTL/cache.
+- UI does not yet present structured artifact summary in a polished product surface.
+- Visual/layout extraction quality is still measured later; this slice only validates structured table provenance that parsers already produce.
+- Phase 2 closure still needs a final stop-condition audit.
+
+### Next Slice Recommendation
+
+Run a Phase 2 closure audit:
+
+- confirm all Phase 2 contracts are local-report documented;
+- verify current ingestion eval covers clean, noisy, text-only table, CSV structured table, external structured table, and parse failure;
+- list exact remaining gaps for Phase 3 handoff.
+
 ## Stop Condition Reminder
 
 Phase 2 is not complete until:

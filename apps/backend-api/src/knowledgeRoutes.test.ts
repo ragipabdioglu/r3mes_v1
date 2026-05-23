@@ -220,6 +220,56 @@ describe("knowledge routes access control", () => {
           summary: "",
           questionsAnswered: [],
           sourceQuality: "structured",
+          parseQuality: {
+            score: 88,
+            level: "clean",
+            warnings: [],
+            signals: {
+              textLength: 1200,
+              chunkCount: 2,
+              averageChunkChars: 600,
+              replacementCharRatio: 0,
+              mojibakeMarkerCount: 0,
+              controlCharRatio: 0,
+              symbolRatio: 0,
+              shortLineRatio: 0,
+              structureSignalCount: 3,
+              tableSignalCount: 1,
+              numericDensity: 0.1,
+              ocrRiskScore: 0,
+            },
+          },
+          ingestionQuality: {
+            version: 1,
+            tableRisk: "low",
+            ocrRisk: "none",
+            thinSource: false,
+            strictRouteEligible: true,
+            warnings: [],
+          },
+          documentUnderstanding: {
+            version: 1,
+            parseQuality: "clean",
+            structureQuality: "strong",
+            tableQuality: "structured",
+            spreadsheetQuality: "none",
+            ocrQuality: "none",
+            answerReadiness: "ready",
+            strictAnswerEligible: true,
+            blockers: [],
+            warnings: [],
+            signals: {
+              artifactCount: 1,
+              structuredArtifactCount: 2,
+              tableCount: 1,
+              structuredTableCount: 1,
+              tableCellCount: 12,
+              pageCount: 2,
+              parserFallbackUsed: false,
+              parseWarningCount: 0,
+              ocrSpanCount: 0,
+            },
+          },
           parserRun: {
             id: "external-document-parser-v1",
             version: 1,
@@ -230,7 +280,7 @@ describe("knowledge routes access control", () => {
             warnings: [],
           },
         },
-        _count: { chunks: 2 },
+        _count: { chunks: 2, artifacts: 1 },
         collection: {
           id: "kc_private",
           visibility: "PRIVATE",
@@ -275,12 +325,150 @@ describe("knowledge routes access control", () => {
         fallbackUsed: false,
         outputSchemaVersion: 2,
       },
+      structuredArtifactSummary: {
+        version: 1,
+        artifactCount: 1,
+        structuredArtifactCount: 2,
+        tableCount: 1,
+        structuredTableCount: 1,
+        tableCellCount: 12,
+        parserId: "external-document-parser-v1",
+        parserProfile: "docling",
+        parserFallbackUsed: false,
+        outputSchemaVersion: 2,
+      },
     });
+    expect(JSON.stringify(parsed.structuredArtifactSummary)).not.toContain("structuredArtifacts");
+    expect(JSON.stringify(parsed.structuredArtifactSummary)).not.toContain("headers");
+    expect(JSON.stringify(parsed.structuredArtifactSummary)).not.toContain("cells");
     expect(parsed.indexing).toMatchObject({
       status: "FAILED",
       vectorIndexStatus: "FAILED",
       indexedChunkCount: null,
     });
+    await app.close();
+  });
+
+  it("GET /v1/knowledge/:id exposes safe structured artifact summary without raw artifact content", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.knowledgeCollection.findUnique).mockResolvedValueOnce({
+      id: "kc_public",
+      name: "public set",
+      visibility: "PUBLIC",
+      publishedAt: new Date("2026-04-22T10:00:00.000Z"),
+      createdAt: new Date("2026-04-22T10:00:00.000Z"),
+      updatedAt: new Date("2026-04-22T10:00:00.000Z"),
+      owner: { walletAddress: "0x9999999999999999999999999999999999999999999999999999999999999999" },
+      documents: [
+        {
+          id: "doc_table",
+          title: "Structured source",
+          sourceType: "PDF",
+          sourceMime: "application/pdf",
+          sourceExtension: ".pdf",
+          contentHash: "hash",
+          storagePath: "knowledge/raw/doc.pdf",
+          parserId: "external-document-parser-v1",
+          parserVersion: 1,
+          scanStatus: "READY",
+          storageStatus: "READY",
+          parseStatus: "READY",
+          storageCid: null,
+          chunkStatus: "READY",
+          embeddingStatus: "READY",
+          vectorIndexStatus: "READY",
+          qualityStatus: "READY",
+          readinessStatus: "READY",
+          createdAt: new Date("2026-05-15T10:00:00.000Z"),
+          updatedAt: new Date("2026-05-15T10:01:00.000Z"),
+          versions: [{ id: "ver_1" }],
+          chunks: [
+            {
+              content: "Document chunk",
+              autoMetadata: {
+                domain: "general",
+                subtopics: ["table"],
+                keywords: ["structured"],
+                entities: [],
+                documentType: "knowledge_note",
+                audience: "general_user",
+                riskLevel: "low",
+                summary: "",
+                questionsAnswered: [],
+                sourceQuality: "structured",
+              },
+            },
+          ],
+          autoMetadata: {
+            domain: "general",
+            subtopics: ["table"],
+            keywords: ["structured"],
+            entities: [],
+            documentType: "knowledge_note",
+            audience: "general_user",
+            riskLevel: "low",
+            summary: "",
+            questionsAnswered: [],
+            sourceQuality: "structured",
+            parserRun: {
+              id: "external-document-parser-v1",
+              version: 1,
+              profile: "docling",
+              durationMs: 30,
+              fallbackUsed: false,
+              outputSchemaVersion: 2,
+              warnings: [],
+            },
+            documentUnderstanding: {
+              version: 1,
+              parseQuality: "clean",
+              structureQuality: "strong",
+              tableQuality: "structured",
+              spreadsheetQuality: "none",
+              ocrQuality: "none",
+              answerReadiness: "ready",
+              strictAnswerEligible: true,
+              blockers: [],
+              warnings: [],
+              signals: {
+                artifactCount: 1,
+                structuredArtifactCount: 2,
+                tableCount: 1,
+                structuredTableCount: 1,
+                tableCellCount: 9,
+                parserFallbackUsed: false,
+                parseWarningCount: 0,
+                ocrSpanCount: 0,
+              },
+            },
+            artifactMetadata: {
+              structuredArtifacts: [{ headers: ["secret"], rows: [["secret cell"]] }],
+            },
+          },
+          _count: { chunks: 1, artifacts: 1 },
+        },
+      ],
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+
+    const res = await app.inject({ method: "GET", url: "/v1/knowledge/kc_public" });
+    expect(res.statusCode).toBe(200);
+    const parsed = parseKnowledgeDetailResponse(JSON.parse(res.body));
+    expect(parsed.documents[0]?.structuredArtifactSummary).toMatchObject({
+      version: 1,
+      artifactCount: 1,
+      structuredTableCount: 1,
+      tableCellCount: 9,
+      parserId: "external-document-parser-v1",
+      parserFallbackUsed: false,
+    });
+    const serialized = JSON.stringify(parsed);
+    expect(serialized).not.toContain("secret cell");
+    expect(serialized).not.toContain("structuredArtifacts");
+    expect(serialized).not.toContain("headers");
+    expect(serialized).not.toContain("rows");
     await app.close();
   });
 

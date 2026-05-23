@@ -207,6 +207,129 @@ function actualStructuredTableCount(result) {
     ?? null;
 }
 
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function structuredTableArtifactsFor(parsed) {
+  return structuredArtifactsFor(parsed).filter((artifact) => isRecord(artifact) && artifact.kind === "table");
+}
+
+function collectArtifactIds(parsed) {
+  const ids = new Set();
+  for (const artifact of arrayValue(parsed?.artifacts)) {
+    if (!isRecord(artifact)) continue;
+    for (const value of [
+      artifact.id,
+      artifact.artifactId,
+      artifact.metadata?.structuredArtifactId,
+      artifact.metadata?.structuredArtifact?.tableId,
+      artifact.metadata?.structuredArtifact?.provenance?.artifactId,
+    ]) {
+      if (typeof value === "string" && value.trim().length > 0) ids.add(value);
+    }
+  }
+  return ids;
+}
+
+function hasTypedValueMismatch(cell) {
+  if (!isRecord(cell)) return true;
+  if (cell.valueType === "empty") return cell.value !== null && cell.value !== undefined && cell.value !== "";
+  if (cell.valueType === "number") return typeof cell.value !== "number" || !Number.isFinite(cell.value);
+  if (cell.valueType === "boolean") return typeof cell.value !== "boolean";
+  if (cell.valueType === "date" || cell.valueType === "string") return typeof cell.value !== "string" && cell.value !== null && cell.value !== undefined;
+  return typeof cell.valueType !== "string";
+}
+
+function inspectStructuredTableProvenance(parsed) {
+  const tables = structuredTableArtifactsFor(parsed);
+  const artifactIds = collectArtifactIds(parsed);
+  const summary = {
+    tableCount: tables.length,
+    cellCount: 0,
+    tablesWithParserProvenance: 0,
+    tablesWithArtifactLinkage: 0,
+    tablesWithSpreadsheetContext: 0,
+    headersWithSourceCell: 0,
+    headerCount: 0,
+    duplicateHeaderSourceCellCount: 0,
+    rowsWithSourceRow: 0,
+    rowCount: 0,
+    rowsSourceRowMonotonic: true,
+    cellsWithSourceCell: 0,
+    duplicateCellSourceCellCount: 0,
+    cellsWithKnownColumn: 0,
+    duplicateRowColumnCount: 0,
+    denseRowCount: 0,
+    cellsWithValueType: 0,
+    typedValueMismatchCount: 0,
+    cellsWithNormalizedText: 0,
+    headersWithNormalizedText: 0,
+  };
+
+  for (const table of tables) {
+    const headers = arrayValue(table.headers).filter(isRecord);
+    const rows = arrayValue(table.rows).filter(isRecord);
+    const headerIds = new Set(headers.map((header) => header.columnId).filter((value) => typeof value === "string"));
+    const headerSourceCells = new Set();
+    const cellSourceCells = new Set();
+    let previousSourceRow = 0;
+
+    summary.headerCount += headers.length;
+    summary.rowCount += rows.length;
+    if (isRecord(table.provenance) && typeof table.provenance.parserId === "string" && Number.isInteger(table.provenance.parserVersion) && table.provenance.parserVersion > 0) {
+      summary.tablesWithParserProvenance += 1;
+    }
+    if (typeof table.sheetName === "string" && table.sheetName.trim().length > 0) {
+      summary.tablesWithSpreadsheetContext += 1;
+    }
+    if (
+      isRecord(table.provenance) &&
+      typeof table.provenance.artifactId === "string" &&
+      artifactIds.has(table.provenance.artifactId)
+    ) {
+      summary.tablesWithArtifactLinkage += 1;
+    }
+
+    for (const header of headers) {
+      if (typeof header.normalizedText === "string" && header.normalizedText.trim().length > 0) summary.headersWithNormalizedText += 1;
+      if (typeof header.sourceCell === "string" && header.sourceCell.trim().length > 0) {
+        if (headerSourceCells.has(header.sourceCell)) summary.duplicateHeaderSourceCellCount += 1;
+        headerSourceCells.add(header.sourceCell);
+        summary.headersWithSourceCell += 1;
+      }
+    }
+
+    for (const row of rows) {
+      const cells = arrayValue(row.cells).filter(isRecord);
+      const rowColumns = new Set();
+      summary.cellCount += cells.length;
+      if (Number.isInteger(row.sourceRow) && row.sourceRow > 0) {
+        summary.rowsWithSourceRow += 1;
+        if (row.sourceRow < previousSourceRow) summary.rowsSourceRowMonotonic = false;
+        previousSourceRow = row.sourceRow;
+      }
+      if (cells.length === headers.length) summary.denseRowCount += 1;
+      for (const cell of cells) {
+        if (typeof cell.columnId === "string" && headerIds.has(cell.columnId)) summary.cellsWithKnownColumn += 1;
+        if (typeof cell.columnId === "string") {
+          if (rowColumns.has(cell.columnId)) summary.duplicateRowColumnCount += 1;
+          rowColumns.add(cell.columnId);
+        }
+        if (typeof cell.sourceCell === "string" && cell.sourceCell.trim().length > 0) {
+          if (cellSourceCells.has(cell.sourceCell)) summary.duplicateCellSourceCellCount += 1;
+          cellSourceCells.add(cell.sourceCell);
+          summary.cellsWithSourceCell += 1;
+        }
+        if (typeof cell.valueType === "string") summary.cellsWithValueType += 1;
+        if (hasTypedValueMismatch(cell)) summary.typedValueMismatchCount += 1;
+        if (typeof cell.normalizedText === "string" && cell.normalizedText.trim().length > 0) summary.cellsWithNormalizedText += 1;
+      }
+    }
+  }
+  return summary;
+}
+
 function applyCaseParserEnv(caseItem) {
   if (!caseItem.externalParserScript) return () => {};
   const original = {
@@ -281,6 +404,60 @@ function expectationFailures(caseItem, result) {
   if (caseItem.expectedTableQuality && result.documentUnderstanding?.tableQuality !== caseItem.expectedTableQuality) {
     failures.push(`table_quality:${result.documentUnderstanding?.tableQuality ?? "missing"}!=${caseItem.expectedTableQuality}`);
   }
+  if (Number.isFinite(Number(caseItem.minTableCellCount)) && (result.structuredTableInspection?.cellCount ?? 0) < Number(caseItem.minTableCellCount)) {
+    failures.push(`table_cell_count:${result.structuredTableInspection?.cellCount ?? "missing"}<${caseItem.minTableCellCount}`);
+  }
+  if (Number.isFinite(Number(caseItem.expectedTableCellCount)) && (result.structuredTableInspection?.cellCount ?? 0) !== Number(caseItem.expectedTableCellCount)) {
+    failures.push(`table_cell_count:${result.structuredTableInspection?.cellCount ?? "missing"}!=${caseItem.expectedTableCellCount}`);
+  }
+  if (caseItem.requireTableProvenance === true && (result.structuredTableInspection?.tablesWithParserProvenance ?? 0) < (result.structuredTableInspection?.tableCount ?? 0)) {
+    failures.push("table_provenance:missing_parser");
+  }
+  if (caseItem.requireArtifactLinkage === true && (result.structuredTableInspection?.tablesWithArtifactLinkage ?? 0) < (result.structuredTableInspection?.tableCount ?? 0)) {
+    failures.push("table_provenance:missing_artifact_linkage");
+  }
+  if (caseItem.requireHeaderSourceCells === true && (result.structuredTableInspection?.headersWithSourceCell ?? 0) < (result.structuredTableInspection?.headerCount ?? 0)) {
+    failures.push("header_source_cells:missing");
+  }
+  if (caseItem.requireHeaderSourceCells === true && (result.structuredTableInspection?.duplicateHeaderSourceCellCount ?? 0) > 0) {
+    failures.push("header_source_cells:duplicate");
+  }
+  if (caseItem.requireRowSourceRows === true && (result.structuredTableInspection?.rowsWithSourceRow ?? 0) < (result.structuredTableInspection?.rowCount ?? 0)) {
+    failures.push("row_source_rows:missing");
+  }
+  if (caseItem.requireRowSourceRows === true && result.structuredTableInspection?.rowsSourceRowMonotonic === false) {
+    failures.push("row_source_rows:not_monotonic");
+  }
+  if (caseItem.requireCellSourceCells === true && (result.structuredTableInspection?.cellsWithSourceCell ?? 0) < (result.structuredTableInspection?.cellCount ?? 0)) {
+    failures.push("cell_source_cells:missing");
+  }
+  if (caseItem.requireCellSourceCells === true && (result.structuredTableInspection?.duplicateCellSourceCellCount ?? 0) > 0) {
+    failures.push("cell_source_cells:duplicate");
+  }
+  if (caseItem.requireRowCellColumnCoverage === true && (result.structuredTableInspection?.cellsWithKnownColumn ?? 0) < (result.structuredTableInspection?.cellCount ?? 0)) {
+    failures.push("row_cell_column_coverage:unknown_column");
+  }
+  if (caseItem.requireRowCellColumnCoverage === true && (result.structuredTableInspection?.duplicateRowColumnCount ?? 0) > 0) {
+    failures.push("row_cell_column_coverage:duplicate_column");
+  }
+  if (caseItem.requireDenseRows === true && (result.structuredTableInspection?.denseRowCount ?? 0) < (result.structuredTableInspection?.rowCount ?? 0)) {
+    failures.push("dense_rows:missing_cells");
+  }
+  if (caseItem.requireCellValueTypes === true && (result.structuredTableInspection?.cellsWithValueType ?? 0) < (result.structuredTableInspection?.cellCount ?? 0)) {
+    failures.push("cell_value_types:missing");
+  }
+  if (caseItem.requireCellValueTypes === true && (result.structuredTableInspection?.typedValueMismatchCount ?? 0) > 0) {
+    failures.push("cell_value_types:mismatch");
+  }
+  if (caseItem.requireNormalizedText === true && (result.structuredTableInspection?.headersWithNormalizedText ?? 0) < (result.structuredTableInspection?.headerCount ?? 0)) {
+    failures.push("normalized_text:missing_header");
+  }
+  if (caseItem.requireNormalizedText === true && (result.structuredTableInspection?.cellsWithNormalizedText ?? 0) < (result.structuredTableInspection?.cellCount ?? 0)) {
+    failures.push("normalized_text:missing_cell");
+  }
+  if (caseItem.requireSpreadsheetContext === true && (result.structuredTableInspection?.tablesWithSpreadsheetContext ?? 0) < (result.structuredTableInspection?.tableCount ?? 0)) {
+    failures.push("spreadsheet_context:missing");
+  }
   if (
     Array.isArray(caseItem.expectedAnswerReadinessAny) &&
     !caseItem.expectedAnswerReadinessAny.includes(result.documentUnderstanding?.answerReadiness)
@@ -330,6 +507,7 @@ async function main() {
       sourceType: null,
       diagnostics: null,
       parserDiagnostics: null,
+      structuredTableInspection: null,
       artifactCount: 0,
       structuredArtifactCount: 0,
       chunkCount: 0,
@@ -374,6 +552,7 @@ async function main() {
           originalBytes: parsed.diagnostics?.originalBytes ?? null,
           normalizedChars: parsed.diagnostics?.normalizedChars ?? null,
         },
+        structuredTableInspection: inspectStructuredTableProvenance(parsed),
         artifactCount: parsed.artifacts?.length ?? 0,
         structuredArtifactCount: structuredArtifactsFor(parsed).length,
         chunkCount: chunks.length,
@@ -393,6 +572,7 @@ async function main() {
           chunkCount: 0,
           warnings: ["parse_failed"],
         },
+        structuredTableInspection: inspectStructuredTableProvenance(null),
         error: error instanceof Error ? error.message : String(error),
       });
     } finally {
