@@ -671,8 +671,8 @@ function externalDocumentParser(): KnowledgeParserAdapter<ParsedKnowledgeDocumen
           parserRun: {
             profile,
             durationMs: Math.max(0, Date.now() - startedAt),
-            fallbackUsed: warnings.some((warning) => warning.includes("fallback") || warning.includes("missing_text")),
-            outputSchemaVersion: 2,
+            fallbackUsed: parsedOutput.fallbackUsed || warnings.some((warning) => warning.includes("fallback") || warning.includes("missing_text")),
+            outputSchemaVersion: parsedOutput.outputSchemaVersion,
           },
         });
       } finally {
@@ -688,6 +688,8 @@ function parseExternalParserOutput(stdout: string, filename: string): {
   text: string;
   artifacts?: DocumentArtifact[];
   structuredArtifacts?: StructuredDocumentArtifact[];
+  outputSchemaVersion: number;
+  fallbackUsed: boolean;
   warnings: string[];
 } {
   const trimmed = stdout.trim();
@@ -700,11 +702,18 @@ function parseExternalParserOutput(stdout: string, filename: string): {
         markdown?: unknown;
         artifacts?: unknown;
         structuredArtifacts?: unknown;
+        outputSchemaVersion?: unknown;
+        schemaVersion?: unknown;
       };
       const sourceType = normalizeSourceType(parsed.sourceType, fallbackSourceType);
       const text = String(parsed.text ?? parsed.markdown ?? "").trim();
       const rawArtifacts = Array.isArray(parsed.artifacts) ? parsed.artifacts : [];
+      const structuredArtifactsProvided = Object.hasOwn(parsed, "structuredArtifacts");
       const rawStructuredArtifacts = Array.isArray(parsed.structuredArtifacts) ? parsed.structuredArtifacts : [];
+      const outputSchemaVersion = normalizeExternalOutputSchemaVersion(
+        parsed.outputSchemaVersion ?? parsed.schemaVersion,
+        structuredArtifactsProvided ? 2 : 1,
+      );
       const artifacts: DocumentArtifact[] = [];
       for (const item of rawArtifacts) {
           if (!item || typeof item !== "object") continue;
@@ -728,15 +737,23 @@ function parseExternalParserOutput(stdout: string, filename: string): {
       const structuredArtifacts = rawStructuredArtifacts
         .map(readStructuredDocumentArtifact)
         .filter((artifact): artifact is StructuredDocumentArtifact => artifact !== null);
-      const structuredWarnings = rawStructuredArtifacts.length > structuredArtifacts.length
-        ? ["external_parser_invalid_structured_artifacts"]
-        : [];
+      const invalidStructuredArtifactCount = rawStructuredArtifacts.length - structuredArtifacts.length;
+      const structuredWarnings = externalStructuredArtifactWarnings({
+        provided: structuredArtifactsProvided,
+        rawValue: parsed.structuredArtifacts,
+        acceptedCount: structuredArtifacts.length,
+        invalidCount: invalidStructuredArtifactCount,
+        totalCount: rawStructuredArtifacts.length,
+      });
+      const structuredFallbackUsed = structuredWarnings.some((warning) => warning.includes("fallback"));
       if (text) {
         return {
           sourceType: sourceType === "TEXT" ? fallbackSourceType : sourceType,
           text,
           artifacts,
           structuredArtifacts,
+          outputSchemaVersion,
+          fallbackUsed: structuredFallbackUsed,
           warnings: structuredWarnings,
         };
       }
@@ -745,6 +762,8 @@ function parseExternalParserOutput(stdout: string, filename: string): {
         text: trimmed,
         artifacts: inferDocumentArtifactsFromText(trimmed),
         structuredArtifacts,
+        outputSchemaVersion,
+        fallbackUsed: true,
         warnings: ["external_parser_json_missing_text", ...structuredWarnings],
       };
     } catch {
@@ -755,8 +774,34 @@ function parseExternalParserOutput(stdout: string, filename: string): {
     sourceType: fallbackSourceType,
     text: trimmed,
     artifacts: inferDocumentArtifactsFromText(trimmed),
+    outputSchemaVersion: 1,
+    fallbackUsed: false,
     warnings: [],
   };
+}
+
+function normalizeExternalOutputSchemaVersion(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) return fallback;
+  return Math.min(value, 99);
+}
+
+function externalStructuredArtifactWarnings(opts: {
+  provided: boolean;
+  rawValue: unknown;
+  acceptedCount: number;
+  invalidCount: number;
+  totalCount: number;
+}): string[] {
+  if (!opts.provided) return [];
+  if (!Array.isArray(opts.rawValue)) {
+    return ["external_parser_structured_artifacts_not_array", "external_parser_structured_artifact_fallback"];
+  }
+  if (opts.invalidCount <= 0) return [];
+  const warnings = [`external_parser_invalid_structured_artifacts:${opts.invalidCount}_of_${opts.totalCount}_rejected`];
+  if (opts.acceptedCount === 0) {
+    warnings.push("external_parser_structured_artifact_fallback");
+  }
+  return warnings;
 }
 
 function builtInParserEntries(): KnowledgeParserRegistryEntry<ParsedKnowledgeDocument>[] {

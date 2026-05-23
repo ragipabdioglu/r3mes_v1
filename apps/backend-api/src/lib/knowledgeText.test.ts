@@ -211,7 +211,7 @@ describe("knowledge parser adapters", () => {
       version: 1,
       profile: "external",
       fallbackUsed: false,
-      outputSchemaVersion: 2,
+      outputSchemaVersion: 1,
     });
     expect(parsed.text).toContain("# Parsed document");
     expect(parsed.artifacts.length).toBeGreaterThan(0);
@@ -236,6 +236,36 @@ describe("knowledge parser adapters", () => {
       },
     });
     expect(parsed.diagnostics.warnings).not.toContain("external_parser_invalid_structured_artifacts");
+  });
+
+  it("surfaces invalid external structured artifact diagnostics without dropping valid artifacts", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(JSON.stringify({sourceType:'PDF',outputSchemaVersion:2,text:'Metric | Value\\\\nRevenue | 123',structuredArtifacts:[{version:1,kind:'table',tableId:'external-table-1',headers:[{columnId:'metric',text:'Metric'},{columnId:'value',text:'Value'}],rows:[{rowId:'r1',cells:[{columnId:'metric',text:'Revenue'},{columnId:'value',text:'123',value:123,valueType:'number'}]}],provenance:{parserId:'docling-test',parserVersion:1}},{kind:'table',tableId:'broken-table'}]}))\" {input}";
+
+    const parsed = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+
+    expect(parsed.parserRun).toMatchObject({
+      fallbackUsed: false,
+      outputSchemaVersion: 2,
+    });
+    expect(parsed.structuredArtifacts).toHaveLength(1);
+    expect(parsed.diagnostics.warnings).toContain("external_parser_invalid_structured_artifacts:1_of_2_rejected");
+    expect(parsed.diagnostics.warnings).not.toContain("external_parser_structured_artifact_fallback");
+  });
+
+  it("marks structured artifact fallback when external parser structuredArtifacts is not usable", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(JSON.stringify({sourceType:'PDF',schemaVersion:2,text:'Plain text survives',structuredArtifacts:{kind:'table'}}))\" {input}";
+
+    const parsed = parseKnowledgeBuffer("report.pdf", Buffer.from("%PDF fake bytes", "utf8"));
+
+    expect(parsed.parserRun).toMatchObject({
+      fallbackUsed: true,
+      outputSchemaVersion: 2,
+    });
+    expect(parsed.structuredArtifacts).toHaveLength(0);
+    expect(parsed.diagnostics.warnings).toContain("external_parser_structured_artifacts_not_array");
+    expect(parsed.diagnostics.warnings).toContain("external_parser_structured_artifact_fallback");
   });
 
   it("keeps external parser artifact ids stable and passes artifact metadata into chunks", () => {
