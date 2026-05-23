@@ -219,6 +219,11 @@ function hasBlockingAnswerQualityFailure(result) {
   );
 }
 
+function hasSafetyPolicyOrPresentationFailure(result) {
+  const failures = Array.isArray(result?.failures) ? result.failures : [];
+  return failures.some((failure) => classifyFailure(failure) === "safety");
+}
+
 function contextClasses(result) {
   const classes = [];
   if (hasBlockingEvidenceOnlyFailure(result)) {
@@ -226,6 +231,9 @@ function contextClasses(result) {
   }
   if (result?.evidenceOnly?.ok === true && hasBlockingAnswerQualityFailure(result)) {
     classes.push("composer_or_model_generation_failure");
+  }
+  if (result?.evidenceOnly?.ok === true && hasSafetyPolicyOrPresentationFailure(result)) {
+    classes.push("safety_policy_or_presentation_failure");
   }
   return classes;
 }
@@ -237,6 +245,9 @@ function contextSubtypes(result) {
   }
   if (result?.evidenceOnly?.ok === true && hasBlockingAnswerQualityFailure(result)) {
     subtypes.push("composer_or_model_generation_failure");
+  }
+  if (result?.evidenceOnly?.ok === true && hasSafetyPolicyOrPresentationFailure(result)) {
+    subtypes.push("safety_policy_or_presentation_failure");
   }
   return subtypes;
 }
