@@ -12,13 +12,14 @@ import {
 } from "../dist/lib/knowledgeAutoMetadata.js";
 import { buildDocumentUnderstandingQuality } from "../dist/lib/documentUnderstandingQuality.js";
 import { buildCanonicalArtifactGraph } from "../dist/lib/canonicalArtifactGraph.js";
+import { embeddingServiceV2 } from "../dist/lib/embeddingService.js";
 import { adaptKnowledgeChunkDraftsToV2 } from "../dist/lib/knowledgeChunkV2.js";
 import { buildKnowledgeArtifactCreateManyInput, buildKnowledgeArtifactRowId } from "../dist/lib/knowledgeArtifactPersistence.js";
 import { parseKnowledgeCard } from "../dist/lib/knowledgeCard.js";
 import { embedKnowledgeText, formatVectorLiteral, getKnowledgeEmbeddingDimensions } from "../dist/lib/knowledgeEmbedding.js";
 import { scoreKnowledgeParseQuality } from "../dist/lib/knowledgeParseQuality.js";
 import { chunkParsedKnowledgeDocument, parseKnowledgeBuffer } from "../dist/lib/knowledgeText.js";
-import { embedTextsForQdrant } from "../dist/lib/qdrantEmbedding.js";
+import { buildQdrantPayloadV2, hashQdrantPayloadText } from "../dist/lib/qdrantPayloadV2.js";
 import {
   buildQdrantPayloadMetadata,
   setQdrantCollectionProfileMetadata,
@@ -198,10 +199,20 @@ async function upsertQdrantChunks({ ownerWallet, collection, collectionMetadata,
   const batchSize = parsePositiveInt(process.env.R3MES_KAP_QDRANT_BATCH_SIZE, 16);
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize);
-    const vectors = await embedTextsForQdrant(batch.map((chunk) => chunk.content));
+    const embeddings = await embeddingServiceV2.embedMany(batch.map((chunk) => ({
+      targetType: "chunk",
+      targetId: chunk.id,
+      purpose: "retrieval_dense",
+      text: chunk.embeddingText,
+      languageHint: "unknown",
+    })));
     await upsertQdrantKnowledgePoints(
       await Promise.all(
         batch.map(async (chunk, index) => {
+          const embedding = embeddings[index];
+          if (!embedding?.vector || embedding.vector.length === 0) {
+            throw new Error(`Qdrant embedding vector is missing for chunk ${chunk.id}`);
+          }
           const card = parseKnowledgeCard(chunk.content);
           const route = routeQuery(`${document.title}\n${card.topic}\n${card.tags.join(" ")}\n${chunk.content.slice(0, 1000)}`);
           const tags = card.tags.length > 0 ? card.tags : [route.domain, ...route.subtopics];
@@ -213,18 +224,42 @@ async function upsertQdrantChunks({ ownerWallet, collection, collectionMetadata,
             fallbackSubtopics: ["kap", "company_disclosure", ...route.subtopics],
             fallbackTags: tags,
           });
+          const payloadV2 = buildQdrantPayloadV2({
+            targetKind: "chunk",
+            targetId: chunk.id,
+            collectionId: collection.id,
+            documentId: document.id,
+            logicalChunkId: chunk.id,
+            visibility: collection.visibility,
+            ownerScopeId: ownerWallet,
+            sourceQuality: payloadMetadata.sourceQuality,
+            parseQualityLevel: documentMetadata.parseQuality?.level,
+            strictRouteEligible: payloadMetadata.strictRouteEligible,
+            strictAnswerEligible: payloadMetadata.strictAnswerEligible,
+            artifactKind: typeof chunk.autoMetadata?.artifactKind === "string"
+              ? chunk.autoMetadata.artifactKind
+              : undefined,
+            contentHash: hashQdrantPayloadText(chunk.content),
+            embeddingTextHash: hashQdrantPayloadText(chunk.embeddingText),
+            embeddingProvider: embedding.provider,
+            embeddingModel: embedding.model,
+            embeddingDimension: embedding.dimension,
+            indexedAt: new Date().toISOString(),
+          });
           return {
             chunkId: chunk.id,
-            vector: vectors[index],
+            vector: embedding.vector,
             payload: {
               ownerWallet,
-              visibility: collection.visibility,
-              collectionId: collection.id,
-              documentId: document.id,
               chunkId: chunk.id,
               chunkIndex: chunk.chunkIndex,
               title: document.title,
+              ...payloadV2,
               ...payloadMetadata,
+              collectionId: collection.id,
+              documentId: document.id,
+              embeddingFallbackUsed: embedding.fallbackUsed,
+              embeddingVectorSize: embedding.dimension,
               content: chunk.content,
               createdAt: document.createdAt.toISOString(),
             },
@@ -294,6 +329,8 @@ async function main() {
     documentsSkipped: 0,
     chunksImported: 0,
     qdrantUpsertedChunks: 0,
+    qdrantEmbeddingTextV2Chunks: 0,
+    qdrantEmbeddingTextContentFallbackChunks: 0,
     skipped: [],
     imported: [],
   };
@@ -342,18 +379,23 @@ async function main() {
       });
       const chunkDrafts = parsedChunks.map((chunk) => ({ ...chunk, content: chunk.content.trim() }));
       const chunkV2 = adaptKnowledgeChunkDraftsToV2(chunkDrafts, { filename: fileName, sourceType: parsed.sourceType });
-      const chunksWithMetadata = chunkDrafts.map((chunk) => ({
-        ...chunk,
-        autoMetadata: {
-          ...buildChunkMetadata({ row, title, content: chunk.content }),
-          sourceType: parsed.sourceType,
-          artifactKind: chunk.artifactKind,
-          sectionTitle: chunk.sectionTitle ?? null,
-          pageNumber: chunk.pageNumber ?? null,
-          isScaffold: chunk.isScaffold ?? false,
-          answerabilityScore: chunk.answerabilityScore,
-        },
-      }));
+      const chunksWithMetadata = chunkDrafts.map((chunk, index) => {
+        const embeddingText = chunkV2.chunks[index]?.embeddingText;
+        return {
+          ...chunk,
+          embeddingText: embeddingText ?? chunk.content,
+          embeddingTextSource: embeddingText === undefined ? "content_fallback" : "chunk_v2",
+          autoMetadata: {
+            ...buildChunkMetadata({ row, title, content: chunk.content }),
+            sourceType: parsed.sourceType,
+            artifactKind: chunk.artifactKind,
+            sectionTitle: chunk.sectionTitle ?? null,
+            pageNumber: chunk.pageNumber ?? null,
+            isScaffold: chunk.isScaffold ?? false,
+            answerabilityScore: chunk.answerabilityScore,
+          },
+        };
+      });
       const inferredDocumentMetadata = mergeKnowledgeAutoMetadata(chunksWithMetadata.map((chunk) => chunk.autoMetadata));
       const documentMetadata = mergeKapMetadata(baseMetadata, inferredDocumentMetadata);
       documentMetadata.ingestionQuality = buildIngestionQualityReport({
@@ -422,12 +464,18 @@ async function main() {
           id: createdChunk.id,
           chunkIndex: createdChunk.chunkIndex,
           content: createdChunk.content,
+          embeddingText: chunk.embeddingText,
+          embeddingTextSource: chunk.embeddingTextSource,
           autoMetadata: chunk.autoMetadata,
         });
       }
 
+      const embeddingTextV2Chunks = createdChunks.filter((chunk) => chunk.embeddingTextSource === "chunk_v2").length;
+      const embeddingTextContentFallbackChunks = createdChunks.length - embeddingTextV2Chunks;
       report.documentsImported += 1;
       report.chunksImported += createdChunks.length;
+      report.qdrantEmbeddingTextV2Chunks += embeddingTextV2Chunks;
+      report.qdrantEmbeddingTextContentFallbackChunks += embeddingTextContentFallbackChunks;
       report.imported.push({
         fileName,
         ticker: row.ticker,
@@ -436,6 +484,8 @@ async function main() {
         parseQuality: parseQuality.level,
         parseScore: parseQuality.score,
         chunks: createdChunks.length,
+        qdrantEmbeddingTextV2Chunks: embeddingTextV2Chunks,
+        qdrantEmbeddingTextContentFallbackChunks: embeddingTextContentFallbackChunks,
         truncated: parsedChunks.length >= maxChunksPerDocument,
       });
 
