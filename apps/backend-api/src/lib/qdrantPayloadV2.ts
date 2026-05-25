@@ -100,10 +100,35 @@ export function hashQdrantPayloadText(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+function qdrantPayloadV2HashMaterial(payload: QdrantPayloadV2HashInput): Omit<QdrantPayloadV2, "payloadHash"> {
+  return {
+    payloadSchemaVersion: payload.payloadSchemaVersion,
+    targetKind: payload.targetKind,
+    targetId: payload.targetId,
+    collectionId: payload.collectionId,
+    ...(payload.documentId !== undefined ? { documentId: payload.documentId } : {}),
+    ...(payload.documentVersionId !== undefined ? { documentVersionId: payload.documentVersionId } : {}),
+    ...(payload.logicalChunkId !== undefined ? { logicalChunkId: payload.logicalChunkId } : {}),
+    visibility: payload.visibility,
+    ownerScopeId: payload.ownerScopeId,
+    ...(payload.sourceQuality !== undefined ? { sourceQuality: payload.sourceQuality } : {}),
+    ...(payload.parseQualityLevel !== undefined ? { parseQualityLevel: payload.parseQualityLevel } : {}),
+    ...(payload.strictRouteEligible !== undefined ? { strictRouteEligible: payload.strictRouteEligible } : {}),
+    ...(payload.strictAnswerEligible !== undefined ? { strictAnswerEligible: payload.strictAnswerEligible } : {}),
+    ...(payload.artifactKind !== undefined ? { artifactKind: payload.artifactKind } : {}),
+    ...(payload.evidenceTypes !== undefined ? { evidenceTypes: payload.evidenceTypes } : {}),
+    contentHash: payload.contentHash,
+    embeddingTextHash: payload.embeddingTextHash,
+    embeddingProvider: payload.embeddingProvider,
+    embeddingModel: payload.embeddingModel,
+    embeddingDimension: payload.embeddingDimension,
+    indexedAt: payload.indexedAt,
+    ...(payload.metadata !== undefined ? { metadata: payload.metadata } : {}),
+  };
+}
+
 export function computeQdrantPayloadV2Hash(payload: QdrantPayloadV2HashInput): string {
-  const hashablePayload = { ...payload };
-  delete hashablePayload.payloadHash;
-  return createHash("sha256").update(canonicalJson(hashablePayload), "utf8").digest("hex");
+  return createHash("sha256").update(canonicalJson(qdrantPayloadV2HashMaterial(payload)), "utf8").digest("hex");
 }
 
 export function buildQdrantPayloadV2(input: QdrantPayloadV2BuildInput): QdrantPayloadV2 {

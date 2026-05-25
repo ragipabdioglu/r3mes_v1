@@ -102,6 +102,20 @@ describe("qdrantPayloadV2", () => {
     ]));
   });
 
+  it("validates V2 lineage when storage payload carries additive legacy fields", () => {
+    const payload = buildQdrantPayloadV2(deterministicInput());
+
+    expect(validateQdrantPayloadV2({
+      ...payload,
+      title: "Stored title",
+      content: "Stored content",
+      embeddingVectorSize: payload.embeddingDimension,
+    })).toEqual({
+      valid: true,
+      diagnostics: [],
+    });
+  });
+
   it("publishes one V2 index-field registry without unstructured metadata", () => {
     expect(QDRANT_PAYLOAD_V2_INDEX_FIELDS).toEqual([
       { fieldName: "payloadSchemaVersion", fieldSchema: "integer" },
