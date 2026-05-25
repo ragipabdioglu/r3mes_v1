@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildQdrantPayloadMetadata } from "./qdrantStore.js";
+import { buildQdrantPayloadMetadata, qdrantPayloadIndexFields } from "./qdrantStore.js";
 
 describe("buildQdrantPayloadMetadata", () => {
   it("projects collection profile into Qdrant payload metadata", () => {
@@ -142,5 +142,24 @@ describe("buildQdrantPayloadMetadata", () => {
       structureQuality: "partial",
       strictRouteEligible: false,
     });
+  });
+});
+
+describe("qdrantPayloadIndexFields", () => {
+  it("merges legacy indexes with the V2 registry without duplicate fields", () => {
+    const fields = qdrantPayloadIndexFields();
+    const names = fields.map(({ field_name }) => field_name);
+
+    expect(names).toEqual(expect.arrayContaining([
+      "collectionId",
+      "payloadSchemaVersion",
+      "targetKind",
+      "ownerScopeId",
+      "embeddingDimension",
+      "payloadHash",
+    ]));
+    expect(new Set(names).size).toBe(names.length);
+    expect(fields).toContainEqual({ field_name: "strictAnswerEligible", field_schema: "bool" });
+    expect(fields).toContainEqual({ field_name: "indexedAt", field_schema: "datetime" });
   });
 });

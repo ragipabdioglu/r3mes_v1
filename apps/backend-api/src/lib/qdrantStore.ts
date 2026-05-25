@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { KnowledgeVisibility } from "@r3mes/shared-types";
 
 import { getQdrantVectorSize } from "./qdrantEmbedding.js";
+import { QDRANT_PAYLOAD_V2_INDEX_FIELDS } from "./qdrantPayloadV2.js";
 
 const DEFAULT_QDRANT_URL = "http://127.0.0.1:6333";
 const DEFAULT_QDRANT_COLLECTION = "r3mes_knowledge";
@@ -385,10 +386,14 @@ export async function ensureQdrantKnowledgeCollection(): Promise<void> {
 
 let payloadIndexesEnsured = false;
 
-async function ensureQdrantPayloadIndexes(): Promise<void> {
-  if (payloadIndexesEnsured) return;
-  const collection = encodeURIComponent(getQdrantCollectionName());
-  const fields: Array<{ field_name: string; field_schema: "keyword" | "integer" }> = [
+type QdrantPayloadIndexFieldSchema = "keyword" | "integer" | "bool" | "datetime";
+interface QdrantPayloadIndexField {
+  field_name: string;
+  field_schema: QdrantPayloadIndexFieldSchema;
+}
+
+export function qdrantPayloadIndexFields(): QdrantPayloadIndexField[] {
+  const fields: QdrantPayloadIndexField[] = [
     { field_name: "collectionId", field_schema: "keyword" },
     { field_name: "visibility", field_schema: "keyword" },
     { field_name: "ownerWallet", field_schema: "keyword" },
@@ -408,8 +413,18 @@ async function ensureQdrantPayloadIndexes(): Promise<void> {
     { field_name: "collectionProfileTextHash", field_schema: "keyword" },
     { field_name: "embeddingProvider", field_schema: "keyword" },
     { field_name: "embeddingVectorSize", field_schema: "integer" },
+    ...QDRANT_PAYLOAD_V2_INDEX_FIELDS.map(({ fieldName, fieldSchema }) => ({
+      field_name: fieldName,
+      field_schema: fieldSchema,
+    })),
   ];
-  for (const { field_name, field_schema } of fields) {
+  return [...new Map(fields.map((field) => [field.field_name, field])).values()];
+}
+
+async function ensureQdrantPayloadIndexes(): Promise<void> {
+  if (payloadIndexesEnsured) return;
+  const collection = encodeURIComponent(getQdrantCollectionName());
+  for (const { field_name, field_schema } of qdrantPayloadIndexFields()) {
     const response = await qdrantFetch(`/collections/${collection}/index?wait=true`, {
       method: "PUT",
       body: JSON.stringify({ field_name, field_schema }),
