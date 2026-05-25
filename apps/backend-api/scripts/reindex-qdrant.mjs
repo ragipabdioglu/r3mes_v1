@@ -1,7 +1,16 @@
 import { PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { embedTextsForQdrantWithDiagnostics, getQdrantVectorSize } from "../dist/lib/qdrantEmbedding.js";
+import { embeddingServiceV2 } from "../dist/lib/embeddingService.js";
+import { getQdrantVectorSize } from "../dist/lib/qdrantEmbedding.js";
+import { buildQdrantPayloadV2, hashQdrantPayloadText, validateQdrantPayloadV2 } from "../dist/lib/qdrantPayloadV2.js";
+import {
+  advanceReindexCheckpoint,
+  completeReindexCheckpoint,
+  failReindexCheckpoint,
+  startReindexCheckpoint,
+} from "../dist/lib/reindexCheckpoint.js";
 import { buildQdrantPayloadMetadata, upsertQdrantKnowledgePoints } from "../dist/lib/qdrantStore.js";
 import { parseKnowledgeCard } from "../dist/lib/knowledgeCard.js";
 import { routeQuery } from "../dist/lib/queryRouter.js";
@@ -33,7 +42,7 @@ const resetCheckpoint = args.has("--reset-checkpoint");
 const noCheckpoint = args.has("--no-checkpoint");
 const statusOnly = args.has("--status");
 const verifyCount = args.has("--verify-count") || statusOnly;
-const CHECKPOINT_SCHEMA_VERSION = 2;
+let activeCheckpoint = null;
 
 function collectionScopeWhere() {
   return explicitCollectionIds.length > 0
@@ -51,6 +60,15 @@ function collectionScopeFilter() {
 
 function collectionScopeKey() {
   return [...new Set(explicitCollectionIds)].sort().join(",");
+}
+
+function checkpointCollectionId() {
+  const uniqueIds = [...new Set(explicitCollectionIds)];
+  return uniqueIds.length === 1 ? uniqueIds[0] : undefined;
+}
+
+function expectedEmbeddingProvider() {
+  return requestedEmbeddingProvider === "deterministic" ? "deterministic-dev" : "bge-m3";
 }
 
 function withCollectionScopeFilter(filter) {
@@ -145,8 +163,8 @@ async function qdrantFilteredPointCount(filter) {
 async function embeddingProviderPointCount() {
   return qdrantFilteredPointCount(withCollectionScopeFilter({
     must: [
-      { key: "embeddingProvider", match: { value: requestedEmbeddingProvider } },
-      { key: "embeddingVectorSize", match: { value: getQdrantVectorSize() } },
+      { key: "embeddingProvider", match: { value: expectedEmbeddingProvider() } },
+      { key: "embeddingDimension", match: { value: getQdrantVectorSize() } },
     ],
   }));
 }
@@ -154,7 +172,7 @@ async function embeddingProviderPointCount() {
 async function deterministicFallbackPointCount() {
   return qdrantFilteredPointCount(withCollectionScopeFilter({
     must: [
-      { key: "embeddingProvider", match: { value: "deterministic" } },
+      { key: "embeddingProvider", match: { any: ["deterministic", "deterministic-dev"] } },
     ],
   }));
 }
@@ -175,6 +193,9 @@ async function qdrantPayloadAudit() {
     fallbackUsedPointCount: 0,
     missingModelPointCount: 0,
     wrongVectorSizePointCount: 0,
+    validPayloadV2PointCount: 0,
+    invalidPayloadV2PointCount: 0,
+    payloadHashMismatchPointCount: 0,
     sampleEmbeddingModels: [],
   };
   const sampleModels = new Set();
@@ -201,15 +222,28 @@ async function qdrantPayloadAudit() {
       const payload = point?.payload && typeof point.payload === "object" ? point.payload : {};
       const provider = typeof payload.embeddingProvider === "string" ? payload.embeddingProvider : "";
       const model = typeof payload.embeddingModel === "string" ? payload.embeddingModel : "";
-      const vectorSize = typeof payload.embeddingVectorSize === "number" ? payload.embeddingVectorSize : null;
+      const vectorSize = typeof payload.embeddingDimension === "number"
+        ? payload.embeddingDimension
+        : typeof payload.embeddingVectorSize === "number"
+          ? payload.embeddingVectorSize
+          : null;
+      const validation = validateQdrantPayloadV2(payload);
 
       audit.auditedPoints += 1;
-      if (provider === "ai-engine" || provider === "bge-m3") audit.realProviderPointCount += 1;
-      if (provider === "deterministic") audit.deterministicProviderPointCount += 1;
+      if (provider === "bge-m3") audit.realProviderPointCount += 1;
+      if (provider === "deterministic" || provider === "deterministic-dev") audit.deterministicProviderPointCount += 1;
       if (payload.embeddingFallbackUsed === true) audit.fallbackUsedPointCount += 1;
       if (!model) audit.missingModelPointCount += 1;
       if (isBgeM3ModelName(model)) audit.bgeM3ModelPointCount += 1;
       if (vectorSize !== getQdrantVectorSize()) audit.wrongVectorSizePointCount += 1;
+      if (validation.valid) {
+        audit.validPayloadV2PointCount += 1;
+      } else {
+        audit.invalidPayloadV2PointCount += 1;
+        if (validation.diagnostics.some((item) => item.code === "payload_hash_mismatch")) {
+          audit.payloadHashMismatchPointCount += 1;
+        }
+      }
       if (model && sampleModels.size < 5) sampleModels.add(model);
     }
     offset = parsed?.result?.next_page_offset ?? null;
@@ -241,10 +275,11 @@ function readCheckpoint() {
   if (noCheckpoint || resetCheckpoint || !existsSync(checkpointPath)) return null;
   try {
     const parsed = JSON.parse(readFileSync(checkpointPath, "utf8"));
-    if (parsed?.collection !== getQdrantCollectionName()) return null;
-    if (parsed?.vectorSize !== getQdrantVectorSize()) return null;
-    if ((parsed?.collectionScopeKey ?? "") !== collectionScopeKey()) return null;
-    if (typeof parsed?.lastChunkId !== "string" || !parsed.lastChunkId) return null;
+    if (parsed?.version !== 1 || parsed?.payloadSchemaVersion !== 2) return null;
+    if (parsed?.indexName !== getQdrantCollectionName() || parsed?.targetKind !== "chunk") return null;
+    if (parsed?.status !== "running") return null;
+    if ((parsed?.collectionId ?? undefined) !== checkpointCollectionId()) return null;
+    if (typeof parsed?.cursor !== "string" || !parsed.cursor) return null;
     return parsed;
   } catch {
     return null;
@@ -276,10 +311,13 @@ async function printStatus(startAfter) {
     : payloadAudit.auditedPoints >= stats.totalChunks &&
       payloadAudit.bgeM3ModelPointCount >= stats.totalChunks &&
       payloadAudit.realProviderPointCount >= stats.totalChunks &&
+      payloadAudit.validPayloadV2PointCount >= stats.totalChunks &&
       payloadAudit.deterministicProviderPointCount === 0 &&
       payloadAudit.fallbackUsedPointCount === 0 &&
       payloadAudit.missingModelPointCount === 0 &&
-      payloadAudit.wrongVectorSizePointCount === 0;
+      payloadAudit.wrongVectorSizePointCount === 0 &&
+      payloadAudit.invalidPayloadV2PointCount === 0 &&
+      payloadAudit.payloadHashMismatchPointCount === 0;
   const status = {
     phase: "qdrant_reindex_status",
     ok: bgeM3BackboneReady ?? providerMatches ?? indexComplete ?? true,
@@ -290,6 +328,7 @@ async function printStatus(startAfter) {
     collectionScopeKey: collectionScopeKey() || null,
     vectorSize: getQdrantVectorSize(),
     requestedEmbeddingProvider,
+    expectedEmbeddingProvider: expectedEmbeddingProvider(),
     requireRealEmbeddings,
     totalChunks: stats.totalChunks,
     completedChunks: indexComplete ? stats.totalChunks : stats.completedChunks,
@@ -307,15 +346,27 @@ async function printStatus(startAfter) {
 
 async function main() {
   if (resetCheckpoint) clearCheckpoint();
+  if (!noCheckpoint && new Set(explicitCollectionIds).size > 1) {
+    throw new Error("Checkpointed reindex supports one explicit collection at a time; run each collection separately or use --no-checkpoint.");
+  }
   await assertQdrantVectorSizeIfCollectionExists();
-  const checkpoint = readCheckpoint();
-  const startAfter = explicitAfter ?? checkpoint?.lastChunkId;
+  const checkpoint = explicitAfter ? null : readCheckpoint();
+  const startAfter = explicitAfter ?? checkpoint?.cursor;
   if (statusOnly) {
     await printStatus(startAfter);
     return;
   }
   const statsAtStart = await chunkStats(startAfter ?? null);
   const startedAt = new Date().toISOString();
+  activeCheckpoint = checkpoint ?? startReindexCheckpoint({
+    operationId: `qdrant-reindex-${randomUUID()}`,
+    indexName: getQdrantCollectionName(),
+    collectionId: checkpointCollectionId(),
+    targetKind: "chunk",
+    startedAt,
+    totalCount: statsAtStart.totalChunks,
+  });
+  writeCheckpoint(activeCheckpoint);
   console.log(JSON.stringify({
     phase: "qdrant_reindex_start",
     batchSize,
@@ -358,14 +409,36 @@ async function main() {
 
     if (chunks.length === 0) break;
 
-    const { vectors, diagnostics } = await embedTextsForQdrantWithDiagnostics(chunks.map((chunk) => chunk.content));
-    if (requireRealEmbeddings && diagnostics.fallbackUsed) {
+    const embeddings = await embeddingServiceV2.embedMany(chunks.map((chunk) => ({
+      targetType: "chunk",
+      targetId: chunk.id,
+      purpose: "retrieval_dense",
+      text: chunk.content,
+      languageHint: "unknown",
+    })));
+    const embeddingLineage = embeddings[0]
+      ? {
+          requestedProvider: requestedEmbeddingProvider,
+          actualProvider: embeddings[0].provider,
+          model: embeddings[0].model,
+          transport: embeddings[0].transport,
+          pooling: embeddings[0].pooling,
+          device: embeddings[0].device,
+          fallbackUsed: embeddings[0].fallbackUsed,
+          ...(embeddings[0].fallbackReason ? { fallbackReason: embeddings[0].fallbackReason } : {}),
+        }
+      : undefined;
+    if (requireRealEmbeddings && embeddings.some((embedding) => embedding.fallbackUsed || embedding.provider !== "bge-m3")) {
       throw new Error(
-        `Qdrant reindex aborted: embedding provider fell back to ${diagnostics.actualProvider}. ` +
-          `requested=${diagnostics.requestedProvider} error=${diagnostics.error ?? "unknown"}`,
+        `Qdrant reindex aborted: real BGE-M3 embedding lineage was not proven. ` +
+          `requested=${requestedEmbeddingProvider} actual=${embeddings[0]?.provider ?? "missing"}`,
       );
     }
     const points = chunks.map((chunk, index) => {
+      const embedding = embeddings[index];
+      if (!embedding?.vector || embedding.vector.length === 0) {
+        throw new Error(`Qdrant reindex embedding vector is missing for chunk ${chunk.id}`);
+      }
       const card = parseKnowledgeCard(chunk.content);
       const metadata = readMetadata(chunk.autoMetadata) ?? readMetadata(chunk.document.autoMetadata);
       const route = routeQuery(`${chunk.document.title}\n${card.topic}\n${card.tags.join(" ")}\n${chunk.content.slice(0, 1000)}`);
@@ -384,23 +457,41 @@ async function main() {
         fallbackSubtopics: subtopics,
         fallbackTags: tags,
       });
+      const indexedAt = new Date().toISOString();
+      const payloadV2 = buildQdrantPayloadV2({
+        targetKind: "chunk",
+        targetId: chunk.id,
+        collectionId: chunk.document.collectionId,
+        documentId: chunk.documentId,
+        ...(chunk.versionId ? { documentVersionId: chunk.versionId } : {}),
+        logicalChunkId: chunk.id,
+        visibility: chunk.document.collection.visibility,
+        ownerScopeId: chunk.document.collection.owner.walletAddress,
+        sourceQuality: payloadMetadata.sourceQuality,
+        strictRouteEligible: payloadMetadata.strictRouteEligible,
+        strictAnswerEligible: payloadMetadata.strictAnswerEligible,
+        artifactKind: typeof metadata?.artifactKind === "string" ? metadata.artifactKind : undefined,
+        contentHash: hashQdrantPayloadText(chunk.content),
+        embeddingTextHash: hashQdrantPayloadText(chunk.content),
+        embeddingProvider: embedding.provider,
+        embeddingModel: embedding.model,
+        embeddingDimension: embedding.dimension,
+        indexedAt,
+      });
       return {
         chunkId: chunk.id,
-        vector: vectors[index],
+        vector: embedding.vector,
         payload: {
           ownerWallet: chunk.document.collection.owner.walletAddress,
-          visibility: chunk.document.collection.visibility,
-          collectionId: chunk.document.collectionId,
-          documentId: chunk.documentId,
           chunkId: chunk.id,
           chunkIndex: chunk.chunkIndex,
           title: chunk.document.title,
+          ...payloadV2,
           ...payloadMetadata,
-          embeddingProvider: diagnostics.actualProvider,
-          embeddingModel: diagnostics.model ?? "",
-          embeddingFallbackUsed: diagnostics.fallbackUsed,
-          embeddingVectorSize: diagnostics.dimension,
-          indexedAt: new Date().toISOString(),
+          collectionId: chunk.document.collectionId,
+          documentId: chunk.documentId,
+          embeddingFallbackUsed: embedding.fallbackUsed,
+          embeddingVectorSize: embedding.dimension,
           content: chunk.content,
           createdAt: chunk.createdAt.toISOString(),
         },
@@ -411,8 +502,15 @@ async function main() {
     total += points.length;
     batches += 1;
     cursor = chunks.at(-1)?.id;
+    activeCheckpoint = advanceReindexCheckpoint(activeCheckpoint, {
+      cursor,
+      processedCount: points.length,
+      indexedCount: points.length,
+      updatedAt: new Date().toISOString(),
+      embeddingProvider: embeddingLineage,
+    });
     const progress = {
-      schemaVersion: CHECKPOINT_SCHEMA_VERSION,
+      ...activeCheckpoint,
       phase: "qdrant_reindex_progress",
       indexedThisRun: total,
       batchesThisRun: batches,
@@ -424,11 +522,10 @@ async function main() {
       totalChunks: statsAtStart.totalChunks,
       completedChunksApprox: Math.min(statsAtStart.totalChunks, statsAtStart.completedChunks + total),
       remainingChunksApprox: Math.max(0, statsAtStart.remainingChunks - total),
-      embedding: diagnostics,
+      embedding: embeddingLineage,
       startedAt,
-      updatedAt: new Date().toISOString(),
     };
-    writeCheckpoint(progress);
+    writeCheckpoint(activeCheckpoint);
     console.log(JSON.stringify(progress));
 
     if (Number.isFinite(maxBatches) && maxBatches > 0 && batches >= maxBatches) {
@@ -447,7 +544,8 @@ async function main() {
   }
 
   const finalPointCount = verifyCount ? await qdrantScopedPointCount() : null;
-  clearCheckpoint();
+  activeCheckpoint = completeReindexCheckpoint(activeCheckpoint, new Date().toISOString());
+  writeCheckpoint(activeCheckpoint);
   console.log(JSON.stringify({
     ok: true,
     partial: false,
@@ -462,6 +560,10 @@ async function main() {
 
 main()
   .catch((error) => {
+    if (activeCheckpoint) {
+      activeCheckpoint = failReindexCheckpoint(activeCheckpoint, new Date().toISOString(), error);
+      writeCheckpoint(activeCheckpoint);
+    }
     console.error(error);
     process.exitCode = 1;
   })
