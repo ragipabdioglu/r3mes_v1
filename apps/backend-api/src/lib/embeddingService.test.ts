@@ -51,6 +51,85 @@ describe("EmbeddingServiceV2", () => {
     expect(result.inputHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("maps one proven BGE-M3 batch call to two typed embedding results", async () => {
+    const embedTexts = vi.fn().mockResolvedValue({
+      vectors: [
+        [0.1, 0.2],
+        [0.3, 0.4],
+      ],
+      diagnostics: {
+        requestedProvider: "bge-m3",
+        actualProvider: "bge-m3",
+        fallbackUsed: false,
+        dimension: 2,
+        model: "BAAI/bge-m3",
+        transport: "ai-engine-http",
+        pooling: "mean_pooling",
+        device: "cpu",
+      },
+    });
+    const service = createEmbeddingServiceV2({
+      embedTexts,
+      now: () => new Date("2026-05-25T12:00:00.000Z"),
+      startClock: () => 10,
+      elapsedMs: () => 7,
+    });
+
+    const results = await service.embedMany([
+      {
+        targetType: "chunk",
+        targetId: "chunk-1",
+        purpose: "retrieval_dense",
+        text: "Birinci metin",
+      },
+      {
+        targetType: "query",
+        purpose: "profile_scoring",
+        text: "Ikinci metin",
+      },
+    ]);
+
+    expect(embedTexts).toHaveBeenCalledOnce();
+    expect(embedTexts).toHaveBeenCalledWith(["Birinci metin", "Ikinci metin"]);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({
+      targetType: "chunk",
+      targetId: "chunk-1",
+      purpose: "retrieval_dense",
+      vector: [0.1, 0.2],
+      provider: "bge-m3",
+      model: "BAAI/bge-m3",
+      dimension: 2,
+      transport: "ai-engine-http",
+      pooling: "mean_pooling",
+      device: "cpu",
+      fallbackUsed: false,
+    });
+    expect(results[1]).toMatchObject({
+      targetType: "query",
+      purpose: "profile_scoring",
+      vector: [0.3, 0.4],
+      provider: "bge-m3",
+      model: "BAAI/bge-m3",
+      dimension: 2,
+      transport: "ai-engine-http",
+      pooling: "mean_pooling",
+      device: "cpu",
+      fallbackUsed: false,
+    });
+    expect(results[0]?.inputHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(results[1]?.inputHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(results[0]?.inputHash).not.toBe(results[1]?.inputHash);
+  });
+
+  it("returns an empty batch without calling the embedding provider", async () => {
+    const embedTexts = vi.fn();
+    const service = createEmbeddingServiceV2({ embedTexts });
+
+    await expect(service.embedMany([])).resolves.toEqual([]);
+    expect(embedTexts).not.toHaveBeenCalled();
+  });
+
   it("makes deterministic fallback explicit as a development-only provider", async () => {
     const service = createEmbeddingServiceV2({
       embedText: vi.fn().mockResolvedValue({

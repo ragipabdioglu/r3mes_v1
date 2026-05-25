@@ -9,6 +9,7 @@ import type {
 
 import {
   embedTextForQdrantWithDiagnostics,
+  embedTextsForQdrantWithDiagnostics,
   type QdrantEmbeddingDiagnostics,
 } from "./qdrantEmbedding.js";
 
@@ -44,9 +45,11 @@ export const EMBEDDING_PROVIDER_REGISTRY = {
 } as const satisfies Record<string, EmbeddingProviderRegistration>;
 
 type ExistingEmbeddingCall = typeof embedTextForQdrantWithDiagnostics;
+type ExistingBatchEmbeddingCall = typeof embedTextsForQdrantWithDiagnostics;
 
 export interface EmbeddingServiceDependencies {
   embedText: ExistingEmbeddingCall;
+  embedTexts: ExistingBatchEmbeddingCall;
   now: () => Date;
   elapsedMs: (startedAt: number) => number;
   startClock: () => number;
@@ -54,6 +57,7 @@ export interface EmbeddingServiceDependencies {
 
 export interface EmbeddingServiceV2 {
   embed(input: EmbeddingInput): Promise<EmbeddingResult>;
+  embedMany(inputs: EmbeddingInput[]): Promise<EmbeddingResult[]>;
 }
 
 function createInputHash(input: EmbeddingInput): string {
@@ -124,35 +128,61 @@ export function createEmbeddingServiceV2(
 ): EmbeddingServiceV2 {
   const deps: EmbeddingServiceDependencies = {
     embedText: dependencies.embedText ?? embedTextForQdrantWithDiagnostics,
+    embedTexts: dependencies.embedTexts ?? embedTextsForQdrantWithDiagnostics,
     now: dependencies.now ?? (() => new Date()),
     startClock: dependencies.startClock ?? (() => Date.now()),
     elapsedMs: dependencies.elapsedMs ?? ((startedAt) => Math.max(0, Date.now() - startedAt)),
   };
 
+  function toEmbeddingResult(
+    input: EmbeddingInput,
+    vector: number[],
+    diagnostics: QdrantEmbeddingDiagnostics,
+    startedAt: number,
+  ): EmbeddingResult {
+    const registration = resolveEmbeddingProviderRegistration(diagnostics);
+
+    return {
+      targetType: input.targetType,
+      targetId: input.targetId,
+      purpose: input.purpose,
+      vector,
+      normalized: diagnostics.normalized ?? true,
+      fallbackUsed: diagnostics.fallbackUsed,
+      fallbackReason: diagnostics.error,
+      provider: mapEmbeddingProvider(diagnostics),
+      model: diagnostics.model ?? "unknown",
+      dimension: diagnostics.dimension,
+      transport: diagnostics.transport ?? registration?.transport ?? "ai-engine-http",
+      pooling: diagnostics.pooling ?? "unknown",
+      device: diagnostics.device ?? "unknown",
+      inputHash: createInputHash(input),
+      latencyMs: deps.elapsedMs(startedAt),
+      createdAt: deps.now().toISOString(),
+    };
+  }
+
   return {
     async embed(input): Promise<EmbeddingResult> {
       const startedAt = deps.startClock();
       const result = await deps.embedText(input.text);
-      const registration = resolveEmbeddingProviderRegistration(result.diagnostics);
+      return toEmbeddingResult(input, result.vector, result.diagnostics, startedAt);
+    },
 
-      return {
-        targetType: input.targetType,
-        targetId: input.targetId,
-        purpose: input.purpose,
-        vector: result.vector,
-        normalized: result.diagnostics.normalized ?? true,
-        fallbackUsed: result.diagnostics.fallbackUsed,
-        fallbackReason: result.diagnostics.error,
-        provider: mapEmbeddingProvider(result.diagnostics),
-        model: result.diagnostics.model ?? "unknown",
-        dimension: result.diagnostics.dimension,
-        transport: result.diagnostics.transport ?? registration?.transport ?? "ai-engine-http",
-        pooling: result.diagnostics.pooling ?? "unknown",
-        device: result.diagnostics.device ?? "unknown",
-        inputHash: createInputHash(input),
-        latencyMs: deps.elapsedMs(startedAt),
-        createdAt: deps.now().toISOString(),
-      };
+    async embedMany(inputs): Promise<EmbeddingResult[]> {
+      if (inputs.length === 0) {
+        return [];
+      }
+
+      const startedAt = deps.startClock();
+      const result = await deps.embedTexts(inputs.map((input) => input.text));
+      if (result.vectors.length !== inputs.length) {
+        throw new Error("embedding batch result vector count does not match input count");
+      }
+
+      return inputs.map((input, index) =>
+        toEmbeddingResult(input, result.vectors[index]!, result.diagnostics, startedAt),
+      );
     },
   };
 }
