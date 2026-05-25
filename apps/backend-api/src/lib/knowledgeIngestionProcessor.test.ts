@@ -107,6 +107,7 @@ describe("knowledge ingestion processor", () => {
   it("parses, chunks, embeds, and marks the job ready", async () => {
     const prisma = createPrismaMock();
     prisma.ingestionJob.findUnique.mockResolvedValue(createJob());
+    const upsertQdrantPoints = vi.fn().mockResolvedValue(undefined);
     const { processKnowledgeIngestionJob } = await import("./knowledgeIngestionProcessor.js");
 
     const result = await processKnowledgeIngestionJob(
@@ -114,8 +115,24 @@ describe("knowledge ingestion processor", () => {
       {
         prisma: prisma as never,
         readRawFile: async () => Buffer.from("Boşanma protokolünde velayet ve nafaka maddeleri açık yazılmalıdır."),
-        embedQdrantText: async () => [0.1, 0.2, 0.3],
-        upsertQdrantPoints: vi.fn().mockResolvedValue(undefined),
+        embedQdrant: async () => ({
+          targetType: "chunk",
+          targetId: "chunk_0",
+          purpose: "retrieval_dense",
+          vector: [0.1, 0.2, 0.3],
+          normalized: true,
+          fallbackUsed: false,
+          provider: "bge-m3",
+          model: "BAAI/bge-m3",
+          dimension: 3,
+          transport: "ai-engine-http",
+          pooling: "mean_pooling",
+          device: "cpu",
+          inputHash: "input-hash",
+          latencyMs: 1,
+          createdAt: "2026-05-15T08:02:00.000Z",
+        }),
+        upsertQdrantPoints,
         setQdrantProfileMetadata: vi.fn().mockResolvedValue(undefined),
         now: () => new Date("2026-05-15T08:02:00.000Z"),
       },
@@ -191,6 +208,20 @@ describe("knowledge ingestion processor", () => {
         }),
       }),
     );
+    expect(upsertQdrantPoints).toHaveBeenCalledWith([
+      expect.objectContaining({
+        vector: [0.1, 0.2, 0.3],
+        payload: expect.objectContaining({
+          payloadSchemaVersion: 2,
+          targetKind: "chunk",
+          documentVersionId: "version_1",
+          embeddingProvider: "bge-m3",
+          embeddingModel: "BAAI/bge-m3",
+          embeddingDimension: 3,
+          payloadHash: expect.any(String),
+        }),
+      }),
+    ]);
   });
 
   it("keeps Prisma ingestion ready but marks qdrant failure as partial ready", async () => {
@@ -204,7 +235,23 @@ describe("knowledge ingestion processor", () => {
       {
         prisma: prisma as never,
         readRawFile: async () => Buffer.from("Kira sözleşmesinde depozito iadesi ve tahliye şartları yer alır."),
-        embedQdrantText: async () => [0.1, 0.2, 0.3],
+        embedQdrant: async () => ({
+          targetType: "chunk",
+          targetId: "chunk_0",
+          purpose: "retrieval_dense",
+          vector: [0.1, 0.2, 0.3],
+          normalized: true,
+          fallbackUsed: false,
+          provider: "bge-m3",
+          model: "BAAI/bge-m3",
+          dimension: 3,
+          transport: "ai-engine-http",
+          pooling: "mean_pooling",
+          device: "cpu",
+          inputHash: "input-hash",
+          latencyMs: 1,
+          createdAt: "2026-05-15T08:02:00.000Z",
+        }),
         upsertQdrantPoints: vi.fn().mockRejectedValue(qdrantError),
         setQdrantProfileMetadata: vi.fn().mockResolvedValue(undefined),
         now: () => new Date("2026-05-15T08:02:00.000Z"),

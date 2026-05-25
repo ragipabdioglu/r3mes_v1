@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { KnowledgeVisibility } from "@r3mes/shared-types";
+import type { KnowledgeVisibility, QdrantPayloadV2 } from "@r3mes/shared-types";
 
 import { getQdrantVectorSize } from "./qdrantEmbedding.js";
 import { QDRANT_PAYLOAD_V2_INDEX_FIELDS } from "./qdrantPayloadV2.js";
@@ -8,7 +8,7 @@ import { QDRANT_PAYLOAD_V2_INDEX_FIELDS } from "./qdrantPayloadV2.js";
 const DEFAULT_QDRANT_URL = "http://127.0.0.1:6333";
 const DEFAULT_QDRANT_COLLECTION = "r3mes_knowledge";
 
-export interface QdrantKnowledgePayload {
+export interface QdrantKnowledgePayload extends Partial<Omit<QdrantPayloadV2, "collectionId" | "documentId" | "visibility" | "sourceQuality">> {
   ownerWallet: string;
   visibility: KnowledgeVisibility;
   collectionId: string;
@@ -44,7 +44,7 @@ export interface QdrantKnowledgePayload {
   collectionLastProfiledAt: string;
   collectionProfileText: string;
   profileSummary: string;
-  embeddingProvider?: string;
+  embeddingProvider?: QdrantPayloadV2["embeddingProvider"];
   embeddingModel?: string;
   embeddingFallbackUsed?: boolean;
   embeddingVectorSize?: number;

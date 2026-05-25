@@ -5,6 +5,7 @@ import {
   computeQdrantPayloadV2Hash,
   QDRANT_PAYLOAD_V2_INDEX_FIELDS,
   validateQdrantPayloadV2,
+  hashQdrantPayloadText,
   type QdrantPayloadV2BuildInput,
 } from "./qdrantPayloadV2.js";
 
@@ -67,6 +68,11 @@ describe("qdrantPayloadV2", () => {
 
     expect(reordered.payloadHash).toBe(first.payloadHash);
     expect(changedEvidenceOrder.payloadHash).not.toBe(first.payloadHash);
+  });
+
+  it("hashes source text deterministically for content lineage fields", () => {
+    expect(hashQdrantPayloadText("aynı içerik")).toBe(hashQdrantPayloadText("aynı içerik"));
+    expect(hashQdrantPayloadText("aynı içerik")).not.toBe(hashQdrantPayloadText("farklı içerik"));
   });
 
   it("reports missing and invalid schema fields plus payload integrity drift", () => {

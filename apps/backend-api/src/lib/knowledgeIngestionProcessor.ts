@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Prisma } from "@prisma/client";
+import type { EmbeddingResult } from "@r3mes/shared-types";
 
 import { buildDocumentUnderstandingQuality } from "./documentUnderstandingQuality.js";
 import { buildCanonicalArtifactGraph } from "./canonicalArtifactGraph.js";
@@ -23,7 +24,8 @@ import { adaptKnowledgeChunkDraftsToV2 } from "./knowledgeChunkV2.js";
 import { chunkParsedKnowledgeDocument, parseKnowledgeBuffer } from "./knowledgeText.js";
 import { prisma } from "./prisma.js";
 import { routeQuery } from "./queryRouter.js";
-import { embedTextForQdrant } from "./qdrantEmbedding.js";
+import { embeddingServiceV2 } from "./embeddingService.js";
+import { buildQdrantPayloadV2, hashQdrantPayloadText } from "./qdrantPayloadV2.js";
 import {
   buildQdrantPayloadMetadata,
   setQdrantCollectionProfileMetadata,
@@ -63,7 +65,13 @@ export interface KnowledgeIngestionProcessorDependencies {
   parseBuffer?: typeof parseKnowledgeBuffer;
   chunkParsedDocument?: typeof chunkParsedKnowledgeDocument;
   embedLexicalText?: typeof embedKnowledgeText;
-  embedQdrantText?: typeof embedTextForQdrant;
+  embedQdrant?: (input: {
+    targetType: "chunk";
+    targetId: string;
+    purpose: "retrieval_dense";
+    text: string;
+    languageHint?: "tr" | "en" | "mixed" | "unknown";
+  }) => Promise<EmbeddingResult>;
   upsertQdrantPoints?: typeof upsertQdrantKnowledgePoints;
   setQdrantProfileMetadata?: typeof setQdrantCollectionProfileMetadata;
   now?: () => Date;
@@ -246,7 +254,10 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
 
   let fileBuffer: Buffer;
   let parsed: ReturnType<typeof parseKnowledgeBuffer>;
-  let chunksWithMetadata: Array<ReturnType<typeof chunkParsedKnowledgeDocument>[number] & { autoMetadata: KnowledgeAutoMetadata }>;
+  let chunksWithMetadata: Array<ReturnType<typeof chunkParsedKnowledgeDocument>[number] & {
+    autoMetadata: KnowledgeAutoMetadata;
+    embeddingText: string;
+  }>;
   let documentAutoMetadata: KnowledgeAutoMetadata;
   let artifactGraph: ReturnType<typeof buildCanonicalArtifactGraph> | null = null;
 
@@ -299,7 +310,7 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
       filename: sourceFilename(document),
       sourceType: parsed.sourceType,
     });
-    chunksWithMetadata = chunks.map((chunk) => {
+    chunksWithMetadata = chunks.map((chunk, index) => {
       const autoMetadata = attachKnowledgeChunkArtifactMetadata(
         inferKnowledgeAutoMetadata({
           title: document.title,
@@ -316,6 +327,7 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
       return {
         ...chunk,
         autoMetadata,
+        embeddingText: chunkV2.chunks[index]?.embeddingText ?? chunk.content,
       };
     });
     const merged = mergeKnowledgeAutoMetadata(chunksWithMetadata.map((chunk) => chunk.autoMetadata));
@@ -383,6 +395,7 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
     embeddingId: string;
     values: number[];
     content: string;
+    embeddingText: string;
     chunkIndex: number;
     autoMetadata: KnowledgeAutoMetadata;
   }> = [];
@@ -470,6 +483,7 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
         embeddingId: createdEmbedding.id,
         values,
         content: chunk.content,
+        embeddingText: chunk.embeddingText,
         chunkIndex: chunk.chunkIndex,
         autoMetadata: chunk.autoMetadata,
       });
@@ -548,18 +562,51 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
           fallbackSubtopics: route.subtopics,
           fallbackTags: tags,
         });
+        const embedding = await deps.embedQdrant({
+          targetType: "chunk",
+          targetId: chunk.chunkId,
+          purpose: "retrieval_dense",
+          text: chunk.embeddingText,
+          languageHint: "unknown",
+        });
+        if (!embedding.vector || embedding.vector.length === 0) {
+          throw new Error(`Qdrant embedding vector is missing for chunk ${chunk.chunkId}`);
+        }
+        const payloadV2 = buildQdrantPayloadV2({
+          targetKind: "chunk",
+          targetId: chunk.chunkId,
+          collectionId: collection.id,
+          documentId: document.id,
+          documentVersionId: versionId ?? undefined,
+          logicalChunkId: chunk.chunkId,
+          visibility: collection.visibility,
+          ownerScopeId: collection.owner.walletAddress,
+          sourceQuality: payloadMetadata.sourceQuality,
+          parseQualityLevel: documentAutoMetadata.parseQuality?.level,
+          strictRouteEligible: payloadMetadata.strictRouteEligible,
+          strictAnswerEligible: payloadMetadata.strictAnswerEligible,
+          artifactKind: chunk.autoMetadata.artifactKind,
+          contentHash: hashQdrantPayloadText(chunk.content),
+          embeddingTextHash: hashQdrantPayloadText(chunk.embeddingText),
+          embeddingProvider: embedding.provider,
+          embeddingModel: embedding.model,
+          embeddingDimension: embedding.dimension,
+          indexedAt: deps.now().toISOString(),
+        });
         return {
           chunkId: chunk.chunkId,
-          vector: await deps.embedQdrantText(chunk.content),
+          vector: embedding.vector,
           payload: {
             ownerWallet: collection.owner.walletAddress,
-            visibility: collection.visibility,
-            collectionId: collection.id,
-            documentId: document.id,
             chunkId: chunk.chunkId,
             chunkIndex: chunk.chunkIndex,
             title: document.title,
+            ...payloadV2,
             ...payloadMetadata,
+            collectionId: collection.id,
+            documentId: document.id,
+            embeddingFallbackUsed: embedding.fallbackUsed,
+            embeddingVectorSize: embedding.dimension,
             content: chunk.content,
             createdAt: document.createdAt.toISOString(),
           },
@@ -616,7 +663,7 @@ function withDefaults(deps: KnowledgeIngestionProcessorDependencies = {}) {
     parseBuffer: deps.parseBuffer ?? parseKnowledgeBuffer,
     chunkParsedDocument: deps.chunkParsedDocument ?? chunkParsedKnowledgeDocument,
     embedLexicalText: deps.embedLexicalText ?? embedKnowledgeText,
-    embedQdrantText: deps.embedQdrantText ?? embedTextForQdrant,
+    embedQdrant: deps.embedQdrant ?? ((input) => embeddingServiceV2.embed(input)),
     upsertQdrantPoints: deps.upsertQdrantPoints ?? upsertQdrantKnowledgePoints,
     setQdrantProfileMetadata: deps.setQdrantProfileMetadata ?? setQdrantCollectionProfileMetadata,
     now: deps.now ?? (() => new Date()),

@@ -96,6 +96,10 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalize(value));
 }
 
+export function hashQdrantPayloadText(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
 export function computeQdrantPayloadV2Hash(payload: QdrantPayloadV2HashInput): string {
   const hashablePayload = { ...payload };
   delete hashablePayload.payloadHash;
