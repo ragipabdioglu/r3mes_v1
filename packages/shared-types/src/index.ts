@@ -13,6 +13,7 @@ export * from "./contractGuards.js";
 export * from "./r3mesTestnetMock.js";
 export * from "./runtime.js";
 export * from "./queryContract.js";
+export * from "./vectorIndex.js";
 
 /** Geriye dönük: `packages/qa-sandbox` TS köprüsü */
 export const R3MES_SHARED_TYPES_PLACEHOLDER = true;
