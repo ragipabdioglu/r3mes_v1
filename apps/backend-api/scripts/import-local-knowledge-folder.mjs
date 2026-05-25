@@ -15,7 +15,8 @@ import { parseKnowledgeCard } from "../dist/lib/knowledgeCard.js";
 import { embedKnowledgeText, formatVectorLiteral, getKnowledgeEmbeddingDimensions } from "../dist/lib/knowledgeEmbedding.js";
 import { scoreKnowledgeParseQuality } from "../dist/lib/knowledgeParseQuality.js";
 import { chunkParsedKnowledgeDocument, isSupportedKnowledgeFilename, parseKnowledgeBuffer } from "../dist/lib/knowledgeText.js";
-import { embedTextForQdrant } from "../dist/lib/qdrantEmbedding.js";
+import { embeddingServiceV2 } from "../dist/lib/embeddingService.js";
+import { buildQdrantPayloadV2, hashQdrantPayloadText } from "../dist/lib/qdrantPayloadV2.js";
 import { buildQdrantPayloadMetadata, upsertQdrantKnowledgePoints } from "../dist/lib/qdrantStore.js";
 import { routeQuery } from "../dist/lib/queryRouter.js";
 
@@ -98,6 +99,7 @@ async function main() {
     filesFound: files.length,
     documentsImported: 0,
     chunksImported: 0,
+    qdrantEmbeddingTextFallbackChunks: 0,
     skipped: [],
     imported: [],
   };
@@ -127,7 +129,7 @@ async function main() {
       const artifactGraph = buildCanonicalArtifactGraph(parsed);
       const chunkV2 = adaptKnowledgeChunkDraftsToV2(chunks, { filename: fileName, sourceType: parsed.sourceType });
 
-      const chunksWithMetadata = chunks.map((chunk) => {
+      const chunksWithMetadata = chunks.map((chunk, index) => {
         const autoMetadata = inferKnowledgeAutoMetadata({ title, content: chunk.content });
         autoMetadata.sourceType = parsed.sourceType;
         autoMetadata.artifactKind = chunk.artifactKind;
@@ -135,7 +137,13 @@ async function main() {
         autoMetadata.pageNumber = chunk.pageNumber ?? null;
         autoMetadata.isScaffold = chunk.isScaffold ?? false;
         autoMetadata.answerabilityScore = chunk.answerabilityScore;
-        return { ...chunk, autoMetadata };
+        const embeddingText = chunkV2.chunks[index]?.embeddingText;
+        return {
+          ...chunk,
+          autoMetadata,
+          embeddingText: embeddingText ?? chunk.content,
+          embeddingTextFallbackUsed: embeddingText === undefined,
+        };
       });
 
       const documentAutoMetadata = mergeKnowledgeAutoMetadata(chunksWithMetadata.map((chunk) => chunk.autoMetadata));
@@ -214,6 +222,8 @@ async function main() {
           chunkIndex: createdChunk.chunkIndex,
           content: createdChunk.content,
           autoMetadata: chunk.autoMetadata,
+          embeddingText: chunk.embeddingText,
+          embeddingTextFallbackUsed: chunk.embeddingTextFallbackUsed,
         });
       }
 
@@ -264,9 +274,42 @@ async function main() {
           fallbackSubtopics: route.subtopics,
           fallbackTags: tags,
         });
+        const embedding = await embeddingServiceV2.embed({
+          targetType: "chunk",
+          targetId: chunk.chunkId,
+          purpose: "retrieval_dense",
+          text: chunk.embeddingText,
+          languageHint: "unknown",
+        });
+        if (!embedding.vector || embedding.vector.length === 0) {
+          throw new Error(`Qdrant embedding vector is missing for chunk ${chunk.chunkId}`);
+        }
+        if (chunk.embeddingTextFallbackUsed) {
+          report.qdrantEmbeddingTextFallbackChunks += 1;
+        }
+        const payloadV2 = buildQdrantPayloadV2({
+          targetKind: "chunk",
+          targetId: chunk.chunkId,
+          collectionId: collection.id,
+          documentId: row.document.id,
+          logicalChunkId: chunk.chunkId,
+          visibility: collection.visibility,
+          ownerScopeId: wallet,
+          sourceQuality: payloadMetadata.sourceQuality,
+          parseQualityLevel: row.documentAutoMetadata.parseQuality?.level,
+          strictRouteEligible: payloadMetadata.strictRouteEligible,
+          strictAnswerEligible: payloadMetadata.strictAnswerEligible,
+          artifactKind: chunk.autoMetadata.artifactKind,
+          contentHash: hashQdrantPayloadText(chunk.content),
+          embeddingTextHash: hashQdrantPayloadText(chunk.embeddingText),
+          embeddingProvider: embedding.provider,
+          embeddingModel: embedding.model,
+          embeddingDimension: embedding.dimension,
+          indexedAt: new Date().toISOString(),
+        });
         return {
           chunkId: chunk.chunkId,
-          vector: await embedTextForQdrant(chunk.content),
+          vector: embedding.vector,
           payload: {
             ownerWallet: wallet,
             visibility: collection.visibility,
@@ -275,7 +318,12 @@ async function main() {
             chunkId: chunk.chunkId,
             chunkIndex: chunk.chunkIndex,
             title: row.document.title,
+            ...payloadV2,
             ...payloadMetadata,
+            collectionId: collection.id,
+            documentId: row.document.id,
+            embeddingFallbackUsed: embedding.fallbackUsed,
+            embeddingVectorSize: embedding.dimension,
             content: chunk.content,
             createdAt: row.document.createdAt.toISOString(),
           },
