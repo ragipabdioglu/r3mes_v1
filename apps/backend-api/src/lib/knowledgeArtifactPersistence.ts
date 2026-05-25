@@ -4,6 +4,7 @@ import type { KnowledgeIngestionStepStatus, Prisma } from "@prisma/client";
 
 import type { DocumentArtifact, KnowledgeChunkDraft, ParsedKnowledgeDocument } from "./knowledgeText.js";
 import type { StructuredDocumentArtifact } from "./structuredDocumentArtifact.js";
+import type { ArtifactGraphV2 } from "./canonicalArtifactGraph.js";
 
 export interface KnowledgeDocumentVersionPersistenceInput {
   documentId: string;
@@ -24,6 +25,7 @@ export interface KnowledgeArtifactPersistenceInput {
   documentId: string;
   parsed: ParsedKnowledgeDocument;
   versionId?: string;
+  artifactGraph?: ArtifactGraphV2;
 }
 
 export interface KnowledgeChunkArtifactPersistenceInput {
@@ -80,7 +82,11 @@ function sanitizeInputJson(value: unknown, depth = 0): Prisma.InputJsonValue | u
   return Object.keys(out).length > 0 ? out as Prisma.InputJsonObject : undefined;
 }
 
-function artifactMetadataJson(artifact: DocumentArtifact, structuredArtifacts: StructuredDocumentArtifact[] = []): Prisma.InputJsonValue | undefined {
+function artifactMetadataJson(
+  artifact: DocumentArtifact,
+  structuredArtifacts: StructuredDocumentArtifact[] = [],
+  artifactGraph?: ArtifactGraphV2,
+): Prisma.InputJsonValue | undefined {
   const metadata: Record<string, unknown> = {
     ...(artifact.metadata ?? {}),
   };
@@ -102,6 +108,21 @@ function artifactMetadataJson(artifact: DocumentArtifact, structuredArtifacts: S
   }
   if (Array.isArray(artifact.items) && artifact.items.length > 0) {
     metadata.items = artifact.items;
+  }
+  const canonicalNode = artifactGraph?.nodes.find((node) =>
+    node.origin === "document_artifact" && node.sourceArtifactId === artifactId
+  );
+  if (canonicalNode) {
+    const childIds = artifactGraph?.edges
+      .filter((edge) => edge.fromId === canonicalNode.id)
+      .map((edge) => edge.toId) ?? [];
+    metadata.canonical = {
+      version: artifactGraph?.version,
+      nodeId: canonicalNode.id,
+      kind: canonicalNode.kind,
+      childIds,
+      childKinds: childIds.map((childId) => artifactGraph?.nodes.find((node) => node.id === childId)?.kind).filter(Boolean),
+    };
   }
   return sanitizeInputJson(metadata);
 }
@@ -210,7 +231,7 @@ export function buildKnowledgeArtifactCreateManyInput(
     };
 
     if (input.versionId) payload.versionId = input.versionId;
-    const metadata = artifactMetadataJson(artifact, structuredArtifacts);
+    const metadata = artifactMetadataJson(artifact, structuredArtifacts, input.artifactGraph);
     if (metadata !== undefined) payload.metadata = metadata;
 
     return payload;

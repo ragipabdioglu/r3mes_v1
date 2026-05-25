@@ -6,9 +6,14 @@ import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 
 import {
+  buildIngestionQualityReport,
   inferKnowledgeAutoMetadata,
   mergeKnowledgeAutoMetadata,
 } from "../dist/lib/knowledgeAutoMetadata.js";
+import { buildDocumentUnderstandingQuality } from "../dist/lib/documentUnderstandingQuality.js";
+import { buildCanonicalArtifactGraph } from "../dist/lib/canonicalArtifactGraph.js";
+import { adaptKnowledgeChunkDraftsToV2 } from "../dist/lib/knowledgeChunkV2.js";
+import { buildKnowledgeArtifactCreateManyInput, buildKnowledgeArtifactRowId } from "../dist/lib/knowledgeArtifactPersistence.js";
 import { parseKnowledgeCard } from "../dist/lib/knowledgeCard.js";
 import { embedKnowledgeText, formatVectorLiteral, getKnowledgeEmbeddingDimensions } from "../dist/lib/knowledgeEmbedding.js";
 import { scoreKnowledgeParseQuality } from "../dist/lib/knowledgeParseQuality.js";
@@ -317,6 +322,7 @@ async function main() {
         text: parsed.text,
         chunks: parsedChunks,
       });
+      const artifactGraph = buildCanonicalArtifactGraph(parsed);
       if (parseQuality.level === "noisy" && !allowNoisy) {
         report.documentsSkipped += 1;
         report.skipped.push({ fileName, reason: "noisy_parse", parseQuality });
@@ -335,6 +341,7 @@ async function main() {
         diagnostics: parsed.diagnostics,
       });
       const chunkDrafts = parsedChunks.map((chunk) => ({ ...chunk, content: chunk.content.trim() }));
+      const chunkV2 = adaptKnowledgeChunkDraftsToV2(chunkDrafts, { filename: fileName, sourceType: parsed.sourceType });
       const chunksWithMetadata = chunkDrafts.map((chunk) => ({
         ...chunk,
         autoMetadata: {
@@ -349,6 +356,20 @@ async function main() {
       }));
       const inferredDocumentMetadata = mergeKnowledgeAutoMetadata(chunksWithMetadata.map((chunk) => chunk.autoMetadata));
       const documentMetadata = mergeKapMetadata(baseMetadata, inferredDocumentMetadata);
+      documentMetadata.ingestionQuality = buildIngestionQualityReport({
+        parseQuality,
+        sourceQuality: documentMetadata.sourceQuality,
+      });
+      documentMetadata.documentUnderstanding = buildDocumentUnderstandingQuality({
+        parseQuality,
+        artifacts: parsed.artifacts,
+        structuredArtifacts: parsed.structuredArtifacts,
+        parserFallbackUsed: parsed.parserRun.fallbackUsed,
+        parserWarnings: parsed.parserRun.warnings,
+        sourceType: parsed.sourceType,
+      });
+      documentMetadata.artifactGraph = { version: artifactGraph.version, diagnostics: artifactGraph.diagnostics };
+      documentMetadata.chunkingDiagnostics = chunkV2.diagnostics;
       documentMetadatas.push(documentMetadata);
 
       const documentId = `kap-${row.disclosureIndex ?? createHash("sha1").update(fileName).digest("hex").slice(0, 10)}-${slugPart(row.ticker, "ticker")}-${slugPart(row.attachmentFileName ?? fileName)}`;
@@ -364,6 +385,14 @@ async function main() {
           parseStatus: "READY",
         },
       });
+      await prisma.knowledgeArtifact.createMany({
+        data: buildKnowledgeArtifactCreateManyInput({
+          documentId: document.id,
+          parsed,
+          artifactGraph,
+        }),
+        skipDuplicates: true,
+      });
 
       const createdChunks = [];
       for (const chunk of chunksWithMetadata) {
@@ -374,6 +403,11 @@ async function main() {
             content: chunk.content,
             tokenCount: chunk.tokenCount,
             autoMetadata: chunk.autoMetadata,
+            artifactId: chunk.artifactId,
+            artifactRowId: chunk.artifactId
+              ? buildKnowledgeArtifactRowId({ documentId: document.id, artifactId: chunk.artifactId })
+              : undefined,
+            artifactSplitIndex: chunk.artifactSplitIndex,
           },
         });
         const values = embedKnowledgeText(chunk.content);

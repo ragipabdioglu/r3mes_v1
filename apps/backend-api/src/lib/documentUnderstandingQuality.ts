@@ -11,6 +11,15 @@ export type DocumentTableQuality = "none" | "text_only" | "structured";
 export type DocumentSpreadsheetQuality = "none" | "structured" | "partial" | "failed";
 export type DocumentOcrQuality = "none" | "usable" | "weak";
 export type DocumentAnswerReadiness = "ready" | "partial" | "needs_review" | "failed";
+export type DocumentTaskKind = "definition" | "list" | "table" | "code" | "procedure" | "visual_layout";
+export type DocumentTaskReadinessLevel = "ready" | "partial" | "needs_review" | "unsupported";
+
+export interface DocumentTaskReadiness {
+  level: DocumentTaskReadinessLevel;
+  evidenceArtifactCount: number;
+  structuredEvidenceCount: number;
+  warnings: string[];
+}
 
 export interface DocumentUnderstandingQuality {
   version: 1;
@@ -23,6 +32,7 @@ export interface DocumentUnderstandingQuality {
   strictAnswerEligible: boolean;
   blockers: string[];
   warnings: string[];
+  taskReadiness?: Record<DocumentTaskKind, DocumentTaskReadiness>;
   signals: {
     artifactCount: number;
     structuredArtifactCount: number;
@@ -33,6 +43,12 @@ export interface DocumentUnderstandingQuality {
     parserFallbackUsed: boolean;
     parseWarningCount: number;
     ocrSpanCount: number;
+    definitionArtifactCount?: number;
+    listArtifactCount?: number;
+    codeArtifactCount?: number;
+    procedureArtifactCount?: number;
+    visualLayoutArtifactCount?: number;
+    visualHintArtifactCount?: number;
   };
 }
 
@@ -88,6 +104,59 @@ function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
+function countArtifactsByKind(artifacts: unknown[], acceptedKinds: string[]): number {
+  const accepted = new Set(acceptedKinds);
+  return artifacts.filter((artifact) => {
+    const kind = artifactKind(artifact);
+    return kind !== null && accepted.has(kind);
+  }).length;
+}
+
+function taskReadiness(opts: {
+  evidenceArtifactCount: number;
+  structuredEvidenceCount?: number;
+  blockers: string[];
+  restricted: boolean;
+  partialEvidence?: boolean;
+  missingWarning: string;
+  partialWarning?: string;
+}): DocumentTaskReadiness {
+  const structuredEvidenceCount = opts.structuredEvidenceCount ?? 0;
+  if (opts.evidenceArtifactCount === 0 && structuredEvidenceCount === 0) {
+    return {
+      level: "unsupported",
+      evidenceArtifactCount: 0,
+      structuredEvidenceCount: 0,
+      warnings: [opts.missingWarning],
+    };
+  }
+  if (opts.blockers.length > 0) {
+    return {
+      level: "needs_review",
+      evidenceArtifactCount: opts.evidenceArtifactCount,
+      structuredEvidenceCount,
+      warnings: unique([...opts.blockers, "document_requires_review"]),
+    };
+  }
+  if (opts.restricted || opts.partialEvidence) {
+    return {
+      level: "partial",
+      evidenceArtifactCount: opts.evidenceArtifactCount,
+      structuredEvidenceCount,
+      warnings: unique([
+        ...(opts.restricted ? ["parser_fallback_used"] : []),
+        ...(opts.partialEvidence && opts.partialWarning ? [opts.partialWarning] : []),
+      ]),
+    };
+  }
+  return {
+    level: "ready",
+    evidenceArtifactCount: opts.evidenceArtifactCount,
+    structuredEvidenceCount,
+    warnings: [],
+  };
+}
+
 export function buildDocumentUnderstandingQuality(input: BuildDocumentUnderstandingQualityInput = {}): DocumentUnderstandingQuality {
   const parseQualityInput = input.parseQuality;
   const parseQuality = parseQualityLevel(isRecord(parseQualityInput) ? parseQualityInput.level : parseQualityInput);
@@ -108,6 +177,12 @@ export function buildDocumentUnderstandingQuality(input: BuildDocumentUnderstand
   const tableCellCount = structuredTables.reduce((sum, table) => sum + countStructuredTableCells(table), 0);
   const textOnlyTable = hasTextOnlyTableSignal(artifacts, parseWarnings, tableWarnings, parseSignals);
   const tableCount = artifacts.filter((artifact) => artifactKind(artifact) === "table").length + structuredTableCount;
+  const definitionArtifactCount = countArtifactsByKind(artifacts, ["definition"]);
+  const listArtifactCount = countArtifactsByKind(artifacts, ["list", "list_item"]);
+  const codeArtifactCount = countArtifactsByKind(artifacts, ["code", "code_block"]);
+  const procedureArtifactCount = countArtifactsByKind(artifacts, ["procedure", "procedure_step"]);
+  const visualLayoutArtifactCount = countArtifactsByKind(artifacts, ["visual_layout", "layout"]);
+  const visualHintArtifactCount = countArtifactsByKind(artifacts, ["visual_layout", "layout", "image", "figure", "image_caption"]);
   const tableQuality: DocumentTableQuality = structuredTableCount > 0 ? "structured" : textOnlyTable ? "text_only" : "none";
   const sourceType = input.sourceType?.toLowerCase() ?? "";
   const spreadsheetLike = sourceType.includes("spreadsheet") || sourceType === "csv" || sourceType === "xlsx" || sourceType === "xls";
@@ -144,6 +219,50 @@ export function buildDocumentUnderstandingQuality(input: BuildDocumentUnderstand
     : tableQuality === "text_only" || parserFallbackUsed || structureQuality === "weak"
       ? "partial"
       : "ready";
+  const restrictedByParser = parserFallbackUsed;
+  const taskReadinessSummary: Record<DocumentTaskKind, DocumentTaskReadiness> = {
+    definition: taskReadiness({
+      evidenceArtifactCount: definitionArtifactCount,
+      blockers,
+      restricted: restrictedByParser,
+      missingWarning: "definition_artifact_missing",
+    }),
+    list: taskReadiness({
+      evidenceArtifactCount: listArtifactCount,
+      blockers,
+      restricted: restrictedByParser,
+      missingWarning: "list_artifact_missing",
+    }),
+    table: taskReadiness({
+      evidenceArtifactCount: tableCount,
+      structuredEvidenceCount: structuredTableCount,
+      blockers,
+      restricted: restrictedByParser,
+      partialEvidence: tableQuality === "text_only",
+      missingWarning: "table_artifact_missing",
+      partialWarning: "table_text_only",
+    }),
+    code: taskReadiness({
+      evidenceArtifactCount: codeArtifactCount,
+      blockers,
+      restricted: restrictedByParser,
+      missingWarning: "code_artifact_missing",
+    }),
+    procedure: taskReadiness({
+      evidenceArtifactCount: procedureArtifactCount,
+      blockers,
+      restricted: restrictedByParser,
+      missingWarning: "procedure_artifact_missing",
+    }),
+    visual_layout: taskReadiness({
+      evidenceArtifactCount: visualHintArtifactCount,
+      blockers,
+      restricted: restrictedByParser,
+      partialEvidence: visualHintArtifactCount > 0 && visualLayoutArtifactCount === 0,
+      missingWarning: "visual_layout_artifact_missing",
+      partialWarning: "visual_layout_hint_only",
+    }),
+  };
 
   return {
     version: 1,
@@ -156,6 +275,7 @@ export function buildDocumentUnderstandingQuality(input: BuildDocumentUnderstand
     strictAnswerEligible: answerReadiness === "ready" && !parserFallbackUsed && !highOcrRisk,
     blockers: unique(blockers),
     warnings: unique(warnings),
+    taskReadiness: taskReadinessSummary,
     signals: {
       artifactCount: artifacts.length,
       structuredArtifactCount: structuredArtifacts.length,
@@ -166,6 +286,12 @@ export function buildDocumentUnderstandingQuality(input: BuildDocumentUnderstand
       parserFallbackUsed,
       parseWarningCount: parseWarnings.length,
       ocrSpanCount,
+      definitionArtifactCount,
+      listArtifactCount,
+      codeArtifactCount,
+      procedureArtifactCount,
+      visualLayoutArtifactCount,
+      visualHintArtifactCount,
     },
   };
 }

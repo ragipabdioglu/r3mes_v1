@@ -65,6 +65,15 @@ export interface KnowledgeDocumentUnderstandingQuality {
   strictAnswerEligible: boolean;
   blockers: string[];
   warnings: string[];
+  taskReadiness?: Partial<Record<
+    "definition" | "list" | "table" | "code" | "procedure" | "visual_layout",
+    {
+      level: "ready" | "partial" | "needs_review" | "unsupported";
+      evidenceArtifactCount: number;
+      structuredEvidenceCount: number;
+      warnings: string[];
+    }
+  >>;
   signals: {
     artifactCount: number;
     structuredArtifactCount: number;
@@ -75,6 +84,12 @@ export interface KnowledgeDocumentUnderstandingQuality {
     parserFallbackUsed: boolean;
     parseWarningCount: number;
     ocrSpanCount: number;
+    definitionArtifactCount?: number;
+    listArtifactCount?: number;
+    codeArtifactCount?: number;
+    procedureArtifactCount?: number;
+    visualLayoutArtifactCount?: number;
+    visualHintArtifactCount?: number;
   };
 }
 
@@ -93,6 +108,12 @@ export interface KnowledgeStructuredArtifactSummary {
   parserFallbackUsed: boolean;
   outputSchemaVersion?: number | null;
   warningsCount: number;
+  artifactGraphVersion?: number | null;
+  canonicalNodeCount?: number | null;
+  canonicalEdgeCount?: number | null;
+  orphanStructuredArtifactCount?: number | null;
+  chunkContractVersion?: number | null;
+  chunkIntegrityWarningCount?: number | null;
 }
 
 export interface KnowledgeParserRunDiagnostics {

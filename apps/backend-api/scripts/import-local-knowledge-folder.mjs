@@ -7,6 +7,10 @@ import {
   inferKnowledgeAutoMetadata,
   mergeKnowledgeAutoMetadata,
 } from "../dist/lib/knowledgeAutoMetadata.js";
+import { buildDocumentUnderstandingQuality } from "../dist/lib/documentUnderstandingQuality.js";
+import { buildCanonicalArtifactGraph } from "../dist/lib/canonicalArtifactGraph.js";
+import { adaptKnowledgeChunkDraftsToV2 } from "../dist/lib/knowledgeChunkV2.js";
+import { buildKnowledgeArtifactCreateManyInput, buildKnowledgeArtifactRowId } from "../dist/lib/knowledgeArtifactPersistence.js";
 import { parseKnowledgeCard } from "../dist/lib/knowledgeCard.js";
 import { embedKnowledgeText, formatVectorLiteral, getKnowledgeEmbeddingDimensions } from "../dist/lib/knowledgeEmbedding.js";
 import { scoreKnowledgeParseQuality } from "../dist/lib/knowledgeParseQuality.js";
@@ -120,6 +124,8 @@ async function main() {
         text: parsed.text,
         chunks,
       });
+      const artifactGraph = buildCanonicalArtifactGraph(parsed);
+      const chunkV2 = adaptKnowledgeChunkDraftsToV2(chunks, { filename: fileName, sourceType: parsed.sourceType });
 
       const chunksWithMetadata = chunks.map((chunk) => {
         const autoMetadata = inferKnowledgeAutoMetadata({ title, content: chunk.content });
@@ -142,6 +148,16 @@ async function main() {
         parseQuality,
         sourceQuality: documentAutoMetadata.sourceQuality,
       });
+      documentAutoMetadata.documentUnderstanding = buildDocumentUnderstandingQuality({
+        parseQuality,
+        artifacts: parsed.artifacts,
+        structuredArtifacts: parsed.structuredArtifacts,
+        parserFallbackUsed: parsed.parserRun.fallbackUsed,
+        parserWarnings: parsed.parserRun.warnings,
+        sourceType: parsed.sourceType,
+      });
+      documentAutoMetadata.artifactGraph = { version: artifactGraph.version, diagnostics: artifactGraph.diagnostics };
+      documentAutoMetadata.chunkingDiagnostics = chunkV2.diagnostics;
       documentAutoMetadata.parseAdapter = {
         id: parsed.parser.id,
         version: parsed.parser.version,
@@ -160,6 +176,14 @@ async function main() {
           parseStatus: "READY",
         },
       });
+      await prisma.knowledgeArtifact.createMany({
+        data: buildKnowledgeArtifactCreateManyInput({
+          documentId: document.id,
+          parsed,
+          artifactGraph,
+        }),
+        skipDuplicates: true,
+      });
 
       const createdChunks = [];
       for (const chunk of chunksWithMetadata) {
@@ -170,6 +194,11 @@ async function main() {
             content: chunk.content,
             tokenCount: chunk.tokenCount,
             autoMetadata: toJson(chunk.autoMetadata),
+            artifactId: chunk.artifactId,
+            artifactRowId: chunk.artifactId
+              ? buildKnowledgeArtifactRowId({ documentId: document.id, artifactId: chunk.artifactId })
+              : undefined,
+            artifactSplitIndex: chunk.artifactSplitIndex,
           },
         });
         const values = embedKnowledgeText(chunk.content);

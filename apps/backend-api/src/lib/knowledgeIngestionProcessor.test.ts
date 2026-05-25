@@ -156,6 +156,18 @@ describe("knowledge ingestion processor", () => {
               answerReadiness: expect.any(String),
               strictAnswerEligible: expect.any(Boolean),
             }),
+            artifactGraph: expect.objectContaining({
+              version: 2,
+              diagnostics: expect.objectContaining({
+                nodeCount: expect.any(Number),
+                edgeCount: expect.any(Number),
+              }),
+            }),
+            chunkingDiagnostics: expect.objectContaining({
+              schemaVersion: 2,
+              outputContract: "KnowledgeChunkV2",
+              runtimeBehaviorChanged: false,
+            }),
             parserRun: expect.objectContaining({
               id: "plain-text-v1",
               version: 1,

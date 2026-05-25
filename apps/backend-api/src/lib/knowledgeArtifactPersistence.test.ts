@@ -8,6 +8,7 @@ import {
   buildKnowledgeChunkCreateManyInput,
   buildKnowledgeDocumentVersionCreateInput,
 } from "./knowledgeArtifactPersistence.js";
+import { buildCanonicalArtifactGraph } from "./canonicalArtifactGraph.js";
 import type { KnowledgeChunkDraft, ParsedKnowledgeDocument } from "./knowledgeText.js";
 
 function parsedFixture(overrides: Partial<ParsedKnowledgeDocument> = {}): ParsedKnowledgeDocument {
@@ -215,6 +216,34 @@ describe("knowledgeArtifactPersistence", () => {
       artifactSplitIndex: 1,
     });
     expect(chunkPayloads[0]).not.toHaveProperty("versionId");
+  });
+
+  it("persists canonical relation summaries without duplicating graph text in public-facing fields", () => {
+    const documentId = "doc_graph";
+    const parsed = parsedFixture({
+      artifacts: [
+        {
+          id: "artifact-list-1",
+          kind: "list",
+          text: "Required steps",
+          items: ["First", "Second"],
+          answerabilityScore: 75,
+        },
+      ],
+    });
+    const artifactGraph = buildCanonicalArtifactGraph(parsed);
+
+    const artifacts = buildKnowledgeArtifactCreateManyInput({ documentId, parsed, artifactGraph });
+
+    expect(artifacts[0]?.metadata).toMatchObject({
+      canonical: {
+        version: 2,
+        nodeId: "artifact-list-1",
+        kind: "list",
+        childIds: ["artifact-list-1:item:1", "artifact-list-1:item:2"],
+        childKinds: ["list_item", "list_item"],
+      },
+    });
   });
 
   it("persists matching structured artifacts inside artifact metadata", () => {

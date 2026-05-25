@@ -439,6 +439,72 @@ describe("knowledge parser adapters", () => {
     expect(normalized).toContain("- Şiddetli ağrı varsa başvur.");
   });
 
+  it("classifies generic list, procedure, and fenced code artifacts without topic rules", () => {
+    const parsed = parseKnowledgeBuffer(
+      "guide.md",
+      Buffer.from([
+        "## Options",
+        "",
+        "- First option",
+        "- Second option",
+        "",
+        "## Steps",
+        "",
+        "1. Open the panel",
+        "2. Confirm the value",
+        "",
+        "## Example",
+        "",
+        "```ts",
+        "const value = readInput();",
+        "```",
+      ].join("\n"), "utf8"),
+    );
+
+    expect(parsed.artifacts.map((artifact) => artifact.kind)).toEqual(expect.arrayContaining(["list", "procedure", "code_block"]));
+  });
+
+  it("preserves generic external document-intelligence artifact kinds", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(JSON.stringify({sourceType:'PDF',text:'steps and layout',artifacts:[{kind:'procedure',text:'1. Do one\\\\n2. Do two'},{kind:'visual_layout',text:'panel with control regions'}]}))\" {input}";
+    try {
+      const parsed = parseKnowledgeBuffer("external.pdf", Buffer.from("binary"));
+      expect(parsed.artifacts.map((artifact) => artifact.kind)).toContain("procedure");
+      expect(parsed.artifacts.map((artifact) => artifact.kind)).toContain("visual_layout");
+    } finally {
+      delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
+      delete process.env.R3MES_DOCUMENT_PARSER_ARGS;
+    }
+  });
+
+  it("routes DOCX and HTML through the configured external document adapter without text loss", () => {
+    process.env.R3MES_DOCUMENT_PARSER_COMMAND = process.execPath;
+    process.env.R3MES_DOCUMENT_PARSER_ARGS = "-e \"console.log(JSON.stringify({text:'preserved document body',artifacts:[{kind:'paragraph',text:'preserved document body'}]}))\" {input}";
+    try {
+      for (const filename of ["policy.docx", "handbook.html"]) {
+        const parsed = parseKnowledgeBuffer(filename, Buffer.from("binary"));
+        expect(parsed.text).toBe("preserved document body");
+        expect(parsed.artifacts[0]).toMatchObject({ kind: "paragraph", text: "preserved document body" });
+        expect(parsed.parser.id).toBe("external-document-parser-v1");
+      }
+    } finally {
+      delete process.env.R3MES_DOCUMENT_PARSER_COMMAND;
+      delete process.env.R3MES_DOCUMENT_PARSER_ARGS;
+    }
+  });
+
+  it("detects titled bullet blocks in plain text as list artifacts", () => {
+    const parsed = parseKnowledgeBuffer(
+      "instructions.txt",
+      Buffer.from("Checks:\n- Validate input\n- Store result\n- Confirm output", "utf8"),
+    );
+
+    expect(parsed.artifacts[0]).toMatchObject({
+      kind: "list",
+      items: ["Validate input", "Store result", "Confirm output"],
+    });
+  });
+
   it("keeps JSON parser output byte-for-byte except trimming", () => {
     const text = '{\n  "a": 1\n}';
 

@@ -104,6 +104,14 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
       score: 88,
       level: "clean",
       warnings: [],
+      taskReadiness: {
+        table: {
+          level: "ready",
+          evidenceArtifactCount: 1,
+          structuredEvidenceCount: 1,
+          warnings: [],
+        },
+      },
       signals: {
         textLength: 600,
         chunkCount: 2,
@@ -238,6 +246,14 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
       strictAnswerEligible: true,
       blockers: [],
       warnings: [],
+      taskReadiness: {
+        table: {
+          level: "ready",
+          evidenceArtifactCount: 1,
+          structuredEvidenceCount: 1,
+          warnings: [],
+        },
+      },
       signals: {
         artifactCount: 1,
         structuredArtifactCount: 1,
@@ -247,6 +263,12 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
         parserFallbackUsed: false,
         parseWarningCount: 0,
         ocrSpanCount: 0,
+        definitionArtifactCount: 0,
+        listArtifactCount: 0,
+        codeArtifactCount: 0,
+        procedureArtifactCount: 0,
+        visualLayoutArtifactCount: 0,
+        visualHintArtifactCount: 0,
       },
     };
     const review = inferKnowledgeAutoMetadata({
@@ -261,6 +283,14 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
       strictAnswerEligible: false,
       blockers: ["spreadsheet_structure_missing"],
       warnings: ["table_text_only"],
+      taskReadiness: {
+        table: {
+          level: "needs_review",
+          evidenceArtifactCount: 1,
+          structuredEvidenceCount: 0,
+          warnings: ["table_text_only"],
+        },
+      },
     };
 
     const merged = mergeKnowledgeAutoMetadata([ready, review]);
@@ -270,6 +300,14 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
       strictAnswerEligible: false,
       tableQuality: "text_only",
       structureQuality: "partial",
+      taskReadiness: {
+        table: {
+          level: "needs_review",
+          evidenceArtifactCount: 2,
+          structuredEvidenceCount: 1,
+          warnings: ["table_text_only"],
+        },
+      },
     });
   });
 

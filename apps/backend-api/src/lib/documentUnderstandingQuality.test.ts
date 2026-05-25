@@ -40,6 +40,12 @@ describe("buildDocumentUnderstandingQuality", () => {
     expect(quality.answerReadiness).toBe("partial");
     expect(quality.strictAnswerEligible).toBe(false);
     expect(quality.warnings).toContain("table_text_only");
+    expect(quality.taskReadiness!.table).toEqual({
+      level: "partial",
+      evidenceArtifactCount: 1,
+      structuredEvidenceCount: 0,
+      warnings: ["table_text_only"],
+    });
   });
 
   it("marks structured spreadsheet sources ready", () => {
@@ -57,6 +63,12 @@ describe("buildDocumentUnderstandingQuality", () => {
     expect(quality.strictAnswerEligible).toBe(true);
     expect(quality.signals.structuredTableCount).toBe(1);
     expect(quality.signals.tableCellCount).toBe(2);
+    expect(quality.taskReadiness!.table).toEqual({
+      level: "ready",
+      evidenceArtifactCount: 2,
+      structuredEvidenceCount: 1,
+      warnings: [],
+    });
   });
 
   it("blocks strict answers for noisy OCR", () => {
@@ -75,5 +87,61 @@ describe("buildDocumentUnderstandingQuality", () => {
     expect(quality.strictAnswerEligible).toBe(false);
     expect(quality.blockers).toContain("parse_quality_noisy");
     expect(quality.blockers).toContain("ocr_risk_high");
+  });
+
+  it("reports generic task readiness from typed artifact evidence", () => {
+    const quality = buildDocumentUnderstandingQuality({
+      parseQuality: { level: "clean", warnings: [], signals: {} },
+      artifacts: [
+        { kind: "definition", text: "A concept is described." },
+        { kind: "list", text: "- first\n- second" },
+        { kind: "code_block", text: "run();" },
+        { kind: "procedure_step", text: "Perform the step." },
+        { kind: "visual_layout", text: "A labeled panel." },
+      ],
+    });
+
+    expect(quality.taskReadiness!.definition.level).toBe("ready");
+    expect(quality.taskReadiness!.list.level).toBe("ready");
+    expect(quality.taskReadiness!.code.level).toBe("ready");
+    expect(quality.taskReadiness!.procedure.level).toBe("ready");
+    expect(quality.taskReadiness!.visual_layout.level).toBe("ready");
+    expect(quality.taskReadiness!.table).toMatchObject({
+      level: "unsupported",
+      evidenceArtifactCount: 0,
+      warnings: ["table_artifact_missing"],
+    });
+    expect(quality.signals).toMatchObject({
+      definitionArtifactCount: 1,
+      listArtifactCount: 1,
+      codeArtifactCount: 1,
+      procedureArtifactCount: 1,
+      visualLayoutArtifactCount: 1,
+      visualHintArtifactCount: 1,
+    });
+  });
+
+  it("keeps caption-only visual evidence partial and downgrades task evidence needing review", () => {
+    const visualHintQuality = buildDocumentUnderstandingQuality({
+      parseQuality: { level: "clean", warnings: [], signals: {} },
+      artifacts: [{ kind: "image_caption", text: "A screen image caption." }],
+    });
+    const noisyDefinitionQuality = buildDocumentUnderstandingQuality({
+      parseQuality: {
+        level: "noisy",
+        warnings: ["ocr_risk_high"],
+        signals: { ocrRiskScore: 50 },
+      },
+      artifacts: [{ kind: "definition", text: "Low quality extracted text." }],
+    });
+
+    expect(visualHintQuality.taskReadiness!.visual_layout).toEqual({
+      level: "partial",
+      evidenceArtifactCount: 1,
+      structuredEvidenceCount: 0,
+      warnings: ["visual_layout_hint_only"],
+    });
+    expect(noisyDefinitionQuality.taskReadiness!.definition.level).toBe("needs_review");
+    expect(noisyDefinitionQuality.taskReadiness!.definition.warnings).toContain("document_requires_review");
   });
 });

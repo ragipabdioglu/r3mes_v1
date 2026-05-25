@@ -279,6 +279,40 @@ describe("knowledge routes access control", () => {
             outputSchemaVersion: 2,
             warnings: [],
           },
+          artifactGraph: {
+            version: 2,
+            diagnostics: {
+              inputArtifactCount: 1,
+              structuredArtifactCount: 2,
+              nodeCount: 14,
+              edgeCount: 13,
+              rootCount: 1,
+              orphanStructuredArtifactCount: 0,
+              duplicateArtifactIdCount: 0,
+              kindCounts: { table: 1, table_row: 4, table_cell: 9 },
+              warnings: [],
+            },
+          },
+          chunkingDiagnostics: {
+            schemaVersion: 2,
+            inputContract: "KnowledgeChunkDraft",
+            outputContract: "KnowledgeChunkV2",
+            runtimeBehaviorChanged: false,
+            sourceChunkCount: 2,
+            adaptedChunkCount: 2,
+            artifactBackedChunkCount: 2,
+            untypedTextChunkCount: 0,
+            splitContinuationCount: 1,
+            scaffoldChunkCount: 0,
+            kindCounts: { table: 2 },
+            integrity: {
+              contiguousIndexes: true,
+              emptyContentCount: 0,
+              invalidTokenCount: 0,
+              warningCounts: {},
+            },
+            warnings: [],
+          },
         },
         _count: { chunks: 2, artifacts: 1 },
         collection: {
@@ -336,11 +370,19 @@ describe("knowledge routes access control", () => {
         parserProfile: "docling",
         parserFallbackUsed: false,
         outputSchemaVersion: 2,
+        artifactGraphVersion: 2,
+        canonicalNodeCount: 14,
+        canonicalEdgeCount: 13,
+        orphanStructuredArtifactCount: 0,
+        chunkContractVersion: 2,
+        chunkIntegrityWarningCount: 0,
       },
     });
     expect(JSON.stringify(parsed.structuredArtifactSummary)).not.toContain("structuredArtifacts");
     expect(JSON.stringify(parsed.structuredArtifactSummary)).not.toContain("headers");
     expect(JSON.stringify(parsed.structuredArtifactSummary)).not.toContain("cells");
+    expect(JSON.stringify(parsed.structuredArtifactSummary)).not.toContain("nodes");
+    expect(JSON.stringify(parsed.structuredArtifactSummary)).not.toContain("embeddingText");
     expect(parsed.indexing).toMatchObject({
       status: "FAILED",
       vectorIndexStatus: "FAILED",

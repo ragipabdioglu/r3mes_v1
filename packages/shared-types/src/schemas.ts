@@ -115,6 +115,15 @@ export const KnowledgeDocumentUnderstandingQualitySchema = z.object({
   strictAnswerEligible: z.boolean(),
   blockers: z.array(z.string()),
   warnings: z.array(z.string()),
+  taskReadiness: z.record(
+    z.enum(["definition", "list", "table", "code", "procedure", "visual_layout"]),
+    z.object({
+      level: z.enum(["ready", "partial", "needs_review", "unsupported"]),
+      evidenceArtifactCount: z.number().int().nonnegative(),
+      structuredEvidenceCount: z.number().int().nonnegative(),
+      warnings: z.array(z.string()),
+    }),
+  ).optional(),
   signals: z.object({
     artifactCount: z.number().int().nonnegative(),
     structuredArtifactCount: z.number().int().nonnegative(),
@@ -125,6 +134,12 @@ export const KnowledgeDocumentUnderstandingQualitySchema = z.object({
     parserFallbackUsed: z.boolean(),
     parseWarningCount: z.number().int().nonnegative(),
     ocrSpanCount: z.number().int().nonnegative(),
+    definitionArtifactCount: z.number().int().nonnegative().optional(),
+    listArtifactCount: z.number().int().nonnegative().optional(),
+    codeArtifactCount: z.number().int().nonnegative().optional(),
+    procedureArtifactCount: z.number().int().nonnegative().optional(),
+    visualLayoutArtifactCount: z.number().int().nonnegative().optional(),
+    visualHintArtifactCount: z.number().int().nonnegative().optional(),
   }),
 });
 export const KnowledgeStructuredArtifactSummarySchema: z.ZodType<KnowledgeStructuredArtifactSummary> = z.object({
@@ -142,6 +157,12 @@ export const KnowledgeStructuredArtifactSummarySchema: z.ZodType<KnowledgeStruct
   parserFallbackUsed: z.boolean(),
   outputSchemaVersion: z.number().int().positive().nullable().optional(),
   warningsCount: z.number().int().nonnegative(),
+  artifactGraphVersion: z.number().int().positive().nullable().optional(),
+  canonicalNodeCount: z.number().int().nonnegative().nullable().optional(),
+  canonicalEdgeCount: z.number().int().nonnegative().nullable().optional(),
+  orphanStructuredArtifactCount: z.number().int().nonnegative().nullable().optional(),
+  chunkContractVersion: z.number().int().positive().nullable().optional(),
+  chunkIntegrityWarningCount: z.number().int().nonnegative().nullable().optional(),
 });
 export const KnowledgeParserRunDiagnosticsSchema = z.object({
   id: z.string().min(1),

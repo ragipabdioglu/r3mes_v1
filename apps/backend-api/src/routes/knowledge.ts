@@ -228,6 +228,12 @@ function readKnowledgeAutoMetadata(value: unknown): KnowledgeAutoMetadata | null
     documentUnderstanding: readDocumentUnderstandingQuality(record.documentUnderstanding),
     parseAdapter: readKnowledgeParseAdapter(record.parseAdapter),
     parserRun: readKnowledgeParserRun(record.parserRun),
+    artifactGraph: record.artifactGraph && typeof record.artifactGraph === "object"
+      ? record.artifactGraph as KnowledgeAutoMetadata["artifactGraph"]
+      : undefined,
+    chunkingDiagnostics: record.chunkingDiagnostics && typeof record.chunkingDiagnostics === "object"
+      ? record.chunkingDiagnostics as KnowledgeAutoMetadata["chunkingDiagnostics"]
+      : undefined,
     sourceType: typeof record.sourceType === "string" ? record.sourceType as KnowledgeAutoMetadata["sourceType"] : undefined,
     artifactId: typeof record.artifactId === "string" ? record.artifactId : undefined,
     artifactKind: typeof record.artifactKind === "string" ? record.artifactKind as KnowledgeAutoMetadata["artifactKind"] : undefined,
@@ -400,6 +406,14 @@ function buildStructuredArtifactSummary(
     parserFallbackUsed: Boolean(signals.parserFallbackUsed || parserRun?.fallbackUsed),
     outputSchemaVersion: parserRun?.outputSchemaVersion ?? null,
     warningsCount,
+    artifactGraphVersion: metadata?.artifactGraph?.version ?? null,
+    canonicalNodeCount: metadata?.artifactGraph?.diagnostics.nodeCount ?? null,
+    canonicalEdgeCount: metadata?.artifactGraph?.diagnostics.edgeCount ?? null,
+    orphanStructuredArtifactCount: metadata?.artifactGraph?.diagnostics.orphanStructuredArtifactCount ?? null,
+    chunkContractVersion: metadata?.chunkingDiagnostics?.schemaVersion ?? null,
+    chunkIntegrityWarningCount: metadata?.chunkingDiagnostics
+      ? Object.values(metadata.chunkingDiagnostics.integrity.warningCounts).reduce((sum, count) => sum + (count ?? 0), 0)
+      : null,
   };
 }
 

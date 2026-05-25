@@ -35,7 +35,11 @@ export type DocumentArtifactKind =
   | "url"
   | "footer"
   | "page_marker"
-  | "image_caption";
+  | "image_caption"
+  | "code_block"
+  | "procedure"
+  | "procedure_step"
+  | "visual_layout";
 
 export interface DocumentArtifact {
   id: string;
@@ -89,6 +93,7 @@ function parsedDocument(opts: {
   structuredArtifacts?: StructuredDocumentArtifact[];
   warnings?: string[];
   parserRun?: Partial<ParsedKnowledgeDocument["parserRun"]>;
+  preserveArtifactKinds?: boolean;
 }): ParsedKnowledgeDocument {
   const sourceType = opts.sourceType ?? opts.adapter.sourceType;
   const text = normalizeParsedKnowledgeText(opts.text, sourceType).trim();
@@ -100,7 +105,7 @@ function parsedDocument(opts: {
     schemaVersion: 2,
     sourceType,
     text,
-    artifacts: normalizeDocumentArtifacts(opts.artifacts, text, sourceType),
+    artifacts: normalizeDocumentArtifacts(opts.artifacts, text, sourceType, opts.preserveArtifactKinds === true),
     structuredArtifacts: opts.structuredArtifacts,
     parser: {
       id: opts.adapter.id,
@@ -246,7 +251,11 @@ function normalizeArtifactKind(value: unknown): DocumentArtifactKind {
     raw === "url" ||
     raw === "footer" ||
     raw === "page_marker" ||
-    raw === "image_caption"
+    raw === "image_caption" ||
+    raw === "code_block" ||
+    raw === "procedure" ||
+    raw === "procedure_step" ||
+    raw === "visual_layout"
   ) return raw;
   return "paragraph";
 }
@@ -275,7 +284,8 @@ function artifactAnswerabilityScore(kind: DocumentArtifactKind, text: string): n
   const trimmed = text.trim();
   if (!trimmed) return 0;
   if (kind === "definition") return 92;
-  if (kind === "table" || kind === "list" || kind === "qa") return 84;
+  if (kind === "table" || kind === "list" || kind === "qa" || kind === "code_block" || kind === "procedure") return 84;
+  if (kind === "procedure_step") return 78;
   if (kind === "paragraph") return 68;
   if (kind === "heading" || kind === "title") return 28;
   if (kind === "url" || kind === "footer" || kind === "page_marker") return 4;
@@ -296,6 +306,7 @@ function normalizeDocumentArtifacts(
   artifacts: DocumentArtifact[] | undefined,
   fallbackText: string,
   sourceType: KnowledgeSourceType,
+  preserveProvidedKinds = false,
 ): DocumentArtifact[] {
   const source = artifacts && artifacts.length > 0 ? artifacts : inferDocumentArtifactsFromText(fallbackText);
   const shouldReclassifyScaffold =
@@ -306,7 +317,7 @@ function normalizeDocumentArtifacts(
     const text = cleanArtifactText(String(artifact.text ?? ""));
     if (!text) continue;
     const rawKind = normalizeArtifactKind(artifact.kind);
-    const kind = shouldReclassifyScaffold && rawKind === "paragraph" && isLikelyStandaloneHeading(text)
+    const kind = !preserveProvidedKinds && shouldReclassifyScaffold && rawKind === "paragraph" && isLikelyStandaloneHeading(text)
       ? "heading"
       : rawKind;
     const baseId = stableDocumentArtifactId({ ...artifact, kind, text });
@@ -450,6 +461,46 @@ function isMarkdownTableLike(text: string): boolean {
   return text.split(/\r?\n/).some((line) => MARKDOWN_TABLE_LINE_PATTERN.test(line));
 }
 
+function isFencedCodeBlock(text: string): boolean {
+  const trimmed = text.trim();
+  return /^```[\s\S]*```$/u.test(trimmed) || /^~~~[\s\S]*~~~$/u.test(trimmed);
+}
+
+function isProcedureBlock(text: string): boolean {
+  const orderedLines = blockContentLines(text).filter((line) => /^\s*\d+[.)]\s+\S/u.test(line));
+  return orderedLines.length >= 2;
+}
+
+function isListBlock(text: string): boolean {
+  const lines = blockContentLines(text);
+  return lines.length >= 2 && lines.every((line) => /^\s*(?:[-*+]\s+|\d+[.)]\s+)\S/u.test(line));
+}
+
+function blockContentLines(text: string): string[] {
+  const lines = text.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+  if (lines.length >= 3 && /:\s*$/u.test(lines[0] ?? "")) return lines.slice(1);
+  return lines;
+}
+
+function classifyArtifactBlock(text: string): DocumentArtifactKind {
+  if (isFencedCodeBlock(text)) return "code_block";
+  if (isMarkdownTableLike(text)) return "table";
+  if (isProcedureBlock(text)) return "procedure";
+  if (isListBlock(text)) return "list";
+  if (isLikelyDefinition(text)) return "definition";
+  return "paragraph";
+}
+
+function artifactItems(kind: DocumentArtifactKind, text: string): string[] | undefined {
+  if (kind !== "list" && kind !== "procedure") return undefined;
+  const items = text
+    .split(/\r?\n/u)
+    .filter((line, index) => !(index === 0 && /:\s*$/u.test(line) && text.split(/\r?\n/u).length >= 3))
+    .map((line) => line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/u, "").trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
 function flushArtifactBlock(opts: {
   artifacts: DocumentArtifact[];
   lines: string[];
@@ -460,7 +511,7 @@ function flushArtifactBlock(opts: {
 }): void {
   const text = opts.lines.join("\n").trim();
   if (!text) return;
-  const kind = opts.kind ?? (isMarkdownTableLike(text) ? "table" : isLikelyDefinition(text) ? "definition" : "paragraph");
+  const kind = opts.kind ?? classifyArtifactBlock(text);
   opts.artifacts.push({
     id: `artifact-${opts.artifacts.length}`,
     kind,
@@ -468,6 +519,7 @@ function flushArtifactBlock(opts: {
     title: opts.title ?? null,
     page: opts.page ?? null,
     level: opts.level ?? null,
+    items: artifactItems(kind, text),
     answerabilityScore: artifactAnswerabilityScore(kind, text),
   });
   opts.lines.length = 0;
@@ -740,6 +792,7 @@ function externalDocumentParser(): KnowledgeParserAdapter<ParsedKnowledgeDocumen
           structuredArtifacts: parsedOutput.structuredArtifacts,
           originalBytes: buffer.length,
           warnings,
+          preserveArtifactKinds: true,
           parserRun: {
             profile,
             durationMs: Math.max(0, Date.now() - startedAt),

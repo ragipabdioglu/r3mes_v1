@@ -7,6 +7,8 @@ import { routeQuery } from "./queryRouter.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import type { DocumentUnderstandingQuality } from "./documentUnderstandingQuality.js";
 import type { KnowledgeParseQuality } from "./knowledgeParseQuality.js";
+import type { ArtifactGraphDiagnostics } from "./canonicalArtifactGraph.js";
+import type { ChunkingDiagnostics } from "./knowledgeChunkV2.js";
 import { getDecisionConfig } from "./decisionConfig.js";
 
 export type KnowledgeRiskLevel = "low" | "medium" | "high";
@@ -43,6 +45,11 @@ export interface KnowledgeAutoMetadata {
     outputSchemaVersion: number;
     warnings: string[];
   };
+  artifactGraph?: {
+    version: 2;
+    diagnostics: ArtifactGraphDiagnostics;
+  };
+  chunkingDiagnostics?: ChunkingDiagnostics;
   sourceType?: KnowledgeSourceType;
   artifactId?: string;
   artifactKind?: DocumentArtifactKind;
@@ -285,8 +292,24 @@ function aggregateDocumentUnderstanding(items: KnowledgeAutoMetadata[]): Documen
   const tableRank = { none: 0, structured: 1, text_only: 2 } as const;
   const spreadsheetRank = { none: 0, structured: 1, partial: 2, failed: 3 } as const;
   const ocrRank = { none: 0, usable: 1, weak: 2 } as const;
+  const taskRank = { ready: 0, partial: 1, needs_review: 2, unsupported: 3 } as const;
   const maxByRank = <T extends string>(values: T[], ranks: Record<T, number>): T =>
     values.sort((a, b) => ranks[b] - ranks[a])[0];
+  const taskKinds = ["definition", "list", "table", "code", "procedure", "visual_layout"] as const;
+  const taskReadiness = Object.fromEntries(
+    taskKinds.flatMap((kind) => {
+      const entries = reports
+        .map((report) => report.taskReadiness?.[kind])
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+      if (entries.length === 0) return [];
+      return [[kind, {
+        level: maxByRank(entries.map((entry) => entry.level), taskRank),
+        evidenceArtifactCount: entries.reduce((sum, entry) => sum + entry.evidenceArtifactCount, 0),
+        structuredEvidenceCount: entries.reduce((sum, entry) => sum + entry.structuredEvidenceCount, 0),
+        warnings: unique(entries.flatMap((entry) => entry.warnings), 24),
+      }]];
+    }),
+  ) as DocumentUnderstandingQuality["taskReadiness"];
   return {
     version: 1,
     parseQuality: reports.some((report) => report.parseQuality === "noisy")
@@ -302,6 +325,7 @@ function aggregateDocumentUnderstanding(items: KnowledgeAutoMetadata[]): Documen
     strictAnswerEligible: reports.every((report) => report.strictAnswerEligible !== false),
     blockers: unique(reports.flatMap((report) => report.blockers), 24),
     warnings: unique(reports.flatMap((report) => report.warnings), 32),
+    ...(taskReadiness && Object.keys(taskReadiness).length > 0 ? { taskReadiness } : {}),
     signals: {
       artifactCount: reports.reduce((sum, report) => sum + report.signals.artifactCount, 0),
       structuredArtifactCount: reports.reduce((sum, report) => sum + report.signals.structuredArtifactCount, 0),
@@ -312,6 +336,12 @@ function aggregateDocumentUnderstanding(items: KnowledgeAutoMetadata[]): Documen
       parserFallbackUsed: reports.some((report) => report.signals.parserFallbackUsed),
       parseWarningCount: reports.reduce((sum, report) => sum + report.signals.parseWarningCount, 0),
       ocrSpanCount: reports.reduce((sum, report) => sum + report.signals.ocrSpanCount, 0),
+      definitionArtifactCount: reports.reduce((sum, report) => sum + (report.signals.definitionArtifactCount ?? 0), 0),
+      listArtifactCount: reports.reduce((sum, report) => sum + (report.signals.listArtifactCount ?? 0), 0),
+      codeArtifactCount: reports.reduce((sum, report) => sum + (report.signals.codeArtifactCount ?? 0), 0),
+      procedureArtifactCount: reports.reduce((sum, report) => sum + (report.signals.procedureArtifactCount ?? 0), 0),
+      visualLayoutArtifactCount: reports.reduce((sum, report) => sum + (report.signals.visualLayoutArtifactCount ?? 0), 0),
+      visualHintArtifactCount: reports.reduce((sum, report) => sum + (report.signals.visualHintArtifactCount ?? 0), 0),
     },
   };
 }

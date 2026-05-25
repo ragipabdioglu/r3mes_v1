@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Prisma } from "@prisma/client";
 
 import { buildDocumentUnderstandingQuality } from "./documentUnderstandingQuality.js";
+import { buildCanonicalArtifactGraph } from "./canonicalArtifactGraph.js";
 import {
   attachKnowledgeChunkArtifactMetadata,
   buildIngestionQualityReport,
@@ -18,6 +19,7 @@ import {
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { embedKnowledgeText, formatVectorLiteral, getKnowledgeEmbeddingDimensions } from "./knowledgeEmbedding.js";
 import { scoreKnowledgeParseQuality } from "./knowledgeParseQuality.js";
+import { adaptKnowledgeChunkDraftsToV2 } from "./knowledgeChunkV2.js";
 import { chunkParsedKnowledgeDocument, parseKnowledgeBuffer } from "./knowledgeText.js";
 import { prisma } from "./prisma.js";
 import { routeQuery } from "./queryRouter.js";
@@ -246,6 +248,7 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
   let parsed: ReturnType<typeof parseKnowledgeBuffer>;
   let chunksWithMetadata: Array<ReturnType<typeof chunkParsedKnowledgeDocument>[number] & { autoMetadata: KnowledgeAutoMetadata }>;
   let documentAutoMetadata: KnowledgeAutoMetadata;
+  let artifactGraph: ReturnType<typeof buildCanonicalArtifactGraph> | null = null;
 
   try {
     if (!document.storagePath) {
@@ -290,6 +293,12 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
       text: parsed.text,
       chunks,
     });
+    artifactGraph = buildCanonicalArtifactGraph(parsed);
+    const chunkV2 = adaptKnowledgeChunkDraftsToV2(chunks, {
+      documentId: document.id,
+      filename: sourceFilename(document),
+      sourceType: parsed.sourceType,
+    });
     chunksWithMetadata = chunks.map((chunk) => {
       const autoMetadata = attachKnowledgeChunkArtifactMetadata(
         inferKnowledgeAutoMetadata({
@@ -330,6 +339,11 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
       sourceType: parsed.sourceType,
       pageCount: parsedPageCount(parsed),
     });
+    documentAutoMetadata.artifactGraph = {
+      version: artifactGraph.version,
+      diagnostics: artifactGraph.diagnostics,
+    };
+    documentAutoMetadata.chunkingDiagnostics = chunkV2.diagnostics;
     documentAutoMetadata.parseAdapter = {
       id: parsed.parser.id,
       version: parsed.parser.version,
@@ -423,6 +437,7 @@ async function runProcessor(job: LoadedJob, deps: Required<Omit<KnowledgeIngesti
         documentId: document.id,
         parsed,
         versionId,
+        artifactGraph: artifactGraph ?? undefined,
       }),
       skipDuplicates: true,
     });
