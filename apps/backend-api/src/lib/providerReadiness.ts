@@ -2,6 +2,7 @@ import { Redis } from "ioredis";
 import type { ProviderReadinessCheck, ProviderReadinessReport, ReadinessStatus, RuntimeProfile } from "@r3mes/shared-types";
 import { prisma } from "./prisma.js";
 import { embedTextsForQdrantWithDiagnostics, getQdrantVectorSize } from "./qdrantEmbedding.js";
+import { validateQdrantPayloadV2 } from "./qdrantPayloadV2.js";
 import { resolveRuntimeProfile } from "./runtimeFallbackPolicy.js";
 
 export type ProviderReadinessMode = "summary" | "warm";
@@ -153,9 +154,60 @@ async function checkQdrantHealth(
   return { status: "pass", details: { health } };
 }
 
+export async function hasStrictQdrantPayloadV2Integrity(
+  profile: RuntimeProfile,
+  env: Record<string, string | undefined>,
+): Promise<boolean> {
+  const timeoutMs = parsePositiveInt(env.R3MES_READY_TIMEOUT_MS, DEFAULT_READY_TIMEOUT_MS);
+  const qdrantUrl = baseUrl(env.R3MES_QDRANT_URL, DEFAULT_QDRANT_URL);
+  const collection = encodeURIComponent(profile.qdrant.collectionName);
+  let offset: unknown;
+  let auditedPointCount = 0;
+
+  for (;;) {
+    const parsed = await fetchJson(`${qdrantUrl}/collections/${collection}/points/scroll`, timeoutMs, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        limit: 256,
+        with_payload: true,
+        with_vector: false,
+        ...(offset !== undefined ? { offset } : {}),
+      }),
+    });
+    const result = parsed && typeof parsed === "object" ? (parsed as { result?: unknown }).result : undefined;
+    const points = result && typeof result === "object" && Array.isArray((result as { points?: unknown }).points)
+      ? (result as { points: unknown[] }).points
+      : [];
+
+    for (const point of points) {
+      const payload = point && typeof point === "object" ? (point as { payload?: unknown }).payload : undefined;
+      const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+      if (
+        !validateQdrantPayloadV2(payload).valid ||
+        record.embeddingProvider !== "bge-m3" ||
+        !isBgeM3Model(record.embeddingModel) ||
+        record.embeddingDimension !== profile.qdrant.vectorSize
+      ) {
+        return false;
+      }
+      auditedPointCount += 1;
+    }
+
+    const nextPageOffset = result && typeof result === "object"
+      ? (result as { next_page_offset?: unknown }).next_page_offset
+      : undefined;
+    if (nextPageOffset === undefined || nextPageOffset === null) {
+      return auditedPointCount > 0;
+    }
+    offset = nextPageOffset;
+  }
+}
+
 async function checkQdrantCollectionShape(
   profile: RuntimeProfile,
   env: Record<string, string | undefined>,
+  strict: boolean,
 ): Promise<Omit<ProviderReadinessCheck, "id" | "requiredForProfile" | "latencyMs">> {
   const timeoutMs = parsePositiveInt(env.R3MES_READY_TIMEOUT_MS, DEFAULT_READY_TIMEOUT_MS);
   const qdrantUrl = baseUrl(env.R3MES_QDRANT_URL, DEFAULT_QDRANT_URL);
@@ -167,6 +219,12 @@ async function checkQdrantCollectionShape(
     return {
       status: "fail",
       details: { collection: profile.qdrant.collectionName, expectedVectorSize, actualVectorSize },
+    };
+  }
+  if (strict && !(await hasStrictQdrantPayloadV2Integrity(profile, env))) {
+    return {
+      status: "fail",
+      details: { collection: profile.qdrant.collectionName, expectedVectorSize, actualVectorSize: actualVectorSize ?? "unknown" },
     };
   }
   return {
@@ -291,7 +349,7 @@ export async function buildProviderReadinessReport(options: ProviderReadinessOpt
     await measure("backend_redis", true, () => checkRedis(env)),
     await measure("ai_engine_runtime", strict, () => checkAiEngineRuntime(env)),
     await measure("qdrant_health", profile.qdrant.required, () => checkQdrantHealth(env)),
-    await measure("qdrant_collection_shape", profile.qdrant.required, () => checkQdrantCollectionShape(profile, env)),
+    await measure("qdrant_collection_shape", profile.qdrant.required, () => checkQdrantCollectionShape(profile, env, strict)),
     await measure("embedding_real_provider", profile.embedding.requiredRealProvider, async () => checkEmbeddingProviderSummary(profile)),
     await measure("reranker_real_provider", profile.reranker.requiredRealProvider, async () => checkRerankerProviderSummary(profile)),
   ];

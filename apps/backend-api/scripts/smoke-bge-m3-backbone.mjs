@@ -36,6 +36,14 @@ const failures = [
   audit.fallbackUsedPointCount === 0 ? null : "embedding_fallback_points_present",
   audit.missingModelPointCount === 0 ? null : "embedding_model_missing",
   audit.wrongVectorSizePointCount === 0 ? null : "wrong_vector_size_points_present",
+  Number.isInteger(status.totalChunks) &&
+    Number.isInteger(audit.validPayloadV2PointCount) &&
+    audit.validPayloadV2PointCount > 0 &&
+    audit.validPayloadV2PointCount >= status.totalChunks
+    ? null
+    : "valid_payload_v2_points_missing",
+  audit.invalidPayloadV2PointCount === 0 ? null : "invalid_payload_v2_points_present",
+  audit.payloadHashMismatchPointCount === 0 ? null : "payload_hash_mismatch_points_present",
 ].filter(Boolean);
 
 if (failures.length > 0) {
