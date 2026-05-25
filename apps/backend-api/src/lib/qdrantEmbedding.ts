@@ -8,7 +8,13 @@ const DEFAULT_QDRANT_VECTOR_SIZE = 1024;
 const DEFAULT_EMBEDDING_TIMEOUT_MS = 15_000;
 
 interface EmbeddingsResponse {
+  provider?: string;
   model?: string;
+  dimension?: number;
+  normalized?: boolean;
+  pooling?: "bge_m3_default" | "mean_pooling" | "cls" | "unknown";
+  device?: "cpu" | "cuda" | "mps" | "auto" | "unknown";
+  fallback_used?: boolean;
   data?: Array<{ index?: number; embedding?: number[] }>;
 }
 
@@ -20,6 +26,11 @@ export interface QdrantEmbeddingDiagnostics {
   fallbackUsed: boolean;
   dimension: number;
   model?: string;
+  transport?: "ai-engine-http" | "in-process";
+  pooling?: "bge_m3_default" | "mean_pooling" | "cls" | "unknown";
+  device?: "cpu" | "cuda" | "mps" | "auto" | "unknown";
+  normalized?: boolean;
+  providerValidated?: boolean;
   error?: string;
 }
 
@@ -68,7 +79,16 @@ export function embedTextDeterministicForQdrant(text: string, dimensions = getQd
   return normalizeVector(values);
 }
 
-async function embedWithAiEngine(texts: string[]): Promise<{ vectors: number[][]; model?: string }> {
+async function embedWithAiEngine(texts: string[]): Promise<{
+  vectors: number[][];
+  provider?: string;
+  model?: string;
+  dimension?: number;
+  normalized?: boolean;
+  pooling?: "bge_m3_default" | "mean_pooling" | "cls" | "unknown";
+  device?: "cpu" | "cuda" | "mps" | "auto" | "unknown";
+  fallbackUsed?: boolean;
+}> {
   const controller = new AbortController();
   const batchScaledTimeoutMs = DEFAULT_EMBEDDING_TIMEOUT_MS * Math.max(1, texts.length);
   const timeoutMs = Math.max(
@@ -95,7 +115,13 @@ async function embedWithAiEngine(texts: string[]): Promise<{ vectors: number[][]
     }
     return {
       vectors: vectors.map((vector) => normalizeVector(vector!.map(Number))),
+      provider: typeof parsed.provider === "string" ? parsed.provider.trim().toLowerCase() : undefined,
       model: typeof parsed.model === "string" ? parsed.model : undefined,
+      dimension: typeof parsed.dimension === "number" ? parsed.dimension : undefined,
+      normalized: typeof parsed.normalized === "boolean" ? parsed.normalized : undefined,
+      pooling: parsed.pooling,
+      device: parsed.device,
+      fallbackUsed: parsed.fallback_used === true,
     };
   } finally {
     clearTimeout(timeout);
@@ -110,17 +136,29 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
   }
   if (provider === "ai-engine" || provider === "bge-m3") {
     try {
-      const { vectors, model } = await embedWithAiEngine(texts);
+      const metadata = await embedWithAiEngine(texts);
+      const { vectors, model } = metadata;
       const dimension = getQdrantVectorSize();
+      const providerValidated = provider !== "bge-m3" || metadata.provider === "bge-m3";
+      if (!providerValidated || metadata.fallbackUsed === true) {
+        throw new Error(
+          `embedding provider metadata mismatch: requested=${provider}, reported=${metadata.provider ?? "unknown"}, fallback=${String(metadata.fallbackUsed ?? false)}`,
+        );
+      }
       if (vectors.every((vector) => vector.length === dimension)) {
         return {
           vectors,
           diagnostics: {
             requestedProvider: provider,
-            actualProvider: provider,
+            actualProvider: metadata.provider === "bge-m3" ? "bge-m3" : "ai-engine",
             fallbackUsed: false,
             dimension,
             model,
+            transport: "ai-engine-http",
+            pooling: metadata.pooling ?? "unknown",
+            device: metadata.device ?? "unknown",
+            normalized: metadata.normalized ?? true,
+            providerValidated,
           },
         };
       }
@@ -137,6 +175,11 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
           fallbackUsed: true,
           dimension: fallbackVectors[0]?.length ?? dimension,
           model,
+          transport: "in-process",
+          pooling: "unknown",
+          device: "unknown",
+          normalized: true,
+          providerValidated: false,
           error: "vector size mismatch",
         },
       };
@@ -157,6 +200,11 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
           actualProvider: "deterministic",
           fallbackUsed: true,
           dimension: fallbackVectors[0]?.length ?? getQdrantVectorSize(),
+          transport: "in-process",
+          pooling: "unknown",
+          device: "unknown",
+          normalized: true,
+          providerValidated: false,
           error: message,
         },
       };
@@ -170,6 +218,11 @@ export async function embedTextsForQdrantWithDiagnostics(texts: string[]): Promi
       actualProvider: "deterministic",
       fallbackUsed: false,
       dimension: vectors[0]?.length ?? getQdrantVectorSize(),
+      transport: "in-process",
+      pooling: "unknown",
+      device: "unknown",
+      normalized: true,
+      providerValidated: provider === "deterministic",
     },
   };
 }

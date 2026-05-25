@@ -37,7 +37,13 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
+          provider: "bge-m3",
           model: "C:/r3mes-hf-model-cache/bge-m3",
+          dimension: 4,
+          normalized: true,
+          pooling: "mean_pooling",
+          device: "cpu",
+          fallback_used: false,
           data: [
             { index: 0, embedding: vector(4, 1) },
             { index: 1, embedding: vector(4, 2) },
@@ -59,17 +65,77 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
       fallbackUsed: false,
       dimension: 4,
       model: "C:/r3mes-hf-model-cache/bge-m3",
+      transport: "ai-engine-http",
+      pooling: "mean_pooling",
+      device: "cpu",
+      normalized: true,
+      providerValidated: true,
     });
+  });
+
+  it("does not accept an unverified ai-engine response as BGE-M3", async () => {
+    vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "bge-m3");
+    vi.stubEnv("R3MES_QDRANT_VECTOR_SIZE", "4");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ model: "unknown-model", data: [{ index: 0, embedding: vector(4, 1) }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const result = await embedTextsForQdrantWithDiagnostics(["soru"]);
+
+    expect(result.diagnostics).toMatchObject({
+      requestedProvider: "bge-m3",
+      actualProvider: "deterministic",
+      fallbackUsed: true,
+      providerValidated: false,
+    });
+    expect(result.diagnostics.error).toContain("embedding provider metadata mismatch");
+  });
+
+  it("fails closed on unverified BGE-M3 provider metadata in strict runtime", async () => {
+    vi.stubEnv("R3MES_RUNTIME_PROFILE", "pilot-rag");
+    vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "bge-m3");
+    vi.stubEnv("R3MES_QDRANT_VECTOR_SIZE", "4");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ model: "unknown-model", data: [{ index: 0, embedding: vector(4, 1) }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(embedTextsForQdrantWithDiagnostics(["soru"])).rejects.toThrow(
+      "embedding provider metadata mismatch",
+    );
   });
 
   it("falls back and reports diagnostics when ai-engine returns the wrong dimension", async () => {
     vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "bge-m3");
     vi.stubEnv("R3MES_QDRANT_VECTOR_SIZE", "4");
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ model: "bad-dim-model", data: [{ index: 0, embedding: vector(3, 1) }] }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify({
+          provider: "bge-m3",
+          model: "BAAI/bge-m3",
+          dimension: 3,
+          normalized: true,
+          pooling: "mean_pooling",
+          device: "cpu",
+          fallback_used: false,
+          data: [{ index: 0, embedding: vector(3, 1) }],
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -82,7 +148,7 @@ describe("embedTextsForQdrantWithDiagnostics", () => {
       actualProvider: "deterministic",
       fallbackUsed: true,
       dimension: 4,
-      model: "bad-dim-model",
+      model: "BAAI/bge-m3",
       error: "vector size mismatch",
     });
   });

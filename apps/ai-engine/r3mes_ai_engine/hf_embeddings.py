@@ -46,6 +46,10 @@ def _l2_normalize(values: list[float]) -> list[float]:
     return [float(value / norm) for value in values]
 
 
+def _provider_from_loaded_model(model_name_or_path: str) -> str:
+    return "bge-m3" if "bge-m3" in model_name_or_path.lower() else "external"
+
+
 async def _load_embedding(settings: Settings, state: AppState) -> EmbeddingRuntime:
     if state.embedding_runtime is not None:
         return state.embedding_runtime
@@ -131,7 +135,12 @@ async def embed_documents(
     runtime.dimension = len(vectors[0]) if vectors else None
 
     return EmbeddingsResponse(
+        provider=_provider_from_loaded_model(runtime.model_name_or_path),
         model=runtime.model_name_or_path,
+        dimension=runtime.dimension or 0,
+        normalized=True,
+        pooling="mean_pooling",
+        device=runtime.device,
         data=[EmbeddingItem(index=index, embedding=vector) for index, vector in enumerate(vectors)],
     )
 

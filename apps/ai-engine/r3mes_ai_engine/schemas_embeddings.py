@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -13,5 +15,12 @@ class EmbeddingItem(BaseModel):
 
 
 class EmbeddingsResponse(BaseModel):
+    object: Literal["list"] = "list"
+    provider: Literal["bge-m3", "external"]
     model: str
+    dimension: int
+    normalized: bool
+    pooling: Literal["mean_pooling"]
+    device: Literal["cpu", "cuda"]
+    fallback_used: Literal[False] = False
     data: list[EmbeddingItem]
