@@ -1,4 +1,5 @@
 import type { GroundingConfidence } from "./answerSchema.js";
+import type { CandidateDeduplicationDiagnostics } from "./candidateDeduper.js";
 import type { HybridKnowledgeCandidate, HybridRetrievedKnowledgeContext } from "./hybridKnowledgeRetrieval.js";
 import type { RerankDiagnostics, RerankWithDiagnosticsResult } from "./modelRerank.js";
 import type { AlignmentDiagnostics, AlignmentScore } from "./querySourceAlignment.js";
@@ -36,7 +37,8 @@ export interface CandidateDeduplicationResult {
   input: HybridCandidatePool;
   deduped: HybridCandidatePool;
   removedCandidateCount: number;
-  decisionMode: "legacy_dedupe_adapter";
+  diagnostics: CandidateDeduplicationDiagnostics;
+  decisionMode: "legacy_dedupe_adapter" | "identity_safe_dedupe";
 }
 
 export interface QuerySourceAlignmentResult {
@@ -72,6 +74,7 @@ export interface RetrievalQualityDiagnostics {
   };
   alignment: AlignmentDiagnostics;
   reranker: RerankDiagnostics;
+  deduplication?: CandidateDeduplicationDiagnostics;
   legacyDiagnostics: HybridRetrievedKnowledgeContext["diagnostics"];
 }
 
@@ -130,13 +133,20 @@ export function adaptHybridCandidatePool(candidates: HybridKnowledgeCandidate[])
 export function adaptCandidateDeduplicationResult(
   input: HybridKnowledgeCandidate[],
   deduped: HybridKnowledgeCandidate[],
+  diagnostics?: CandidateDeduplicationDiagnostics,
 ): CandidateDeduplicationResult {
   return {
     contractVersion: RETRIEVAL_QUALITY_CONTRACT_VERSION,
     input: adaptHybridCandidatePool(input),
     deduped: adaptHybridCandidatePool(deduped),
     removedCandidateCount: Math.max(0, input.length - deduped.length),
-    decisionMode: "legacy_dedupe_adapter",
+    diagnostics: diagnostics ?? {
+      inputCandidateCount: input.length,
+      outputCandidateCount: deduped.length,
+      mergedCandidateCount: Math.max(0, input.length - deduped.length),
+      merges: [],
+    },
+    decisionMode: diagnostics ? "identity_safe_dedupe" : "legacy_dedupe_adapter",
   };
 }
 
@@ -176,6 +186,7 @@ export function adaptRetrievalQualityDiagnostics(
     },
     alignment: diagnostics.alignment,
     reranker: diagnostics.reranker,
+    deduplication: diagnostics.deduplication,
     legacyDiagnostics: diagnostics,
   };
 }

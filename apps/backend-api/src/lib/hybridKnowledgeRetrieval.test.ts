@@ -182,6 +182,12 @@ describe("true hybrid retrieval helpers", () => {
       fallbackUsed: false,
       dimension: 3,
     });
+    expect(result.diagnostics.deduplication).toMatchObject({
+      inputCandidateCount: 0,
+      outputCandidateCount: 0,
+      mergedCandidateCount: 0,
+      merges: [],
+    });
     expect(vi.mocked(embeddingServiceV2.embed)).toHaveBeenCalledWith(expect.objectContaining({
       targetType: "query",
       purpose: "retrieval_dense",

@@ -3,6 +3,10 @@ import type { KnowledgeIngestionStepStatus, Prisma } from "@prisma/client";
 
 import { getAlignmentConfig } from "./alignmentConfig.js";
 import type { GroundingConfidence } from "./answerSchema.js";
+import {
+  dedupeCandidatesIdentitySafe,
+  type CandidateDeduplicationDiagnostics,
+} from "./candidateDeduper.js";
 import { compileEvidence, hasCompiledUsableGrounding, type CompiledEvidence } from "./compiledEvidence.js";
 import { getDecisionConfig } from "./decisionConfig.js";
 import { embeddingServiceV2 } from "./embeddingService.js";
@@ -110,6 +114,7 @@ export interface HybridRetrievedKnowledgeContext {
       evidenceUsableFactCount: number;
     };
     qdrantEmbedding: QdrantEmbeddingDiagnostics | null;
+    deduplication?: CandidateDeduplicationDiagnostics;
     providerFailures?: Array<{ provider: "qdrant" | "prisma" | "critical_evidence"; reason: string }>;
     qdrantProviderFailed?: boolean;
     qdrantFallbackUsed?: boolean;
@@ -370,14 +375,6 @@ const ROUTE_DOMAIN_TAGS = new Set(["medical", "legal", "finance", "technical", "
 
 function explicitCardDomains(card: KnowledgeCard): string[] {
   return uniqueTokens([card.topic, ...card.tags]).filter((token) => ROUTE_DOMAIN_TAGS.has(token));
-}
-
-function candidateKey(chunk: HybridKnowledgeChunk): string {
-  return chunk.id || `${chunk.documentId}:${chunk.chunkIndex}`;
-}
-
-function contentHashKey(content: string): string {
-  return normalize(content).replace(/\s+/g, " ").slice(0, 500);
 }
 
 function disclosureIndexes(value: string): string[] {
@@ -1116,27 +1113,7 @@ async function collectCriticalEvidenceCandidates(opts: {
 }
 
 export function dedupeHybridKnowledgeCandidates(candidates: HybridKnowledgeCandidate[]): HybridKnowledgeCandidate[] {
-  const byKey = new Map<string, HybridKnowledgeCandidate>();
-  const contentSeen = new Map<string, string>();
-  for (const candidate of candidates) {
-    const key = candidateKey(candidate.chunk);
-    const contentKey = contentHashKey(candidate.chunk.content);
-    const existingKey = contentSeen.get(contentKey);
-    const targetKey = existingKey ?? key;
-    const existing = byKey.get(targetKey);
-    if (existing) {
-      existing.sources = [...new Set([...existing.sources, ...candidate.sources])];
-      existing.vectorScore = Math.max(existing.vectorScore ?? Number.NEGATIVE_INFINITY, candidate.vectorScore ?? Number.NEGATIVE_INFINITY);
-      if (existing.vectorScore === Number.NEGATIVE_INFINITY) delete existing.vectorScore;
-      existing.lexicalScore = Math.max(existing.lexicalScore ?? Number.NEGATIVE_INFINITY, candidate.lexicalScore ?? Number.NEGATIVE_INFINITY);
-      if (existing.lexicalScore === Number.NEGATIVE_INFINITY) delete existing.lexicalScore;
-      existing.preRankScore = Math.max(existing.preRankScore, candidate.preRankScore);
-      continue;
-    }
-    contentSeen.set(contentKey, key);
-    byKey.set(key, { ...candidate, sources: [...candidate.sources] });
-  }
-  return [...byKey.values()];
+  return dedupeCandidatesIdentitySafe(candidates).candidates;
 }
 
 function scoreLightweightCandidate(query: string, candidate: HybridKnowledgeCandidate, routePlan?: DomainRoutePlan | null): number {
@@ -1605,7 +1582,8 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     qdrantFallbackUsed: qdrantProviderFailed,
   };
 
-  const deduped = dedupeHybridKnowledgeCandidates([...criticalEvidenceCandidates, ...qdrantCandidates, ...prismaCandidates]);
+  const deduplicationResult = dedupeCandidatesIdentitySafe([...criticalEvidenceCandidates, ...qdrantCandidates, ...prismaCandidates]);
+  const deduped = deduplicationResult.candidates;
   if (strictRouteScope && deduped.length === 0) {
     return {
       contextText: "",
@@ -1629,6 +1607,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        deduplication: deduplicationResult.diagnostics,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1667,6 +1646,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        deduplication: deduplicationResult.diagnostics,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1704,6 +1684,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        deduplication: deduplicationResult.diagnostics,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1732,6 +1713,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        deduplication: deduplicationResult.diagnostics,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1831,6 +1813,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        deduplication: deduplicationResult.diagnostics,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1945,6 +1928,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           evidence: evidenceRun.output,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
+        deduplication: deduplicationResult.diagnostics,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -2012,6 +1996,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         evidence: evidenceRun.output,
       }),
       qdrantEmbedding: qdrantEmbeddingDiagnostics,
+      deduplication: deduplicationResult.diagnostics,
       ...providerFailureDiagnostics,
       retrievalMode: "true_hybrid",
     },

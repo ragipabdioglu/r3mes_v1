@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { dedupeCandidatesIdentitySafe } from "./candidateDeduper.js";
 import type { HybridKnowledgeCandidate, HybridRetrievedKnowledgeContext } from "./hybridKnowledgeRetrieval.js";
 import {
   adaptCandidateDeduplicationResult,
@@ -117,6 +118,19 @@ describe("retrieval quality contracts", () => {
     expect(result.decisionMode).toBe("legacy_dedupe_adapter");
     expect(result.removedCandidateCount).toBe(1);
     expect(result.deduped.candidates[0]?.candidate).toBe(shared);
+  });
+
+  it("carries identity-safe dedupe rule diagnostics through the named contract", () => {
+    const shared = candidate("shared", ["qdrant"]);
+    const duplicate = { ...candidate("shared", ["prisma"]), chunk: { ...shared.chunk } };
+    const dedupe = dedupeCandidatesIdentitySafe([shared, duplicate]);
+
+    const result = adaptCandidateDeduplicationResult([shared, duplicate], dedupe.candidates, dedupe.diagnostics);
+
+    expect(result.decisionMode).toBe("identity_safe_dedupe");
+    expect(result.diagnostics).toBe(dedupe.diagnostics);
+    expect(result.diagnostics.merges[0]?.rule).toBe("exact_chunk_identity");
+    expect(result.deduped.candidates[0]?.provenance.legacySources.sort()).toEqual(["prisma", "qdrant"]);
   });
 
   it("names existing alignment output without recomputing alignment decisions", () => {
