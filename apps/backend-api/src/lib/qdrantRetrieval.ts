@@ -1,11 +1,11 @@
 import type { ChatSourceCitation } from "@r3mes/shared-types";
 
 import type { GroundingConfidence } from "./answerSchema.js";
+import { embeddingServiceV2 } from "./embeddingService.js";
 import { buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import type { HybridCandidate } from "./hybridRetrieval.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { rerankKnowledgeCardsWithFallback } from "./modelRerank.js";
-import { embedTextForQdrant } from "./qdrantEmbedding.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
 import { runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
@@ -137,9 +137,17 @@ export async function retrieveKnowledgeContextQdrant(opts: {
     };
   }
 
-  const vector = await embedTextForQdrant(query);
+  const embedding = await embeddingServiceV2.embed({
+    targetType: "query",
+    purpose: "retrieval_dense",
+    text: query,
+    languageHint: "unknown",
+  });
+  if (!embedding.vector || embedding.vector.length === 0) {
+    throw new Error("Qdrant query embedding vector is missing");
+  }
   const rawPoints = await searchQdrantKnowledge({
-    vector,
+    vector: embedding.vector,
     accessibleCollectionIds,
     limit: 50,
   });

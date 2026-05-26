@@ -10,6 +10,7 @@ import {
   retrieveKnowledgeContextTrueHybrid,
   type HybridKnowledgeCandidate,
 } from "./hybridKnowledgeRetrieval.js";
+import { embeddingServiceV2 } from "./embeddingService.js";
 import { prisma } from "./prisma.js";
 import { searchQdrantKnowledge } from "./qdrantStore.js";
 
@@ -17,17 +18,26 @@ vi.mock("./qdrantStore.js", () => ({
   searchQdrantKnowledge: vi.fn(),
 }));
 
-vi.mock("./qdrantEmbedding.js", () => ({
-  embedTextForQdrant: vi.fn(async () => [0, 1, 0]),
-  embedTextForQdrantWithDiagnostics: vi.fn(async () => ({
-    vector: [0, 1, 0],
-    diagnostics: {
-      requestedProvider: "deterministic",
-      actualProvider: "deterministic",
+vi.mock("./embeddingService.js", () => ({
+  embeddingServiceV2: {
+    embed: vi.fn(async () => ({
+      targetType: "query",
+      purpose: "retrieval_dense",
+      text: "query",
+      vector: [0, 1, 0],
+      normalized: true,
       fallbackUsed: false,
+      provider: "deterministic-dev",
+      model: "unknown",
       dimension: 3,
-    },
-  })),
+      transport: "in-process",
+      pooling: "unknown",
+      device: "unknown",
+      inputHash: "query-hash",
+      latencyMs: 0,
+      createdAt: "2026-05-27T00:00:00.000Z",
+    })),
+  },
 }));
 
 afterEach(() => {
@@ -96,6 +106,7 @@ describe("true hybrid retrieval helpers", () => {
   });
 
   it("returns no context instead of falling back to unrelated raw candidates under strict route scope", async () => {
+    vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "deterministic");
     const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue([
       {
         id: "gyn-1",
@@ -171,6 +182,10 @@ describe("true hybrid retrieval helpers", () => {
       fallbackUsed: false,
       dimension: 3,
     });
+    expect(vi.mocked(embeddingServiceV2.embed)).toHaveBeenCalledWith(expect.objectContaining({
+      targetType: "query",
+      purpose: "retrieval_dense",
+    }));
 
     findMany.mockRestore();
     qdrant.mockRestore();

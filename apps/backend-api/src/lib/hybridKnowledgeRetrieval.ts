@@ -1,10 +1,11 @@
-import type { ChatSourceCitation } from "@r3mes/shared-types";
+import type { ChatSourceCitation, EmbeddingResult } from "@r3mes/shared-types";
 import type { KnowledgeIngestionStepStatus, Prisma } from "@prisma/client";
 
 import { getAlignmentConfig } from "./alignmentConfig.js";
 import type { GroundingConfidence } from "./answerSchema.js";
 import { compileEvidence, hasCompiledUsableGrounding, type CompiledEvidence } from "./compiledEvidence.js";
 import { getDecisionConfig } from "./decisionConfig.js";
+import { embeddingServiceV2 } from "./embeddingService.js";
 import { buildCompiledEvidenceBrief, buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
@@ -17,7 +18,7 @@ import {
   type AlignmentDiagnostics,
   type AlignmentScore,
 } from "./querySourceAlignment.js";
-import { embedTextForQdrantWithDiagnostics, type QdrantEmbeddingDiagnostics } from "./qdrantEmbedding.js";
+import type { QdrantEmbeddingDiagnostics } from "./qdrantEmbedding.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
 import { getRuntimeFallbackPolicy } from "./runtimeFallbackPolicy.js";
@@ -303,6 +304,29 @@ function buildBudgetDiagnostics(opts: {
     evidenceSupportingFactCount: opts.evidence?.supportingContext.length ?? 0,
     evidenceRiskFactCount: opts.evidence?.riskFacts.length ?? 0,
     evidenceUsableFactCount: opts.evidence?.usableFacts.length ?? 0,
+  };
+}
+
+function toQdrantEmbeddingDiagnostics(embedding: EmbeddingResult): QdrantEmbeddingDiagnostics {
+  const requestedProvider = (process.env.R3MES_EMBEDDING_PROVIDER ?? "deterministic").trim().toLowerCase();
+  return {
+    requestedProvider,
+    actualProvider:
+      embedding.provider === "deterministic-dev"
+        ? "deterministic"
+        : embedding.provider === "bge-m3"
+          ? "bge-m3"
+          : "ai-engine",
+    fallbackUsed: embedding.fallbackUsed,
+    dimension: embedding.dimension,
+    ...(embedding.model !== "unknown" ? { model: embedding.model } : {}),
+    transport: embedding.transport === "in-process" ? "in-process" : "ai-engine-http",
+    pooling: embedding.pooling,
+    device: embedding.device,
+    normalized: embedding.normalized,
+    providerValidated:
+      !embedding.fallbackUsed && (requestedProvider !== "bge-m3" || embedding.provider === "bge-m3"),
+    ...(embedding.fallbackReason ? { error: embedding.fallbackReason } : {}),
   };
 }
 
@@ -933,9 +957,17 @@ async function collectQdrantCandidates(opts: {
   routePlan?: DomainRoutePlan | null;
 }): Promise<{ candidates: HybridKnowledgeCandidate[]; embedding: QdrantEmbeddingDiagnostics }> {
   const retrievalQuery = buildExpandedQueryText(opts.query, opts.routePlan);
-  const embeddingRun = await embedTextForQdrantWithDiagnostics(retrievalQuery);
+  const embedding = await embeddingServiceV2.embed({
+    targetType: "query",
+    purpose: "retrieval_dense",
+    text: retrievalQuery,
+    languageHint: "unknown",
+  });
+  if (!embedding.vector || embedding.vector.length === 0) {
+    throw new Error("Qdrant query embedding vector is missing");
+  }
   const points = await searchQdrantKnowledge({
-    vector: embeddingRun.vector,
+    vector: embedding.vector,
     accessibleCollectionIds: opts.accessibleCollectionIds,
     limit: qdrantLimit(),
   });
@@ -954,7 +986,7 @@ async function collectQdrantCandidates(opts: {
     .filter((candidate) => candidateMatchesRouteScope(candidate.card, candidate.chunk, opts.routePlan));
   return {
     candidates,
-    embedding: embeddingRun.diagnostics,
+    embedding: toQdrantEmbeddingDiagnostics(embedding),
   };
 }
 
