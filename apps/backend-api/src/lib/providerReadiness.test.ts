@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildQdrantPayloadV2, hashQdrantPayloadText } from "./qdrantPayloadV2.js";
-import { hasStrictQdrantPayloadV2Integrity } from "./providerReadiness.js";
+import { checkQdrantHealth, hasStrictQdrantPayloadV2Integrity } from "./providerReadiness.js";
 import { resolveRuntimeProfile } from "./runtimeFallbackPolicy.js";
 
 function strictProfile() {
@@ -64,5 +64,18 @@ describe("strict Qdrant payload V2 integrity", () => {
     await expect(hasStrictQdrantPayloadV2Integrity(strictProfile(), {
       R3MES_QDRANT_URL: "http://qdrant.test",
     })).resolves.toBe(false);
+  });
+});
+
+describe("Qdrant health probe", () => {
+  it("accepts the text health response returned by Qdrant", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("healthz check passed", { status: 200 })));
+
+    await expect(checkQdrantHealth({
+      R3MES_QDRANT_URL: "http://qdrant.test",
+    })).resolves.toEqual({
+      status: "pass",
+      details: { health: "healthz check passed" },
+    });
   });
 });

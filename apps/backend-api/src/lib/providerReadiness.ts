@@ -145,12 +145,31 @@ async function checkLlamaLoaded(
   return { status: "pass", details: { loaded: loaded ?? "unknown" } };
 }
 
-async function checkQdrantHealth(
+export async function checkQdrantHealth(
   env: Record<string, string | undefined>,
 ): Promise<Omit<ProviderReadinessCheck, "id" | "requiredForProfile" | "latencyMs">> {
   const timeoutMs = parsePositiveInt(env.R3MES_READY_TIMEOUT_MS, DEFAULT_READY_TIMEOUT_MS);
   const qdrantUrl = baseUrl(env.R3MES_QDRANT_URL, DEFAULT_QDRANT_URL);
-  const health = await fetchJson(`${qdrantUrl}/healthz`, timeoutMs);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let health: unknown;
+  try {
+    const response = await fetch(`${qdrantUrl}/healthz`, {
+      headers: { accept: "text/plain, application/json" },
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`status=${response.status} body=${text.slice(0, 200)}`);
+    }
+    try {
+      health = text ? JSON.parse(text) : {};
+    } catch {
+      health = text;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
   return { status: "pass", details: { health } };
 }
 
