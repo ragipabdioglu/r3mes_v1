@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { embedKnowledgeText } from "./knowledgeEmbedding.js";
-import type { DocumentArtifactKind, KnowledgeChunkDraft, KnowledgeSourceType } from "./knowledgeText.js";
+import {
+  inferDocumentArtifactsFromText,
+  type DocumentArtifactKind,
+  type KnowledgeChunkDraft,
+  type KnowledgeSourceType,
+} from "./knowledgeText.js";
 import { routeQuery } from "./queryRouter.js";
 import { expandSurfaceConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import type { DocumentUnderstandingQuality } from "./documentUnderstandingQuality.js";
@@ -672,6 +677,50 @@ function inferAudience(domain: string, content: string): string {
   return "general_user";
 }
 
+const ARTIFACT_KIND_METADATA_RANK: Record<DocumentArtifactKind, number> = {
+  code_block: 100,
+  table: 95,
+  procedure: 90,
+  list: 80,
+  definition: 70,
+  qa: 65,
+  visual_layout: 60,
+  paragraph: 40,
+  image_caption: 35,
+  heading: 15,
+  title: 10,
+  page_marker: 5,
+  footer: 5,
+  url: 5,
+  procedure_step: 85,
+};
+
+function inferPrimaryArtifactMetadata(content: string): Pick<KnowledgeAutoMetadata, "artifactKind" | "artifactMetadata"> {
+  const artifacts = inferDocumentArtifactsFromText(content);
+  const candidates = artifacts
+    .filter((artifact) => !["title", "heading", "footer", "page_marker", "url"].includes(artifact.kind))
+    .sort((a, b) => {
+      const rankDelta = (ARTIFACT_KIND_METADATA_RANK[b.kind] ?? 0) - (ARTIFACT_KIND_METADATA_RANK[a.kind] ?? 0);
+      if (rankDelta !== 0) return rankDelta;
+      return b.text.length - a.text.length;
+    });
+  const primary = candidates[0];
+  if (!primary) return {};
+  const kindCounts = artifacts.reduce<Record<string, number>>((acc, artifact) => {
+    acc[artifact.kind] = (acc[artifact.kind] ?? 0) + 1;
+    return acc;
+  }, {});
+  return {
+    artifactKind: primary.kind,
+    artifactMetadata: {
+      inferredBy: "knowledge_auto_metadata_v1",
+      artifactCount: artifacts.length,
+      kindCounts,
+      confidence: primary.answerabilityScore >= 70 ? "high" : primary.answerabilityScore >= 45 ? "medium" : "low",
+    },
+  };
+}
+
 export function inferKnowledgeAutoMetadata(opts: {
   title: string;
   content: string;
@@ -720,6 +769,7 @@ export function inferKnowledgeAutoMetadata(opts: {
     6,
   );
   const hasGenericProfileSignal = genericPhrases.length >= 3;
+  const primaryArtifact = inferPrimaryArtifactMetadata(opts.content);
 
   return {
     domain: inferredDomain,
@@ -740,6 +790,7 @@ export function inferKnowledgeAutoMetadata(opts: {
     summary,
     questionsAnswered,
     sourceQuality: structured ? "structured" : routePlan.confidence === "low" && !hasGenericProfileSignal ? "thin" : "inferred",
+    ...primaryArtifact,
   };
 }
 

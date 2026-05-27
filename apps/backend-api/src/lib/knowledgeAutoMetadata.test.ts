@@ -436,6 +436,42 @@ Source Summary: Depozito iadesi için belgeler saklanmalıdır.`;
     expect(profile?.confidence).toBe("medium");
   });
 
+  it("infers generic artifact kind metadata for legacy procedure chunks", () => {
+    const metadata = inferKnowledgeAutoMetadata({
+      title: "işlem adımları",
+      content: [
+        "Yeni hesap açma süreci:",
+        "1. Talep kaydı oluşturulur.",
+        "2. Yetki onayı alınır.",
+        "3. Kullanıcıya giriş bilgisi iletilir.",
+      ].join("\n"),
+    });
+
+    expect(metadata.artifactKind).toBe("procedure");
+    expect(metadata.artifactMetadata).toMatchObject({
+      inferredBy: "knowledge_auto_metadata_v1",
+      confidence: "high",
+    });
+  });
+
+  it("infers table artifact metadata without document-specific literals", () => {
+    const metadata = inferKnowledgeAutoMetadata({
+      title: "ölçüm tablosu",
+      content: [
+        "| Alan | Değer |",
+        "| --- | --- |",
+        "| Toplam | 42 |",
+        "| Durum | Hazır |",
+      ].join("\n"),
+    });
+
+    expect(metadata.artifactKind).toBe("table");
+    expect(metadata.artifactMetadata).toMatchObject({
+      inferredBy: "knowledge_auto_metadata_v1",
+      confidence: "high",
+    });
+  });
+
   it("keeps profile version stable until profile content changes", () => {
     const first = inferKnowledgeAutoMetadata({
       title: "db migration",
