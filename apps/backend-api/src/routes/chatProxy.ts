@@ -47,6 +47,10 @@ import { getRuntimeFallbackPolicy } from "../lib/runtimeFallbackPolicy.js";
 import { resolveRetrievalBudget } from "../lib/retrievalBudget.js";
 import { buildRetrievalPlan, summarizeRetrievalPlan, type RetrievalPlan } from "../lib/retrievalPlan.js";
 import {
+  buildCompleteRetrievalDiagnosticsEnvelope,
+  buildRetrievalDiagnosticsCoverageEnvelope,
+} from "../lib/retrievalQualityContracts.js";
+import {
   buildRetrievalRuntimeHealthFromEnv,
   summarizeRetrievalRuntimeHealth,
   type RetrievalRuntimeHealth,
@@ -763,6 +767,10 @@ function summarizeRetrievalDiagnostics(diagnostics?: Record<string, unknown>): R
     : undefined;
 
   return {
+    contractVersion: diagnostics.contractVersion,
+    coverageStatus: diagnostics.coverageStatus,
+    mode: diagnostics.mode,
+    missingStages: diagnostics.missingStages,
     retrievalMode: diagnostics.retrievalMode,
     qdrantCandidateCount: diagnostics.qdrantCandidateCount,
     prismaCandidateCount: diagnostics.prismaCandidateCount,
@@ -2058,7 +2066,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                   return {
                     ...hybridRetrieval,
                     retrievalMode: "true_hybrid" as const,
-                    retrievalDiagnostics: hybridRetrieval.diagnostics,
+                    retrievalDiagnostics: buildCompleteRetrievalDiagnosticsEnvelope(hybridRetrieval.diagnostics),
                   };
                 } catch (error) {
                   const message = error instanceof Error ? error.message : String(error);
@@ -2079,7 +2087,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                       groundingConfidence: "low" as const,
                       evidence: null,
                       retrievalMode: "true_hybrid" as const,
-                      retrievalDiagnostics: null,
+                      retrievalDiagnostics: buildRetrievalDiagnosticsCoverageEnvelope({
+                        mode: "true_hybrid",
+                        coverageStatus: "provider_failure",
+                      }),
                     };
                   }
                   throw error;
@@ -2097,7 +2108,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                     return {
                       ...qdrantRetrieval,
                       retrievalMode: "qdrant" as const,
-                      retrievalDiagnostics: null,
+                      retrievalDiagnostics: buildRetrievalDiagnosticsCoverageEnvelope({
+                        mode: "qdrant",
+                        coverageStatus: "legacy_uninstrumented",
+                      }),
                     };
                   }
                 } catch (error) {
@@ -2118,7 +2132,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                       groundingConfidence: "low" as const,
                       evidence: null,
                       retrievalMode: engine === "hybrid" ? "legacy_hybrid" as const : "qdrant" as const,
-                      retrievalDiagnostics: null,
+                      retrievalDiagnostics: buildRetrievalDiagnosticsCoverageEnvelope({
+                        mode: engine === "hybrid" ? "legacy_hybrid" : "qdrant",
+                        coverageStatus: "provider_failure",
+                      }),
                     };
                   }
                   req.log.warn({ err: message }, "Qdrant retrieval failed, falling back to Prisma retrieval");
@@ -2130,7 +2147,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                       groundingConfidence: "low" as const,
                       evidence: null,
                       retrievalMode: "qdrant" as const,
-                      retrievalDiagnostics: null,
+                      retrievalDiagnostics: buildRetrievalDiagnosticsCoverageEnvelope({
+                        mode: "qdrant",
+                        coverageStatus: "provider_failure",
+                      }),
                     };
                   }
                 }
@@ -2144,7 +2164,10 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               return {
                 ...prismaRetrieval,
                 retrievalMode: engine === "hybrid" ? "legacy_hybrid" as const : "prisma" as const,
-                retrievalDiagnostics: null,
+                retrievalDiagnostics: buildRetrievalDiagnosticsCoverageEnvelope({
+                  mode: engine === "hybrid" ? "legacy_hybrid" : "prisma",
+                  coverageStatus: "legacy_uninstrumented",
+                }),
               };
             })()
           : {
@@ -2154,13 +2177,17 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               groundingConfidence: "low" as const,
               evidence: null,
               retrievalMode: "prisma" as const,
-              retrievalDiagnostics: null,
+              retrievalDiagnostics: buildRetrievalDiagnosticsCoverageEnvelope({
+                mode: "not_executed",
+                coverageStatus: "not_executed",
+              }),
             };
       if (strictQdrantFailure) {
         chatTrace.finish(retrievalTrace, "error", {
           mode: getRetrievalEngine(),
           reason: "qdrant_provider_failed",
           strictRuntime: true,
+          diagnostics: summarizeRetrievalDiagnostics(retrieval.retrievalDiagnostics ?? undefined),
         });
         return sendApiError(
           reply,

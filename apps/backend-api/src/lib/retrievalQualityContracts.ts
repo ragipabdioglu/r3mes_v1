@@ -78,6 +78,45 @@ export interface RetrievalQualityDiagnostics {
   legacyDiagnostics: HybridRetrievedKnowledgeContext["diagnostics"];
 }
 
+export type RetrievalDiagnosticsCoverageStatus =
+  | "complete"
+  | "legacy_uninstrumented"
+  | "not_executed"
+  | "provider_failure";
+export type RetrievalDiagnosticsCoverageMode =
+  | "true_hybrid"
+  | "qdrant"
+  | "prisma"
+  | "legacy_hybrid"
+  | "not_executed";
+export type RetrievalDiagnosticsStage =
+  | "candidate_collection"
+  | "deduplication"
+  | "alignment"
+  | "reranker"
+  | "context_packaging";
+
+const RETRIEVAL_DIAGNOSTICS_STAGES: RetrievalDiagnosticsStage[] = [
+  "candidate_collection",
+  "deduplication",
+  "alignment",
+  "reranker",
+  "context_packaging",
+];
+
+export interface RetrievalDiagnosticsEnvelopeV2 extends Record<string, unknown> {
+  contractVersion: typeof RETRIEVAL_QUALITY_CONTRACT_VERSION;
+  coverageStatus: RetrievalDiagnosticsCoverageStatus;
+  mode: RetrievalDiagnosticsCoverageMode;
+  missingStages: RetrievalDiagnosticsStage[];
+  qualityDiagnostics: RetrievalQualityDiagnostics | null;
+  compatibilityMode:
+    | "legacy_true_hybrid_observed"
+    | "legacy_uninstrumented"
+    | "not_executed"
+    | "provider_failure";
+}
+
 export interface ContextPackage {
   contractVersion: typeof RETRIEVAL_QUALITY_CONTRACT_VERSION;
   contextText: string;
@@ -188,6 +227,34 @@ export function adaptRetrievalQualityDiagnostics(
     reranker: diagnostics.reranker,
     deduplication: diagnostics.deduplication,
     legacyDiagnostics: diagnostics,
+  };
+}
+
+export function buildCompleteRetrievalDiagnosticsEnvelope(
+  diagnostics: HybridRetrievedKnowledgeContext["diagnostics"],
+): RetrievalDiagnosticsEnvelopeV2 & HybridRetrievedKnowledgeContext["diagnostics"] {
+  return {
+    ...diagnostics,
+    contractVersion: RETRIEVAL_QUALITY_CONTRACT_VERSION,
+    coverageStatus: "complete",
+    mode: "true_hybrid",
+    missingStages: [],
+    qualityDiagnostics: adaptRetrievalQualityDiagnostics(diagnostics),
+    compatibilityMode: "legacy_true_hybrid_observed",
+  };
+}
+
+export function buildRetrievalDiagnosticsCoverageEnvelope(opts: {
+  mode: RetrievalDiagnosticsCoverageMode;
+  coverageStatus: Exclude<RetrievalDiagnosticsCoverageStatus, "complete">;
+}): RetrievalDiagnosticsEnvelopeV2 {
+  return {
+    contractVersion: RETRIEVAL_QUALITY_CONTRACT_VERSION,
+    coverageStatus: opts.coverageStatus,
+    mode: opts.mode,
+    missingStages: [...RETRIEVAL_DIAGNOSTICS_STAGES],
+    qualityDiagnostics: null,
+    compatibilityMode: opts.coverageStatus,
   };
 }
 

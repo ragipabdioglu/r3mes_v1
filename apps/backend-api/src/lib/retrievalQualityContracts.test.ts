@@ -9,6 +9,8 @@ import {
   adaptRerankerOutput,
   adaptRetrievalPlanV2,
   adaptTrueHybridContextPackage,
+  buildCompleteRetrievalDiagnosticsEnvelope,
+  buildRetrievalDiagnosticsCoverageEnvelope,
   RETRIEVAL_QUALITY_CONTRACT_VERSION,
 } from "./retrievalQualityContracts.js";
 
@@ -236,5 +238,72 @@ describe("retrieval quality contracts", () => {
       lowGroundingConfidence: false,
       assessmentMode: "legacy_grounding_adapter",
     });
+  });
+
+  it("reports complete true-hybrid diagnostics while preserving legacy diagnostic access", () => {
+    const diagnostics: HybridRetrievedKnowledgeContext["diagnostics"] = {
+      qdrantCandidateCount: 2,
+      prismaCandidateCount: 1,
+      dedupedCandidateCount: 2,
+      preRankedCandidateCount: 2,
+      rerankedCandidateCount: 1,
+      finalCandidateCount: 1,
+      alignment,
+      reranker,
+      budget: {
+        contextMode: "compact",
+        budgetMode: "normal_rag",
+        requestedSourceLimit: 3,
+        finalSourceLimit: 3,
+        finalSourceCount: 1,
+        evidenceContextMode: "none",
+        contextTextChars: 18,
+        evidenceInputChars: 0,
+        evidencePrunedInputChars: 0,
+        evidenceFactCandidateCount: 0,
+        evidenceFactSelectedCount: 0,
+        evidenceFactDroppedCount: 0,
+        evidenceContradictionSignalCount: 0,
+        evidenceDirectFactLimit: 0,
+        evidenceSupportingFactLimit: 0,
+        evidenceRiskFactLimit: 0,
+        evidenceUsableFactLimit: 0,
+        evidenceDirectFactCount: 0,
+        evidenceSupportingFactCount: 0,
+        evidenceRiskFactCount: 0,
+        evidenceUsableFactCount: 0,
+      },
+      qdrantEmbedding: null,
+      retrievalMode: "true_hybrid",
+    };
+
+    const envelope = buildCompleteRetrievalDiagnosticsEnvelope(diagnostics);
+
+    expect(envelope).toMatchObject({
+      coverageStatus: "complete",
+      mode: "true_hybrid",
+      missingStages: [],
+      finalCandidateCount: diagnostics.finalCandidateCount,
+    });
+    expect(envelope.qualityDiagnostics?.legacyDiagnostics).toBe(diagnostics);
+  });
+
+  it("names missing diagnostic stages for uninstrumented, skipped, and failed paths", () => {
+    for (const [mode, coverageStatus] of [
+      ["qdrant", "legacy_uninstrumented"],
+      ["not_executed", "not_executed"],
+      ["true_hybrid", "provider_failure"],
+    ] as const) {
+      const envelope = buildRetrievalDiagnosticsCoverageEnvelope({ mode, coverageStatus });
+
+      expect(envelope).toMatchObject({ mode, coverageStatus, qualityDiagnostics: null });
+      expect(envelope.missingStages).toEqual([
+        "candidate_collection",
+        "deduplication",
+        "alignment",
+        "reranker",
+        "context_packaging",
+      ]);
+    }
   });
 });
