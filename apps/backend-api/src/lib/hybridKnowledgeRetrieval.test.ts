@@ -13,6 +13,8 @@ import {
 import { embeddingServiceV2 } from "./embeddingService.js";
 import { prisma } from "./prisma.js";
 import { searchQdrantKnowledge } from "./qdrantStore.js";
+import { buildRetrievalPlan } from "./retrievalPlan.js";
+import { adaptRetrievalPlanV2 } from "./retrievalQualityContracts.js";
 
 vi.mock("./qdrantStore.js", () => ({
   searchQdrantKnowledge: vi.fn(),
@@ -286,6 +288,37 @@ describe("true hybrid retrieval helpers", () => {
 
     findMany.mockRestore();
     qdrant.mockRestore();
+  });
+
+  it("reports handed-off evidence demand without using it to change empty retrieval output", async () => {
+    const retrievalPlan = adaptRetrievalPlanV2(buildRetrievalPlan({
+      query: "generic query",
+      sourcePlan: { mode: "explicit", selectedCollectionIds: [] },
+      runtime: {
+        retrievalEngineRequested: "hybrid",
+        retrievalEngineActual: "hybrid",
+        embeddingProviderRequested: "bge-m3",
+        embeddingProviderActual: "bge-m3",
+        embeddingFallbackUsed: false,
+        rerankerModeRequested: "model",
+        rerankerModeActual: "model",
+        rerankerFallbackUsed: false,
+        warnings: [],
+      },
+      expectedEvidenceKinds: ["table", "numeric"],
+      requestedFields: ["field_a"],
+      outputConstraints: ["format:table"],
+    }));
+
+    const result = await retrieveKnowledgeContextTrueHybrid({
+      query: "generic query",
+      accessibleCollectionIds: [],
+      retrievalPlan,
+    });
+
+    expect(result.contextText).toBe("");
+    expect(result.sources).toEqual([]);
+    expect(result.diagnostics.evidenceDemand).toEqual(retrievalPlan.evidenceDemand);
   });
 
   it("requires subtopic metadata support when route is specific", () => {

@@ -28,6 +28,8 @@ import type { DomainRoutePlan } from "./queryRouter.js";
 import { getRuntimeFallbackPolicy } from "./runtimeFallbackPolicy.js";
 import {
   adaptHybridCandidatePoolTelemetry,
+  type RetrievalEvidenceDemandSummary,
+  type RetrievalPlanV2,
   type HybridCandidatePoolTelemetry,
 } from "./retrievalQualityContracts.js";
 import { getEvidenceExtractorBudget, runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
@@ -120,6 +122,7 @@ export interface HybridRetrievedKnowledgeContext {
     qdrantEmbedding: QdrantEmbeddingDiagnostics | null;
     deduplication?: CandidateDeduplicationDiagnostics;
     candidatePool?: HybridCandidatePoolTelemetry;
+    evidenceDemand?: RetrievalEvidenceDemandSummary;
     providerFailures?: Array<{ provider: "qdrant" | "prisma" | "critical_evidence"; reason: string }>;
     qdrantProviderFailed?: boolean;
     qdrantFallbackUsed?: boolean;
@@ -1483,11 +1486,13 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   limit?: number;
   budgetMode?: RetrievalBudgetMode;
   routePlan?: DomainRoutePlan | null;
+  retrievalPlan?: RetrievalPlanV2;
 }): Promise<HybridRetrievedKnowledgeContext> {
   const { query, evidenceQuery = query, accessibleCollectionIds, routePlan = null } = opts;
   const requestedSourceLimit = opts.limit ?? 3;
   const limit = finalSourceLimit(requestedSourceLimit);
   const budgetMode = opts.budgetMode ?? "normal_rag";
+  const evidenceDemand = opts.retrievalPlan?.evidenceDemand;
   if (accessibleCollectionIds.length === 0) {
     return {
       contextText: "",
@@ -1511,6 +1516,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: null,
+        evidenceDemand,
         retrievalMode: "true_hybrid",
       },
     };
@@ -1542,6 +1548,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           finalSourceCount: 0,
         }),
         qdrantEmbedding: null,
+        evidenceDemand,
         retrievalMode: "true_hybrid",
       },
     };
@@ -1616,6 +1623,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
         candidatePool,
+        evidenceDemand,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1656,6 +1664,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
         candidatePool,
+        evidenceDemand,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1695,6 +1704,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
         candidatePool,
+        evidenceDemand,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1725,6 +1735,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
         candidatePool,
+        evidenceDemand,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1826,6 +1837,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
         candidatePool,
+        evidenceDemand,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1942,6 +1954,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
         candidatePool,
+        evidenceDemand,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -2011,6 +2024,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       qdrantEmbedding: qdrantEmbeddingDiagnostics,
       deduplication: deduplicationResult.diagnostics,
       candidatePool,
+      evidenceDemand,
       ...providerFailureDiagnostics,
       retrievalMode: "true_hybrid",
     },

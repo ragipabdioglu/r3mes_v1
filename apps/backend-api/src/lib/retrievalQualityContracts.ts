@@ -13,6 +13,18 @@ export type ObservableLegacyRetrievalSource = HybridKnowledgeCandidate["sources"
 export interface RetrievalPlanV2 extends RetrievalPlan {
   contractVersion: typeof RETRIEVAL_QUALITY_CONTRACT_VERSION;
   compatibilityMode: "legacy_plan_adapter";
+  evidenceDemand: RetrievalEvidenceDemandSummary;
+}
+
+export interface RetrievalEvidenceDemandSummary {
+  expectedEvidenceKinds: RetrievalPlan["expectedEvidenceKinds"];
+  requestedFieldIds: string[];
+  requestedFieldCount: number;
+  outputConstraints: string[];
+  operation: NonNullable<RetrievalPlan["evidenceDemandBasis"]>["operation"] | null;
+  requiredEvidenceType: NonNullable<RetrievalPlan["evidenceDemandBasis"]>["requiredEvidenceType"] | null;
+  derivationMode: "query_contract" | "legacy_plan_inference";
+  compatibilityMode: "retrieval_plan_v2_observed";
 }
 
 export interface RetrievalCandidate {
@@ -96,6 +108,7 @@ export interface RetrievalQualityDiagnostics {
   reranker: RerankDiagnostics;
   deduplication?: CandidateDeduplicationDiagnostics;
   candidatePool?: HybridCandidatePoolTelemetry;
+  evidenceDemand?: RetrievalEvidenceDemandSummary;
   legacyDiagnostics: HybridRetrievedKnowledgeContext["diagnostics"];
 }
 
@@ -159,6 +172,20 @@ export function adaptRetrievalPlanV2(plan: RetrievalPlan): RetrievalPlanV2 {
     ...plan,
     contractVersion: RETRIEVAL_QUALITY_CONTRACT_VERSION,
     compatibilityMode: "legacy_plan_adapter",
+    evidenceDemand: summarizeRetrievalEvidenceDemand(plan),
+  };
+}
+
+export function summarizeRetrievalEvidenceDemand(plan: RetrievalPlan): RetrievalEvidenceDemandSummary {
+  return {
+    expectedEvidenceKinds: [...plan.expectedEvidenceKinds],
+    requestedFieldIds: [...plan.requestedFields],
+    requestedFieldCount: plan.requestedFields.length,
+    outputConstraints: [...plan.outputConstraints],
+    operation: plan.evidenceDemandBasis?.operation ?? null,
+    requiredEvidenceType: plan.evidenceDemandBasis?.requiredEvidenceType ?? null,
+    derivationMode: plan.evidenceDemandBasis?.derivationMode ?? "legacy_plan_inference",
+    compatibilityMode: "retrieval_plan_v2_observed",
   };
 }
 
@@ -288,6 +315,7 @@ export function adaptRetrievalQualityDiagnostics(
     reranker: diagnostics.reranker,
     deduplication: diagnostics.deduplication,
     candidatePool: diagnostics.candidatePool,
+    evidenceDemand: diagnostics.evidenceDemand,
     legacyDiagnostics: diagnostics,
   };
 }

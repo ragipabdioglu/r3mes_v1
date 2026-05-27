@@ -1,3 +1,5 @@
+import type { QueryContract } from "@r3mes/shared-types";
+
 import type { ChatRequestContext } from "./chatRequestContext.js";
 import type { RetrievalRuntimeHealth } from "./retrievalRuntimeHealth.js";
 
@@ -35,6 +37,12 @@ export interface SourceResolutionPlanLike {
 
 export type ExpectedEvidenceKind = "paragraph" | "table" | "numeric" | "procedure" | "definition";
 
+export interface RetrievalPlanEvidenceDemandBasis {
+  operation: QueryContract["operation"];
+  requiredEvidenceType: QueryContract["requiredEvidenceType"];
+  derivationMode: "query_contract";
+}
+
 export interface RetrievalPlan {
   query: string;
   normalizedQuery: string;
@@ -43,6 +51,7 @@ export interface RetrievalPlan {
   expectedEvidenceKinds: ExpectedEvidenceKind[];
   requestedFields: string[];
   outputConstraints: string[];
+  evidenceDemandBasis?: RetrievalPlanEvidenceDemandBasis;
   requestContext?: ChatRequestContext;
   warnings: string[];
 }
@@ -55,6 +64,7 @@ export interface BuildRetrievalPlanInput {
   expectedEvidenceKinds?: ExpectedEvidenceKind[];
   requestedFields?: string[];
   outputConstraints?: string[];
+  evidenceDemandBasis?: RetrievalPlanEvidenceDemandBasis;
   requestContext?: ChatRequestContext;
   warnings?: string[];
 }
@@ -81,6 +91,49 @@ function inferEvidenceKinds(input: BuildRetrievalPlanInput): ExpectedEvidenceKin
   return [...new Set(kinds)];
 }
 
+export function buildRetrievalPlanInputsFromQueryContract(
+  queryContract: QueryContract | null | undefined,
+): Pick<BuildRetrievalPlanInput, "expectedEvidenceKinds" | "requestedFields" | "outputConstraints" | "evidenceDemandBasis"> {
+  if (!queryContract) return {};
+
+  const expectedEvidenceKinds: ExpectedEvidenceKind[] = ["paragraph"];
+  if (queryContract.operation === "procedure") expectedEvidenceKinds.push("procedure");
+  if (queryContract.operation === "define") expectedEvidenceKinds.push("definition");
+  if (
+    queryContract.outputFormat === "table" ||
+    queryContract.requestedFields.some((field) => field.outputHint === "table")
+  ) {
+    expectedEvidenceKinds.push("table");
+  }
+  if (queryContract.requestedFields.some((field) => field.outputHint === "number")) {
+    expectedEvidenceKinds.push("numeric");
+  }
+
+  const outputConstraints = [
+    `format:${queryContract.outputConstraints.format}`,
+    ...(typeof queryContract.outputConstraints.maxWords === "number"
+      ? [`max_words:${queryContract.outputConstraints.maxWords}`]
+      : []),
+    ...(typeof queryContract.outputConstraints.maxSentencesPerBullet === "number"
+      ? [`max_sentences_per_bullet:${queryContract.outputConstraints.maxSentencesPerBullet}`]
+      : []),
+    ...(queryContract.outputConstraints.forbidCaution ? ["forbid_caution"] : []),
+    ...(queryContract.outputConstraints.noRawTableDump ? ["no_raw_table_dump"] : []),
+    ...(queryContract.outputConstraints.sourceGroundedOnly ? ["source_grounded_only"] : []),
+  ];
+
+  return {
+    expectedEvidenceKinds: [...new Set(expectedEvidenceKinds)],
+    requestedFields: queryContract.requestedFields.map((field) => field.id),
+    outputConstraints,
+    evidenceDemandBasis: {
+      operation: queryContract.operation,
+      requiredEvidenceType: queryContract.requiredEvidenceType,
+      derivationMode: "query_contract",
+    },
+  };
+}
+
 export function buildRetrievalPlan(input: BuildRetrievalPlanInput): RetrievalPlan {
   const warnings = uniqueStrings([
     ...(input.warnings ?? []),
@@ -101,6 +154,7 @@ export function buildRetrievalPlan(input: BuildRetrievalPlanInput): RetrievalPla
     expectedEvidenceKinds: inferEvidenceKinds(input),
     requestedFields: uniqueStrings(input.requestedFields),
     outputConstraints: uniqueStrings(input.outputConstraints),
+    evidenceDemandBasis: input.evidenceDemandBasis,
     requestContext: input.requestContext,
     warnings,
   };
@@ -123,6 +177,7 @@ export function summarizeRetrievalPlan(plan: RetrievalPlan): Record<string, unkn
     expectedEvidenceKinds: plan.expectedEvidenceKinds,
     requestedFieldCount: plan.requestedFields.length,
     outputConstraintCount: plan.outputConstraints.length,
+    evidenceDemandBasis: plan.evidenceDemandBasis,
     requestSourceMode: plan.requestContext?.sourceMode,
     warnings: plan.warnings,
   };

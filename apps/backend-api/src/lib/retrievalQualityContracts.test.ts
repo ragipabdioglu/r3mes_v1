@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { dedupeCandidatesIdentitySafe } from "./candidateDeduper.js";
 import type { HybridKnowledgeCandidate, HybridRetrievedKnowledgeContext } from "./hybridKnowledgeRetrieval.js";
+import { buildRetrievalPlan, buildRetrievalPlanInputsFromQueryContract } from "./retrievalPlan.js";
 import {
   adaptCandidateDeduplicationResult,
   adaptHybridCandidatePool,
@@ -97,8 +98,68 @@ describe("retrieval quality contracts", () => {
       compatibilityMode: "legacy_plan_adapter",
       query: plan.query,
       sourcePlan: plan.sourcePlan,
+      evidenceDemand: {
+        expectedEvidenceKinds: ["paragraph"],
+        requestedFieldCount: 0,
+        derivationMode: "legacy_plan_inference",
+        compatibilityMode: "retrieval_plan_v2_observed",
+      },
     });
     expect(plan).not.toHaveProperty("contractVersion");
+  });
+
+  it("adapts query-contract evidence demand without introducing retrieval decisions", () => {
+    const plan = buildRetrievalPlan({
+      query: "generic requested fields",
+      sourcePlan: { mode: "explicit", selectedCollectionIds: ["collection-1"] },
+      runtime: {
+        retrievalEngineRequested: "hybrid",
+        retrievalEngineActual: "hybrid",
+        embeddingProviderRequested: "bge-m3",
+        embeddingProviderActual: "bge-m3",
+        embeddingFallbackUsed: false,
+        rerankerModeRequested: "model",
+        rerankerModeActual: "model",
+        rerankerFallbackUsed: false,
+        warnings: [],
+      },
+      ...buildRetrievalPlanInputsFromQueryContract({
+        operation: "extract_fields",
+        requiredEvidenceType: "structured_fields",
+        outputFormat: "table",
+        outputConstraints: {
+          format: "table",
+          forbidCaution: false,
+          noRawTableDump: true,
+          sourceGroundedOnly: true,
+        },
+        sourceOnly: true,
+        requestedFields: [
+          { id: "field_a", label: "Field A", required: true, outputHint: "number", confidence: "high" },
+        ],
+        forbiddenAdditions: [],
+        queryQuality: {
+          shape: "normal",
+          clarityScore: 100,
+          tokenCount: 2,
+          expandedTokenCount: 2,
+          conceptCount: 1,
+          profileConceptCount: 0,
+          weakSignalCount: 0,
+        },
+      }),
+    });
+
+    expect(adaptRetrievalPlanV2(plan).evidenceDemand).toEqual({
+      expectedEvidenceKinds: ["paragraph", "table", "numeric"],
+      requestedFieldIds: ["field_a"],
+      requestedFieldCount: 1,
+      outputConstraints: ["format:table", "no_raw_table_dump", "source_grounded_only"],
+      operation: "extract_fields",
+      requiredEvidenceType: "structured_fields",
+      derivationMode: "query_contract",
+      compatibilityMode: "retrieval_plan_v2_observed",
+    });
   });
 
   it("projects existing provenance into observable channel counts only", () => {

@@ -45,8 +45,14 @@ import { buildRouteDecisionLogEvent } from "../lib/routeDecisionLog.js";
 import { buildRuntimeLineage } from "../lib/runtimeLineage.js";
 import { getRuntimeFallbackPolicy } from "../lib/runtimeFallbackPolicy.js";
 import { resolveRetrievalBudget } from "../lib/retrievalBudget.js";
-import { buildRetrievalPlan, summarizeRetrievalPlan, type RetrievalPlan } from "../lib/retrievalPlan.js";
 import {
+  buildRetrievalPlan,
+  buildRetrievalPlanInputsFromQueryContract,
+  summarizeRetrievalPlan,
+  type RetrievalPlan,
+} from "../lib/retrievalPlan.js";
+import {
+  adaptRetrievalPlanV2,
   buildCompleteRetrievalDiagnosticsEnvelope,
   buildRetrievalDiagnosticsCoverageEnvelope,
 } from "../lib/retrievalQualityContracts.js";
@@ -768,6 +774,9 @@ function summarizeRetrievalDiagnostics(diagnostics?: Record<string, unknown>): R
   const candidatePool = typeof diagnostics.candidatePool === "object" && diagnostics.candidatePool
     ? diagnostics.candidatePool as Record<string, unknown>
     : undefined;
+  const evidenceDemand = typeof diagnostics.evidenceDemand === "object" && diagnostics.evidenceDemand
+    ? diagnostics.evidenceDemand as Record<string, unknown>
+    : undefined;
 
   return {
     contractVersion: diagnostics.contractVersion,
@@ -789,6 +798,7 @@ function summarizeRetrievalDiagnostics(diagnostics?: Record<string, unknown>): R
           provenanceDerivation: candidatePool.provenanceDerivation,
         }
       : undefined,
+    evidenceDemand,
     alignment: alignment
       ? {
           enabled: alignment.enabled,
@@ -2007,6 +2017,9 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         retrievalEngineRequested: getRetrievalEngine(),
         retrievalEngineActual: getRetrievalEngine(),
       });
+      const queryContractPlanInputs = buildRetrievalPlanInputsFromQueryContract(
+        retrievalQueryUnderstanding.queryContract,
+      );
       const retrievalPlanBeforeRetrieval = buildRetrievalPlan({
         query: plannedRetrievalQuery,
         normalizedQuery: retrievalQueryUnderstanding.normalized.normalized,
@@ -2021,12 +2034,14 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               ],
             },
         runtime: runtimeBeforeRetrieval,
+        ...queryContractPlanInputs,
         requestContext: {
           ...requestContext,
           effectiveCollectionIds: retrievalCollectionIds,
         },
         warnings: sourceResolutionPlanEnabled ? [] : ["source_resolution_plan_disabled_legacy_collection_ids"],
       });
+      const retrievalPlanV2BeforeRetrieval = adaptRetrievalPlanV2(retrievalPlanBeforeRetrieval);
       chatTrace.recordNow("source_selection", "ok", {
         name: "source_resolution_plan",
         enabled: sourceResolutionPlanEnabled,
@@ -2073,6 +2088,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
                     routePlan: retrievalRoutePlan,
                     limit: retrievalBudget.sourceLimit,
                     budgetMode: retrievalBudget.mode,
+                    retrievalPlan: retrievalPlanV2BeforeRetrieval,
                   });
                   return {
                     ...hybridRetrieval,
@@ -2232,6 +2248,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
               ],
             },
         runtime: runtimeAfterRetrieval,
+        ...queryContractPlanInputs,
         requestContext: {
           ...requestContext,
           effectiveCollectionIds: retrievalCollectionIds,
