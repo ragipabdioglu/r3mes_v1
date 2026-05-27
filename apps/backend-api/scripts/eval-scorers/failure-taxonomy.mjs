@@ -89,6 +89,13 @@ export function classifyFailure(failure) {
   return "unknown";
 }
 
+function isEvidenceDemandCoverageFailure(value) {
+  return (
+    value.startsWith("expectTrace.retrievalDiagnostics.candidatePool.evidenceDemandCoverage.") ||
+    value.startsWith("expectTrace.retrievalDiagnostics.qualityDiagnostics.candidatePool.evidenceDemandCoverage.")
+  );
+}
+
 export function classifyFailureSubtype(failure) {
   const value = String(failure ?? "unknown");
   if (
@@ -138,11 +145,6 @@ export function classifyFailureSubtype(failure) {
     return "wrong_source";
   }
   if (
-    value.startsWith("expectTrace.retrievalDiagnostics.")
-  ) {
-    return "diagnostics_coverage";
-  }
-  if (
     value.startsWith("alignment_") ||
     value.startsWith("reranker_") ||
     value.startsWith("budget_") ||
@@ -151,12 +153,18 @@ export function classifyFailureSubtype(failure) {
     return "wrong_chunk";
   }
   if (
+    isEvidenceDemandCoverageFailure(value) ||
     value.startsWith("evidence_type:") ||
     value.startsWith("wrong_evidence_type:") ||
     value.startsWith("compiled_evidence_type:") ||
     value.startsWith("evidence_context_mode:")
   ) {
     return "wrong_evidence_type";
+  }
+  if (
+    value.startsWith("expectTrace.retrievalDiagnostics.")
+  ) {
+    return "diagnostics_coverage";
   }
   if (
     value.startsWith("evidence") ||
@@ -197,10 +205,14 @@ export function classifyFailureSubtype(failure) {
 
 function failureSubtypesForResult(result, failure) {
   const subtype = classifyFailureSubtype(failure);
+  const subtypes = [subtype];
   if (result?.bucket === "same_collection_distractor" && subtype === "wrong_chunk") {
-    return [subtype, "wrong_chunk_within_correct_source"];
+    subtypes.push("wrong_chunk_within_correct_source");
   }
-  return [subtype];
+  if (isEvidenceDemandCoverageFailure(String(failure ?? "unknown"))) {
+    subtypes.push("structured_evidence_coverage_gap");
+  }
+  return [...new Set(subtypes)];
 }
 
 function isAnswerGenerationFailure(failure) {

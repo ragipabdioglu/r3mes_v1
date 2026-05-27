@@ -47,3 +47,23 @@ test("classifies retrieval diagnostics expectation gaps as retrieval-quality cov
   assert.equal(summary.classes.retrieval_quality, 1);
   assert.equal(summary.subtypes.diagnostics_coverage, 1);
 });
+
+test("classifies evidence demand coverage gaps as structured evidence type gaps", () => {
+  const summary = summarizeFailureTaxonomy([
+    {
+      id: "evidence-demand-coverage-case",
+      bucket: "retrieval_evidence_type",
+      failures: [
+        'expectTrace.retrievalDiagnostics.candidatePool.evidenceDemandCoverage.deduped.status expected "covered", got "missing"',
+      ],
+    },
+  ]);
+
+  assert.equal(summary.classes.retrieval_quality, 1);
+  assert.equal(summary.subtypes.wrong_evidence_type, 1);
+  assert.equal(summary.subtypes.structured_evidence_coverage_gap, 1);
+  assert.deepEqual(summary.byBucketSubtypes.retrieval_evidence_type, {
+    wrong_evidence_type: 1,
+    structured_evidence_coverage_gap: 1,
+  });
+});
