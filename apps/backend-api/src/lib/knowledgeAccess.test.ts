@@ -331,6 +331,63 @@ describe("rankSuggestedKnowledgeCollections", () => {
     expect(metadataCandidates[0]?.scoreBreakdown?.signals.sourceQuality).toBe(100);
   });
 
+  it("uses source quality as a deterministic tie-breaker when metadata scores saturate", async () => {
+    const { rankMetadataRouteCandidates } = await import("./knowledgeAccess.js");
+    const { routeQuery } = await import("./queryRouter.js");
+
+    const query = "deployment rollback runbook checklist";
+    const routePlan = routeQuery(query);
+    const baseProfile = {
+      domains: ["technical"],
+      subtopics: ["operations"],
+      keywords: ["deployment", "rollback", "runbook", "checklist", "staging", "backup", "release"],
+      entities: [],
+      topicPhrases: ["deployment rollback runbook checklist", "staging backup release checklist"],
+      answerableConcepts: ["deployment rollback checklist", "release safety runbook"],
+      sampleQuestions: [query],
+      summary: "Deployment rollback runbook checklist with staging, backup and release validation steps.",
+      confidence: "high" as const,
+    };
+    const collections = [
+      {
+        id: "inferred-runbook",
+        name: "A inferred runbook",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            ...baseProfile,
+            sourceQuality: "inferred",
+          },
+        },
+        documents: Array.from({ length: 10 }, (_, index) => ({
+          title: `Inferred note ${index + 1}`,
+          chunks: [{ content: "deployment rollback runbook checklist staging backup release" }],
+        })),
+      },
+      {
+        id: "structured-runbook",
+        name: "Z structured runbook",
+        visibility: "PRIVATE" as const,
+        autoMetadata: {
+          profile: {
+            ...baseProfile,
+            sourceQuality: "structured",
+          },
+        },
+        documents: Array.from({ length: 10 }, (_, index) => ({
+          title: `Structured note ${index + 1}`,
+          chunks: [{ content: "deployment rollback runbook checklist staging backup release" }],
+        })),
+      },
+    ];
+
+    const candidates = rankMetadataRouteCandidates({ routePlan, query, collections, limit: 2, fast: true });
+
+    expect(candidates.map((candidate) => candidate.id)).toEqual(["structured-runbook", "inferred-runbook"]);
+    expect(candidates[0]?.score).toBe(candidates[1]?.score);
+    expect(candidates[0]?.sourceQuality).toBe("structured");
+  });
+
   it("explains profile-backed suggestions with quality and score", async () => {
     const { explainCollectionRouteSuggestion } = await import("./knowledgeAccess.js");
     const { embedKnowledgeText } = await import("./knowledgeEmbedding.js");

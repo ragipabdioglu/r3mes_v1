@@ -775,6 +775,35 @@ function sourceQualityScore(profile: KnowledgeMetadataProfile): number {
   return base;
 }
 
+function metadataCandidateQualityTieBreaker(candidate: KnowledgeMetadataRouteCandidate): number {
+  const signal = candidate.scoreBreakdown?.signals.sourceQuality;
+  if (typeof signal === "number" && Number.isFinite(signal)) return signal;
+  return candidate.sourceQuality === "structured"
+    ? 100
+    : candidate.sourceQuality === "inferred"
+      ? 65
+      : candidate.sourceQuality === "thin"
+        ? 20
+        : 0;
+}
+
+function collectionSourceQualityTieBreaker(collection: KnowledgeCollectionAccessItem): number {
+  return Math.max(
+    0,
+    ...collectionMetadataProfiles(collection).map((profile) => sourceQualityScore(profile)),
+  );
+}
+
+function compareMetadataRouteCandidates(
+  a: KnowledgeMetadataRouteCandidate,
+  b: KnowledgeMetadataRouteCandidate,
+): number {
+  return b.score - a.score ||
+    metadataCandidateQualityTieBreaker(b) - metadataCandidateQualityTieBreaker(a) ||
+    b.matchedTerms.length - a.matchedTerms.length ||
+    a.name.localeCompare(b.name, "tr-TR");
+}
+
 function profileEmbeddingScore(profile: KnowledgeMetadataProfile, routePlan: DomainRoutePlan, query?: string): number | null {
   const queryVector = embedKnowledgeText(routeSignalText(routePlan, query));
   const signals = [
@@ -1286,6 +1315,8 @@ export function rankSuggestedKnowledgeCollections(opts: {
     })
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
+      const qualityDiff = collectionSourceQualityTieBreaker(b.collection) - collectionSourceQualityTieBreaker(a.collection);
+      if (qualityDiff !== 0) return qualityDiff;
       if (a.collection.visibility !== b.collection.visibility) {
         return a.collection.visibility === "PRIVATE" ? -1 : 1;
       }
@@ -1372,7 +1403,7 @@ export function rankMetadataRouteCandidates(opts: {
       });
     }
     fastCandidates
-      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
+      .sort(compareMetadataRouteCandidates)
       .splice(limit);
     writeMetadataRouteCandidateCache(cacheKey, fastCandidates);
     return fastCandidates;
@@ -1393,7 +1424,7 @@ export function rankMetadataRouteCandidates(opts: {
     )
     .filter((candidate): candidate is KnowledgeMetadataRouteCandidate => Boolean(candidate))
     .filter((candidate) => candidate.score >= getDecisionConfig().router.metadataCandidateMinScore)
-    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr-TR"))
+    .sort(compareMetadataRouteCandidates)
     .slice(0, limit);
   writeMetadataRouteCandidateCache(cacheKey, candidates);
   return candidates;

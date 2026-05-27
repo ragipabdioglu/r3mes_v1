@@ -8,8 +8,10 @@ of truth; these files are the short working charter read before each task.
 
 ## Current Phase State
 
-- Completed: Faz 0, Faz 1, Faz 2, Faz 3.
-- Next implementation phase: Faz 4 - Retrieval Quality.
+- Completed: Faz 0, Faz 1, Faz 2, Faz 3, Faz 4.
+- Current implementation phase: Faz 5 - Query / Source Intelligence.
+- Faz 5 Dilim 1 completed metadata/source suggestion quality tie-break.
+- Collection-suggestion now passes 5/5 after backend restart on new dist.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
 - LoRA is not part of knowledge correctness; chat must retain a LoRA-free path.
