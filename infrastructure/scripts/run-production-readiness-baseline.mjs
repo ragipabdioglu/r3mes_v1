@@ -522,6 +522,59 @@ function summarizeBudgetQualityArtifacts(artifacts) {
   return aggregate;
 }
 
+function summarizeRetrievalEvidenceDemandCoverageArtifacts(artifacts) {
+  const coverageArtifacts = artifacts.filter((artifact) => artifact.summary?.retrievalEvidenceDemandCoverageQuality);
+  const aggregate = {
+    observedSuites: coverageArtifacts.length,
+    observedCases: 0,
+    totalCases: 0,
+    coverageRatio: 0,
+    statusCounts: {},
+    missingEvidenceKinds: {},
+    coveredEvidenceKinds: {},
+    observedArtifactKinds: {},
+    bySuite: {},
+    gapCases: [],
+    diagnosticMode: "observed_only",
+    behaviorImpact: "none",
+  };
+
+  for (const artifact of coverageArtifacts) {
+    const quality = artifact.summary.retrievalEvidenceDemandCoverageQuality;
+    const suiteTotal = Number(artifact.summary.total ?? 0);
+    const observedCases = Number(quality.observedCases ?? 0);
+    aggregate.totalCases += suiteTotal;
+    aggregate.observedCases += observedCases;
+    mergeCounts(aggregate.statusCounts, quality.statusCounts);
+    mergeCounts(aggregate.missingEvidenceKinds, quality.missingEvidenceKinds);
+    mergeCounts(aggregate.coveredEvidenceKinds, quality.coveredEvidenceKinds);
+    mergeCounts(aggregate.observedArtifactKinds, quality.observedArtifactKinds);
+    aggregate.bySuite[artifact.suite] = {
+      observedCases,
+      totalCases: suiteTotal,
+      coverageRatio: Number(quality.coverageRatio ?? 0),
+      statusCounts: quality.statusCounts ?? {},
+      missingEvidenceKinds: quality.missingEvidenceKinds ?? {},
+    };
+    for (const gapCase of Array.isArray(quality.gapCases) ? quality.gapCases : []) {
+      if (aggregate.gapCases.length >= 25) break;
+      aggregate.gapCases.push({
+        suite: artifact.suite,
+        id: gapCase.id,
+        bucket: gapCase.bucket,
+        status: gapCase.status,
+        missingEvidenceKinds: Array.isArray(gapCase.missingEvidenceKinds)
+          ? gapCase.missingEvidenceKinds
+          : [],
+      });
+    }
+  }
+
+  aggregate.coverageRatio =
+    aggregate.totalCases === 0 ? 0 : Number((aggregate.observedCases / aggregate.totalCases).toFixed(3));
+  return aggregate;
+}
+
 function summarizeProfileHealthArtifact(artifact) {
   const summary = artifact?.summary;
   if (!summary) {
@@ -681,6 +734,7 @@ async function main() {
   const readiness = scoreReadiness({ totalCases, coverage, artifacts, productionRag });
   const routerQuality = summarizeRouterQualityArtifacts(artifacts);
   const budgetQuality = summarizeBudgetQualityArtifacts(artifacts);
+  const retrievalEvidenceDemandCoverage = summarizeRetrievalEvidenceDemandCoverageArtifacts(artifacts);
   const profileHealth = summarizeProfileHealthArtifact(profileHealthArtifact);
   const providerReadiness = summarizeProviderReadinessArtifact(providerReadinessArtifact);
   const report = {
@@ -688,6 +742,7 @@ async function main() {
     readiness,
     routerQuality,
     budgetQuality,
+    retrievalEvidenceDemandCoverage,
     profileHealth,
     providerReadiness,
     productionRag,
@@ -710,6 +765,11 @@ async function main() {
       budgetQuality.observedSuites < suiteReports.length
         ? `Regenerate grounded eval artifacts to populate budgetQuality summaries (${budgetQuality.observedSuites}/${suiteReports.length} suites observed).`
         : "Adaptive RAG budget summaries are present for all grounded eval artifacts.",
+      retrievalEvidenceDemandCoverage.observedSuites === 0
+        ? "Regenerate grounded eval artifacts to populate retrieval evidence demand coverage summaries."
+        : retrievalEvidenceDemandCoverage.gapCases.length > 0
+          ? `Review retrieval evidence demand coverage gaps before behavior changes: ${retrievalEvidenceDemandCoverage.gapCases.length} observed gap cases.`
+          : "Retrieval evidence demand coverage summaries are present with no observed structured evidence gaps.",
       profileHealth.observed
         ? profileHealth.ok
           ? "Profile health eval is passing."
