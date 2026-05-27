@@ -264,6 +264,36 @@ describe("retrieval quality contracts", () => {
     expect(JSON.stringify(telemetry.input.artifactCapabilities)).not.toContain("course-private-label");
   });
 
+  it("compares evidence demand with observed artifact capability without changing telemetry decisions", () => {
+    const table = candidate("table", ["qdrant"]);
+    table.chunk.artifactKind = "table";
+    const text = candidate("text", ["prisma"]);
+
+    const telemetry = adaptHybridCandidatePoolTelemetry([table, text], [table, text], undefined, {
+      expectedEvidenceKinds: ["paragraph", "table", "numeric", "procedure"],
+      requestedFieldIds: [],
+      requestedFieldCount: 0,
+      outputConstraints: [],
+      operation: null,
+      requiredEvidenceType: null,
+      derivationMode: "query_contract",
+      compatibilityMode: "retrieval_plan_v2_observed",
+    });
+
+    expect(telemetry.evidenceDemandCoverage?.input).toEqual({
+      status: "partial",
+      requestedEvidenceKinds: ["paragraph", "table", "numeric", "procedure"],
+      structuredEvidenceKinds: ["table", "numeric", "procedure"],
+      coveredEvidenceKinds: ["table", "numeric"],
+      missingEvidenceKinds: ["procedure"],
+      observedArtifactKinds: ["table"],
+      diagnosticMode: "observed_only",
+      behaviorImpact: "none",
+    });
+    expect(telemetry.input.candidateCount).toBe(2);
+    expect(telemetry.deduped.candidateCount).toBe(2);
+  });
+
   it("names existing alignment output without recomputing alignment decisions", () => {
     const alignedCandidate = {
       ...candidate("aligned", ["prisma"]),

@@ -1604,7 +1604,12 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   const collectedCandidates = [...criticalEvidenceCandidates, ...qdrantCandidates, ...prismaCandidates];
   const deduplicationResult = dedupeCandidatesIdentitySafe(collectedCandidates);
   const deduped = deduplicationResult.candidates;
-  const candidatePool = adaptHybridCandidatePoolTelemetry(collectedCandidates, deduped, deduplicationResult.diagnostics);
+  const candidatePool = adaptHybridCandidatePoolTelemetry(
+    collectedCandidates,
+    deduped,
+    deduplicationResult.diagnostics,
+    evidenceDemand,
+  );
   if (strictRouteScope && deduped.length === 0) {
     return {
       contextText: "",

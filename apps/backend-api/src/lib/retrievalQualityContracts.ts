@@ -73,6 +73,7 @@ export interface HybridCandidatePoolTelemetry {
     decisionMode: CandidateDeduplicationResult["decisionMode"];
   };
   provenanceDerivation: RetrievalCandidate["provenance"]["channelDerivation"];
+  evidenceDemandCoverage?: RetrievalEvidenceDemandCoverageTelemetry;
 }
 
 export type RetrievalArtifactCapabilityKind =
@@ -98,6 +99,28 @@ export interface RetrievalArtifactCapabilitySummary {
   kindCounts: Partial<Record<RetrievalArtifactCapabilityKind, number>>;
   capabilityDerivation: "candidate_metadata_observed";
   valuePolicy: "generic_artifact_kind_only";
+}
+
+export type RetrievalEvidenceDemandCoverageStatus =
+  | "not_applicable"
+  | "covered"
+  | "partial"
+  | "missing";
+
+export interface RetrievalEvidenceDemandCoverageSummary {
+  status: RetrievalEvidenceDemandCoverageStatus;
+  requestedEvidenceKinds: RetrievalEvidenceDemandSummary["expectedEvidenceKinds"];
+  structuredEvidenceKinds: Array<Exclude<RetrievalEvidenceDemandSummary["expectedEvidenceKinds"][number], "paragraph">>;
+  coveredEvidenceKinds: Array<Exclude<RetrievalEvidenceDemandSummary["expectedEvidenceKinds"][number], "paragraph">>;
+  missingEvidenceKinds: Array<Exclude<RetrievalEvidenceDemandSummary["expectedEvidenceKinds"][number], "paragraph">>;
+  observedArtifactKinds: RetrievalArtifactCapabilityKind[];
+  diagnosticMode: "observed_only";
+  behaviorImpact: "none";
+}
+
+export interface RetrievalEvidenceDemandCoverageTelemetry {
+  input: RetrievalEvidenceDemandCoverageSummary;
+  deduped: RetrievalEvidenceDemandCoverageSummary;
 }
 
 export interface QuerySourceAlignmentResult {
@@ -335,23 +358,76 @@ export function summarizeRetrievalArtifactCapabilities(
   };
 }
 
+const ARTIFACT_KINDS_FOR_EVIDENCE_KIND: Record<
+  Exclude<RetrievalEvidenceDemandSummary["expectedEvidenceKinds"][number], "paragraph">,
+  RetrievalArtifactCapabilityKind[]
+> = {
+  definition: ["definition"],
+  numeric: ["table", "table_row", "table_cell", "key_value"],
+  procedure: ["procedure"],
+  table: ["table", "table_row", "table_cell"],
+};
+
+function uniqueEvidenceKinds<Kind extends string>(kinds: Kind[]): Kind[] {
+  return [...new Set(kinds)];
+}
+
+export function summarizeEvidenceDemandCoverage(
+  evidenceDemand: RetrievalEvidenceDemandSummary,
+  artifactCapabilities: RetrievalArtifactCapabilitySummary,
+): RetrievalEvidenceDemandCoverageSummary {
+  const structuredEvidenceKinds = uniqueEvidenceKinds(
+    evidenceDemand.expectedEvidenceKinds.filter(
+      (kind): kind is Exclude<typeof kind, "paragraph"> => kind !== "paragraph",
+    ),
+  );
+  const observedArtifactKinds = Object.entries(artifactCapabilities.kindCounts)
+    .filter(([, count]) => (count ?? 0) > 0)
+    .map(([kind]) => kind as RetrievalArtifactCapabilityKind);
+  const coveredEvidenceKinds = structuredEvidenceKinds.filter((kind) =>
+    ARTIFACT_KINDS_FOR_EVIDENCE_KIND[kind].some((artifactKind) => (artifactCapabilities.kindCounts[artifactKind] ?? 0) > 0),
+  );
+  const missingEvidenceKinds = structuredEvidenceKinds.filter((kind) => !coveredEvidenceKinds.includes(kind));
+  const status: RetrievalEvidenceDemandCoverageStatus =
+    structuredEvidenceKinds.length === 0
+      ? "not_applicable"
+      : missingEvidenceKinds.length === 0
+        ? "covered"
+        : coveredEvidenceKinds.length > 0
+          ? "partial"
+          : "missing";
+  return {
+    status,
+    requestedEvidenceKinds: [...evidenceDemand.expectedEvidenceKinds],
+    structuredEvidenceKinds,
+    coveredEvidenceKinds,
+    missingEvidenceKinds,
+    observedArtifactKinds,
+    diagnosticMode: "observed_only",
+    behaviorImpact: "none",
+  };
+}
+
 export function adaptHybridCandidatePoolTelemetry(
   input: HybridKnowledgeCandidate[],
   deduped: HybridKnowledgeCandidate[],
   diagnostics?: CandidateDeduplicationDiagnostics,
+  evidenceDemand?: RetrievalEvidenceDemandSummary,
 ): HybridCandidatePoolTelemetry {
   const result = adaptCandidateDeduplicationResult(input, deduped, diagnostics);
+  const inputArtifactCapabilities = summarizeRetrievalArtifactCapabilities(input);
+  const dedupedArtifactCapabilities = summarizeRetrievalArtifactCapabilities(deduped);
   return {
     contractVersion: RETRIEVAL_QUALITY_CONTRACT_VERSION,
     input: {
       candidateCount: result.input.legacyCandidateCount,
       channelCounts: summarizeObservableChannelCounts(result.input),
-      artifactCapabilities: summarizeRetrievalArtifactCapabilities(input),
+      artifactCapabilities: inputArtifactCapabilities,
     },
     deduped: {
       candidateCount: result.deduped.legacyCandidateCount,
       channelCounts: summarizeObservableChannelCounts(result.deduped),
-      artifactCapabilities: summarizeRetrievalArtifactCapabilities(deduped),
+      artifactCapabilities: dedupedArtifactCapabilities,
     },
     deduplication: {
       inputCandidateCount: result.diagnostics.inputCandidateCount,
@@ -361,6 +437,14 @@ export function adaptHybridCandidatePoolTelemetry(
       decisionMode: result.decisionMode,
     },
     provenanceDerivation: "legacy_source_mapping",
+    ...(evidenceDemand
+      ? {
+          evidenceDemandCoverage: {
+            input: summarizeEvidenceDemandCoverage(evidenceDemand, inputArtifactCapabilities),
+            deduped: summarizeEvidenceDemandCoverage(evidenceDemand, dedupedArtifactCapabilities),
+          },
+        }
+      : {}),
   };
 }
 
