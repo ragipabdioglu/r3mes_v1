@@ -60,6 +60,7 @@ export function classifyFailure(failure) {
   }
   if (
     value.startsWith("sources:") ||
+    value.startsWith("expectTrace.retrievalDiagnostics.") ||
     value.startsWith("alignment_") ||
     value.startsWith("reranker_") ||
     value.startsWith("retrieval_mode:") ||
@@ -137,6 +138,11 @@ export function classifyFailureSubtype(failure) {
     return "wrong_source";
   }
   if (
+    value.startsWith("expectTrace.retrievalDiagnostics.")
+  ) {
+    return "diagnostics_coverage";
+  }
+  if (
     value.startsWith("alignment_") ||
     value.startsWith("reranker_") ||
     value.startsWith("budget_") ||
@@ -187,6 +193,14 @@ export function classifyFailureSubtype(failure) {
     return "model_generation_failure";
   }
   return classifyFailure(failure);
+}
+
+function failureSubtypesForResult(result, failure) {
+  const subtype = classifyFailureSubtype(failure);
+  if (result?.bucket === "same_collection_distractor" && subtype === "wrong_chunk") {
+    return [subtype, "wrong_chunk_within_correct_source"];
+  }
+  return [subtype];
 }
 
 function isAnswerGenerationFailure(failure) {
@@ -276,7 +290,7 @@ export function summarizeFailureTaxonomy(results) {
   const failedResults = results.filter((result) => Array.isArray(result.failures) && result.failures.length > 0);
   const cases = failedResults.map((result) => {
     const classes = [...new Set(result.failures.map((failure) => classifyFailure(failure)))];
-    const subtypes = [...new Set(result.failures.map((failure) => classifyFailureSubtype(failure)))];
+    const subtypes = [...new Set(result.failures.flatMap((failure) => failureSubtypesForResult(result, failure)))];
     const phaseDiagnosis = contextDiagnosis(result);
     return {
       id: result.id,
@@ -304,11 +318,12 @@ export function summarizeFailureTaxonomy(results) {
     phaseDiagnosis.byBucket[bucket] ??= {};
     for (const failure of result.failures) {
       const failureClass = classifyFailure(failure);
-      const failureSubtype = classifyFailureSubtype(failure);
       increment(classes, failureClass);
-      increment(subtypes, failureSubtype);
       increment(byBucket[bucket], failureClass);
-      increment(byBucketSubtypes[bucket], failureSubtype);
+      for (const failureSubtype of failureSubtypesForResult(result, failure)) {
+        increment(subtypes, failureSubtype);
+        increment(byBucketSubtypes[bucket], failureSubtype);
+      }
     }
     const diagnosis = contextDiagnosis(result);
     if (diagnosis) {
