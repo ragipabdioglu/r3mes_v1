@@ -5,6 +5,7 @@ import type { HybridKnowledgeCandidate, HybridRetrievedKnowledgeContext } from "
 import {
   adaptCandidateDeduplicationResult,
   adaptHybridCandidatePool,
+  adaptHybridCandidatePoolTelemetry,
   adaptQuerySourceAlignmentResult,
   adaptRerankerOutput,
   adaptRetrievalPlanV2,
@@ -133,6 +134,35 @@ describe("retrieval quality contracts", () => {
     expect(result.diagnostics).toBe(dedupe.diagnostics);
     expect(result.diagnostics.merges[0]?.rule).toBe("exact_chunk_identity");
     expect(result.deduped.candidates[0]?.provenance.legacySources.sort()).toEqual(["prisma", "qdrant"]);
+  });
+
+  it("summarizes input and deduped channel distribution without inferring structured provenance", () => {
+    const shared = candidate("shared", ["qdrant"]);
+    const duplicate = { ...candidate("shared", ["prisma"]), chunk: { ...shared.chunk } };
+    const dedupe = dedupeCandidatesIdentitySafe([shared, duplicate]);
+
+    const telemetry = adaptHybridCandidatePoolTelemetry([shared, duplicate], dedupe.candidates, dedupe.diagnostics);
+
+    expect(telemetry).toEqual({
+      contractVersion: RETRIEVAL_QUALITY_CONTRACT_VERSION,
+      input: {
+        candidateCount: 2,
+        channelCounts: { semantic_dense: 1, lexical_exact: 1 },
+      },
+      deduped: {
+        candidateCount: 1,
+        channelCounts: { semantic_dense: 1, lexical_exact: 1 },
+      },
+      deduplication: {
+        inputCandidateCount: 2,
+        outputCandidateCount: 1,
+        mergedCandidateCount: 1,
+        removedCandidateCount: 1,
+        decisionMode: "identity_safe_dedupe",
+      },
+      provenanceDerivation: "legacy_source_mapping",
+    });
+    expect(telemetry.input.channelCounts).not.toHaveProperty("structured_signal");
   });
 
   it("names existing alignment output without recomputing alignment decisions", () => {

@@ -41,6 +41,26 @@ export interface CandidateDeduplicationResult {
   decisionMode: "legacy_dedupe_adapter" | "identity_safe_dedupe";
 }
 
+export interface HybridCandidatePoolTelemetry {
+  contractVersion: typeof RETRIEVAL_QUALITY_CONTRACT_VERSION;
+  input: {
+    candidateCount: number;
+    channelCounts: Partial<Record<RetrievalChannel, number>>;
+  };
+  deduped: {
+    candidateCount: number;
+    channelCounts: Partial<Record<RetrievalChannel, number>>;
+  };
+  deduplication: {
+    inputCandidateCount: number;
+    outputCandidateCount: number;
+    mergedCandidateCount: number;
+    removedCandidateCount: number;
+    decisionMode: CandidateDeduplicationResult["decisionMode"];
+  };
+  provenanceDerivation: RetrievalCandidate["provenance"]["channelDerivation"];
+}
+
 export interface QuerySourceAlignmentResult {
   contractVersion: typeof RETRIEVAL_QUALITY_CONTRACT_VERSION;
   candidates: Array<HybridKnowledgeCandidate & { alignment: AlignmentScore }>;
@@ -75,6 +95,7 @@ export interface RetrievalQualityDiagnostics {
   alignment: AlignmentDiagnostics;
   reranker: RerankDiagnostics;
   deduplication?: CandidateDeduplicationDiagnostics;
+  candidatePool?: HybridCandidatePoolTelemetry;
   legacyDiagnostics: HybridRetrievedKnowledgeContext["diagnostics"];
 }
 
@@ -189,6 +210,46 @@ export function adaptCandidateDeduplicationResult(
   };
 }
 
+function summarizeObservableChannelCounts(
+  pool: HybridCandidatePool,
+): Partial<Record<RetrievalChannel, number>> {
+  const channelCounts: Partial<Record<RetrievalChannel, number>> = {
+    semantic_dense: pool.channelCounts.semantic_dense ?? 0,
+    lexical_exact: pool.channelCounts.lexical_exact ?? 0,
+  };
+  if (pool.channelCounts.structured_signal !== undefined) {
+    channelCounts.structured_signal = pool.channelCounts.structured_signal;
+  }
+  return channelCounts;
+}
+
+export function adaptHybridCandidatePoolTelemetry(
+  input: HybridKnowledgeCandidate[],
+  deduped: HybridKnowledgeCandidate[],
+  diagnostics?: CandidateDeduplicationDiagnostics,
+): HybridCandidatePoolTelemetry {
+  const result = adaptCandidateDeduplicationResult(input, deduped, diagnostics);
+  return {
+    contractVersion: RETRIEVAL_QUALITY_CONTRACT_VERSION,
+    input: {
+      candidateCount: result.input.legacyCandidateCount,
+      channelCounts: summarizeObservableChannelCounts(result.input),
+    },
+    deduped: {
+      candidateCount: result.deduped.legacyCandidateCount,
+      channelCounts: summarizeObservableChannelCounts(result.deduped),
+    },
+    deduplication: {
+      inputCandidateCount: result.diagnostics.inputCandidateCount,
+      outputCandidateCount: result.diagnostics.outputCandidateCount,
+      mergedCandidateCount: result.diagnostics.mergedCandidateCount,
+      removedCandidateCount: result.removedCandidateCount,
+      decisionMode: result.decisionMode,
+    },
+    provenanceDerivation: "legacy_source_mapping",
+  };
+}
+
 export function adaptQuerySourceAlignmentResult(result: {
   candidates: Array<HybridKnowledgeCandidate & { alignment: AlignmentScore }>;
   diagnostics: AlignmentDiagnostics;
@@ -226,6 +287,7 @@ export function adaptRetrievalQualityDiagnostics(
     alignment: diagnostics.alignment,
     reranker: diagnostics.reranker,
     deduplication: diagnostics.deduplication,
+    candidatePool: diagnostics.candidatePool,
     legacyDiagnostics: diagnostics,
   };
 }

@@ -266,6 +266,23 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.diagnostics.providerFailures).toEqual([
       { provider: "qdrant", reason: "qdrant unavailable" },
     ]);
+    expect(result.diagnostics.candidatePool).toMatchObject({
+      input: {
+        candidateCount: 1,
+        channelCounts: { semantic_dense: 0, lexical_exact: 1 },
+      },
+      deduped: {
+        candidateCount: 1,
+        channelCounts: { semantic_dense: 0, lexical_exact: 1 },
+      },
+      deduplication: {
+        inputCandidateCount: 1,
+        outputCandidateCount: 1,
+        mergedCandidateCount: 0,
+        decisionMode: "identity_safe_dedupe",
+      },
+      provenanceDerivation: "legacy_source_mapping",
+    });
 
     findMany.mockRestore();
     qdrant.mockRestore();

@@ -765,6 +765,9 @@ function summarizeRetrievalDiagnostics(diagnostics?: Record<string, unknown>): R
   const budget = typeof diagnostics.budget === "object" && diagnostics.budget
     ? diagnostics.budget as Record<string, unknown>
     : undefined;
+  const candidatePool = typeof diagnostics.candidatePool === "object" && diagnostics.candidatePool
+    ? diagnostics.candidatePool as Record<string, unknown>
+    : undefined;
 
   return {
     contractVersion: diagnostics.contractVersion,
@@ -778,6 +781,14 @@ function summarizeRetrievalDiagnostics(diagnostics?: Record<string, unknown>): R
     preRankedCandidateCount: diagnostics.preRankedCandidateCount,
     rerankedCandidateCount: diagnostics.rerankedCandidateCount,
     finalCandidateCount: diagnostics.finalCandidateCount,
+    candidatePool: candidatePool
+      ? {
+          input: candidatePool.input,
+          deduped: candidatePool.deduped,
+          deduplication: candidatePool.deduplication,
+          provenanceDerivation: candidatePool.provenanceDerivation,
+        }
+      : undefined,
     alignment: alignment
       ? {
           enabled: alignment.enabled,

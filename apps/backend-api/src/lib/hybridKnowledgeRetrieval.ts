@@ -26,6 +26,10 @@ import type { QdrantEmbeddingDiagnostics } from "./qdrantEmbedding.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
 import { getRuntimeFallbackPolicy } from "./runtimeFallbackPolicy.js";
+import {
+  adaptHybridCandidatePoolTelemetry,
+  type HybridCandidatePoolTelemetry,
+} from "./retrievalQualityContracts.js";
 import { getEvidenceExtractorBudget, runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 import type { RetrievalBudgetMode } from "./retrievalBudget.js";
@@ -115,6 +119,7 @@ export interface HybridRetrievedKnowledgeContext {
     };
     qdrantEmbedding: QdrantEmbeddingDiagnostics | null;
     deduplication?: CandidateDeduplicationDiagnostics;
+    candidatePool?: HybridCandidatePoolTelemetry;
     providerFailures?: Array<{ provider: "qdrant" | "prisma" | "critical_evidence"; reason: string }>;
     qdrantProviderFailed?: boolean;
     qdrantFallbackUsed?: boolean;
@@ -1582,8 +1587,10 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     qdrantFallbackUsed: qdrantProviderFailed,
   };
 
-  const deduplicationResult = dedupeCandidatesIdentitySafe([...criticalEvidenceCandidates, ...qdrantCandidates, ...prismaCandidates]);
+  const collectedCandidates = [...criticalEvidenceCandidates, ...qdrantCandidates, ...prismaCandidates];
+  const deduplicationResult = dedupeCandidatesIdentitySafe(collectedCandidates);
   const deduped = deduplicationResult.candidates;
+  const candidatePool = adaptHybridCandidatePoolTelemetry(collectedCandidates, deduped, deduplicationResult.diagnostics);
   if (strictRouteScope && deduped.length === 0) {
     return {
       contextText: "",
@@ -1608,6 +1615,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
+        candidatePool,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1647,6 +1655,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
+        candidatePool,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1685,6 +1694,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
+        candidatePool,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1714,6 +1724,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
+        candidatePool,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1814,6 +1825,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
+        candidatePool,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1929,6 +1941,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
+        candidatePool,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -1997,6 +2010,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       }),
       qdrantEmbedding: qdrantEmbeddingDiagnostics,
       deduplication: deduplicationResult.diagnostics,
+      candidatePool,
       ...providerFailureDiagnostics,
       retrievalMode: "true_hybrid",
     },
