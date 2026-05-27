@@ -1228,6 +1228,7 @@ function scoreCase(testCase, response) {
     answerPlan,
     answerBaseline: debugContractScore.contract.answerBaseline ?? null,
     debugContract: debugContractScore.contract,
+    retrievalEvidenceDemandCoverage: retrievalDebug?.retrievalDiagnostics?.candidatePool?.evidenceDemandCoverage ?? null,
     evidenceOnly: {
       ok: evidenceOnlyScore.ok,
       findings: evidenceOnlyScore.findings,
@@ -1554,6 +1555,63 @@ function collectProviderStrictFailures(results) {
         failure,
       })),
   );
+}
+
+function summarizeRetrievalEvidenceDemandCoverage(results) {
+  const observed = results
+    .map((result) => ({
+      id: result.id,
+      bucket: result.bucket ?? "default",
+      coverage: result.retrievalEvidenceDemandCoverage?.deduped ?? result.retrievalEvidenceDemandCoverage?.input ?? null,
+    }))
+    .filter((entry) => entry.coverage && typeof entry.coverage === "object");
+  const statusCounts = {};
+  const byBucket = {};
+  const missingEvidenceKinds = {};
+  const coveredEvidenceKinds = {};
+  const observedArtifactKinds = {};
+  const gapCases = [];
+
+  for (const entry of observed) {
+    const status = entry.coverage.status ?? "missing";
+    increment(statusCounts, status);
+    byBucket[entry.bucket] ??= {};
+    increment(byBucket[entry.bucket], status);
+
+    for (const kind of Array.isArray(entry.coverage.missingEvidenceKinds) ? entry.coverage.missingEvidenceKinds : []) {
+      increment(missingEvidenceKinds, kind);
+    }
+    for (const kind of Array.isArray(entry.coverage.coveredEvidenceKinds) ? entry.coverage.coveredEvidenceKinds : []) {
+      increment(coveredEvidenceKinds, kind);
+    }
+    for (const kind of Array.isArray(entry.coverage.observedArtifactKinds) ? entry.coverage.observedArtifactKinds : []) {
+      increment(observedArtifactKinds, kind);
+    }
+
+    if (status === "missing" || status === "partial") {
+      gapCases.push({
+        id: entry.id,
+        bucket: entry.bucket,
+        status,
+        missingEvidenceKinds: Array.isArray(entry.coverage.missingEvidenceKinds)
+          ? entry.coverage.missingEvidenceKinds
+          : [],
+      });
+    }
+  }
+
+  return {
+    observedCases: observed.length,
+    coverageRatio: results.length === 0 ? 0 : Number((observed.length / results.length).toFixed(3)),
+    statusCounts,
+    byBucket,
+    missingEvidenceKinds,
+    coveredEvidenceKinds,
+    observedArtifactKinds,
+    gapCases,
+    diagnosticMode: "observed_only",
+    behaviorImpact: "none",
+  };
 }
 
 function summarizeRuntimeControlTower(results) {
@@ -2092,6 +2150,7 @@ async function main() {
   const answerQualityTrends = summarizeAnswerQualityTrends(results);
   const evidenceOnlyQuality = summarizeEvidenceOnlyQuality(results);
   const answerBaselineQuality = summarizeAnswerBaselineQuality(results);
+  const retrievalEvidenceDemandCoverageQuality = summarizeRetrievalEvidenceDemandCoverage(results);
   const runtimeControlTower = summarizeRuntimeControlTower(results);
   const evalGuardrails = buildEvalGuardrails({ budgetQuality, rerankerQuality, runtimeControlTower });
   const providerStrictFailures = collectProviderStrictFailures(results);
@@ -2118,6 +2177,7 @@ async function main() {
     budgetQuality,
     compiledEvidenceQuality,
     rerankerQuality,
+    retrievalEvidenceDemandCoverageQuality,
     evidenceOnlyQuality,
     answerBaselineQuality,
     answerQualityTrends,
