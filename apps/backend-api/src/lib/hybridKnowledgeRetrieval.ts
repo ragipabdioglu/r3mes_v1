@@ -43,6 +43,7 @@ export interface HybridKnowledgeChunk {
   documentId: string;
   chunkIndex: number;
   content: string;
+  artifactKind?: string;
   autoMetadata?: unknown;
   document: {
     title: string;
@@ -788,7 +789,9 @@ function payloadToChunk(payload: QdrantKnowledgePayload): HybridKnowledgeChunk {
     documentId: payload.documentId,
     chunkIndex: payload.chunkIndex,
     content: payload.content,
+    artifactKind: payload.artifactKind,
     autoMetadata: {
+      artifactKind: payload.artifactKind,
       domain: payload.domain,
       subtopics: [...(payload.profileSubtopics ?? []), ...(payload.subtopics ?? [])],
       keywords: [...(payload.keywords ?? []), ...(payload.tags ?? [])],
@@ -1031,11 +1034,13 @@ async function collectPrismaCandidates(opts: {
   const ranked = rankHybridCandidates(buildExpandedQueryText(opts.query, opts.routePlan), chunks)
     .slice(0, prismaLimit())
     .map((candidate) => {
+      const chunkAutoMetadata = candidate.chunk.autoMetadata as Record<string, unknown> | null;
       const chunk: HybridKnowledgeChunk = {
         id: candidate.chunk.id,
         documentId: candidate.chunk.documentId,
         chunkIndex: candidate.chunk.chunkIndex,
         content: candidate.chunk.content,
+        artifactKind: typeof chunkAutoMetadata?.artifactKind === "string" ? chunkAutoMetadata.artifactKind : undefined,
         autoMetadata: candidate.chunk.autoMetadata,
         document: {
           title: candidate.chunk.document.title,
@@ -1090,11 +1095,13 @@ async function collectCriticalEvidenceCandidates(opts: {
 
   return chunks
     .map((candidate) => {
+      const chunkAutoMetadata = candidate.autoMetadata as Record<string, unknown> | null;
       const chunk: HybridKnowledgeChunk = {
         id: candidate.id,
         documentId: candidate.documentId,
         chunkIndex: candidate.chunkIndex,
         content: candidate.content,
+        artifactKind: typeof chunkAutoMetadata?.artifactKind === "string" ? chunkAutoMetadata.artifactKind : undefined,
         autoMetadata: candidate.autoMetadata,
         document: {
           title: candidate.document.title,

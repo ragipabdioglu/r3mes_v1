@@ -321,6 +321,80 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.diagnostics.evidenceDemand).toEqual(retrievalPlan.evidenceDemand);
   });
 
+  it("reports qdrant artifact capability without changing retrieval output", async () => {
+    vi.stubEnv("R3MES_RUNTIME_PROFILE", "local-dev");
+    vi.stubEnv("R3MES_RERANKER_MODE", "deterministic");
+    vi.stubEnv("R3MES_RAG_MIN_RERANK_SCORE", "0.1");
+    const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue([]);
+    const qdrant = vi.mocked(searchQdrantKnowledge).mockResolvedValue([
+      {
+        id: "q1",
+        score: 0.95,
+        payload: {
+          ownerWallet: "0x1",
+          visibility: "PRIVATE",
+          collectionId: "kc-1",
+          documentId: "doc-1",
+          chunkId: "chunk-1",
+          chunkIndex: 0,
+          title: "Generic table source",
+          domain: "technical",
+          domains: ["technical"],
+          subtopics: [],
+          profileSubtopics: [],
+          tags: [],
+          keywords: ["migration"],
+          entities: [],
+          topicPhrases: [],
+          answerableConcepts: [],
+          negativeHints: [],
+          documentType: "knowledge_note",
+          audience: "general_user",
+          riskLevel: "low",
+          sourceQuality: "structured",
+          tableRisk: "low",
+          ocrRisk: "none",
+          thinSource: false,
+          strictRouteEligible: true,
+          metadataConfidence: "high",
+          collectionProfileVersion: 1,
+          collectionProfileTextHash: "hash",
+          collectionLastProfiledAt: "2026-05-27T00:00:00.000Z",
+          collectionProfileText: "Generic profile",
+          profileSummary: "Generic profile",
+          artifactKind: "table",
+          content: "Topic: migration\nMigration plan table includes rollback verification.",
+          createdAt: "2026-05-27T00:00:00.000Z",
+        },
+      },
+    ]);
+
+    const result = await retrieveKnowledgeContextTrueHybrid({
+      query: "Migration plan table includes what?",
+      evidenceQuery: "Migration plan table includes what?",
+      accessibleCollectionIds: ["kc-1"],
+      limit: 1,
+      budgetMode: "fast_grounded",
+    });
+
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0]).toMatchObject({
+      documentId: "doc-1",
+      title: "Generic table source",
+      chunkIndex: 0,
+    });
+    expect(result.diagnostics.candidatePool?.input.artifactCapabilities).toMatchObject({
+      status: "observed",
+      candidateCount: 1,
+      candidatesWithArtifactKind: 1,
+      kindCounts: { table: 1 },
+      valuePolicy: "generic_artifact_kind_only",
+    });
+
+    findMany.mockRestore();
+    qdrant.mockRestore();
+  });
+
   it("requires subtopic metadata support when route is specific", () => {
     const routePlan = {
       domain: "medical" as const,

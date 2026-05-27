@@ -58,10 +58,12 @@ export interface HybridCandidatePoolTelemetry {
   input: {
     candidateCount: number;
     channelCounts: Partial<Record<RetrievalChannel, number>>;
+    artifactCapabilities: RetrievalArtifactCapabilitySummary;
   };
   deduped: {
     candidateCount: number;
     channelCounts: Partial<Record<RetrievalChannel, number>>;
+    artifactCapabilities: RetrievalArtifactCapabilitySummary;
   };
   deduplication: {
     inputCandidateCount: number;
@@ -71,6 +73,31 @@ export interface HybridCandidatePoolTelemetry {
     decisionMode: CandidateDeduplicationResult["decisionMode"];
   };
   provenanceDerivation: RetrievalCandidate["provenance"]["channelDerivation"];
+}
+
+export type RetrievalArtifactCapabilityKind =
+  | "definition"
+  | "list"
+  | "list_item"
+  | "table"
+  | "table_row"
+  | "table_cell"
+  | "procedure"
+  | "code"
+  | "code_block"
+  | "paragraph"
+  | "key_value"
+  | "ocr_span"
+  | "visual_layout";
+
+export interface RetrievalArtifactCapabilitySummary {
+  status: "observed" | "unavailable";
+  candidateCount: number;
+  candidatesWithArtifactKind: number;
+  candidatesWithoutArtifactKind: number;
+  kindCounts: Partial<Record<RetrievalArtifactCapabilityKind, number>>;
+  capabilityDerivation: "candidate_metadata_observed";
+  valuePolicy: "generic_artifact_kind_only";
 }
 
 export interface QuerySourceAlignmentResult {
@@ -250,6 +277,64 @@ function summarizeObservableChannelCounts(
   return channelCounts;
 }
 
+const GENERIC_ARTIFACT_KINDS = new Set<RetrievalArtifactCapabilityKind>([
+  "definition",
+  "list",
+  "list_item",
+  "table",
+  "table_row",
+  "table_cell",
+  "procedure",
+  "code",
+  "code_block",
+  "paragraph",
+  "key_value",
+  "ocr_span",
+  "visual_layout",
+]);
+
+function metadataArtifactKind(value: unknown): RetrievalArtifactCapabilityKind | null {
+  if (!value || typeof value !== "object") return null;
+  const artifactKind = (value as Record<string, unknown>).artifactKind;
+  if (typeof artifactKind !== "string") return null;
+  const normalized = artifactKind.trim().toLowerCase();
+  return GENERIC_ARTIFACT_KINDS.has(normalized as RetrievalArtifactCapabilityKind)
+    ? normalized as RetrievalArtifactCapabilityKind
+    : null;
+}
+
+function candidateArtifactKind(candidate: HybridKnowledgeCandidate): RetrievalArtifactCapabilityKind | null {
+  if (typeof candidate.chunk.artifactKind === "string") {
+    const normalized = candidate.chunk.artifactKind.trim().toLowerCase();
+    if (GENERIC_ARTIFACT_KINDS.has(normalized as RetrievalArtifactCapabilityKind)) {
+      return normalized as RetrievalArtifactCapabilityKind;
+    }
+  }
+  return metadataArtifactKind(candidate.chunk.autoMetadata);
+}
+
+export function summarizeRetrievalArtifactCapabilities(
+  candidates: HybridKnowledgeCandidate[],
+): RetrievalArtifactCapabilitySummary {
+  const kindCounts: Partial<Record<RetrievalArtifactCapabilityKind, number>> = {};
+  let candidatesWithArtifactKind = 0;
+  for (const candidate of candidates) {
+    const kind = candidateArtifactKind(candidate);
+    if (!kind) continue;
+    candidatesWithArtifactKind += 1;
+    kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
+  }
+  return {
+    status: candidatesWithArtifactKind > 0 ? "observed" : "unavailable",
+    candidateCount: candidates.length,
+    candidatesWithArtifactKind,
+    candidatesWithoutArtifactKind: candidates.length - candidatesWithArtifactKind,
+    kindCounts,
+    capabilityDerivation: "candidate_metadata_observed",
+    valuePolicy: "generic_artifact_kind_only",
+  };
+}
+
 export function adaptHybridCandidatePoolTelemetry(
   input: HybridKnowledgeCandidate[],
   deduped: HybridKnowledgeCandidate[],
@@ -261,10 +346,12 @@ export function adaptHybridCandidatePoolTelemetry(
     input: {
       candidateCount: result.input.legacyCandidateCount,
       channelCounts: summarizeObservableChannelCounts(result.input),
+      artifactCapabilities: summarizeRetrievalArtifactCapabilities(input),
     },
     deduped: {
       candidateCount: result.deduped.legacyCandidateCount,
       channelCounts: summarizeObservableChannelCounts(result.deduped),
+      artifactCapabilities: summarizeRetrievalArtifactCapabilities(deduped),
     },
     deduplication: {
       inputCandidateCount: result.diagnostics.inputCandidateCount,

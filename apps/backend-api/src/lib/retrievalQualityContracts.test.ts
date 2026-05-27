@@ -209,10 +209,28 @@ describe("retrieval quality contracts", () => {
       input: {
         candidateCount: 2,
         channelCounts: { semantic_dense: 1, lexical_exact: 1 },
+        artifactCapabilities: {
+          status: "unavailable",
+          candidateCount: 2,
+          candidatesWithArtifactKind: 0,
+          candidatesWithoutArtifactKind: 2,
+          kindCounts: {},
+          capabilityDerivation: "candidate_metadata_observed",
+          valuePolicy: "generic_artifact_kind_only",
+        },
       },
       deduped: {
         candidateCount: 1,
         channelCounts: { semantic_dense: 1, lexical_exact: 1 },
+        artifactCapabilities: {
+          status: "unavailable",
+          candidateCount: 1,
+          candidatesWithArtifactKind: 0,
+          candidatesWithoutArtifactKind: 1,
+          kindCounts: {},
+          capabilityDerivation: "candidate_metadata_observed",
+          valuePolicy: "generic_artifact_kind_only",
+        },
       },
       deduplication: {
         inputCandidateCount: 2,
@@ -224,6 +242,26 @@ describe("retrieval quality contracts", () => {
       provenanceDerivation: "legacy_source_mapping",
     });
     expect(telemetry.input.channelCounts).not.toHaveProperty("structured_signal");
+  });
+
+  it("reports only generic artifact capability kinds from candidate metadata", () => {
+    const table = candidate("table", ["qdrant"]);
+    table.chunk.artifactKind = "table";
+    const unknown = candidate("unknown", ["prisma"]);
+    unknown.chunk.autoMetadata = { artifactKind: "course-private-label" };
+
+    const telemetry = adaptHybridCandidatePoolTelemetry([table, unknown], [table, unknown]);
+
+    expect(telemetry.input.artifactCapabilities).toEqual({
+      status: "observed",
+      candidateCount: 2,
+      candidatesWithArtifactKind: 1,
+      candidatesWithoutArtifactKind: 1,
+      kindCounts: { table: 1 },
+      capabilityDerivation: "candidate_metadata_observed",
+      valuePolicy: "generic_artifact_kind_only",
+    });
+    expect(JSON.stringify(telemetry.input.artifactCapabilities)).not.toContain("course-private-label");
   });
 
   it("names existing alignment output without recomputing alignment decisions", () => {
