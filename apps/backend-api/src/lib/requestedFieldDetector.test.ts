@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { detectRequestedFields } from "./requestedFieldDetector.js";
 
 describe("detectRequestedFields", () => {
-  it("detects KAP requested numeric fields and output constraints", () => {
+  it("detects requested numeric fields and output constraints without domain aliases", () => {
     const result = detectRequestedFields(
       "EREGL 1578858 Türkçe kar dağıtım tablosunda dağıtılması öngörülen diğer kaynaklar ve olağanüstü yedekler hangi rakamlarla geçiyor? Sadece sorulan rakamları kısa maddelerle yaz; risk yorumu ekleme.",
     );
 
     expect(result.requestedFields.map((field) => field.id)).toEqual(
-      expect.arrayContaining(["diger_kaynaklar", "olaganustu_yedekler"]),
+      expect.arrayContaining(["dagitilmasi_ongorulen_diger_kaynaklar", "olaganustu_yedekler"]),
     );
     expect(result.constraints.forbidCaution).toBe(true);
     expect(result.constraints.noRawTableDump).toBe(true);
@@ -22,17 +22,19 @@ describe("detectRequestedFields", () => {
     );
 
     expect(result.requestedFields.map((field) => field.id)).toEqual(
-      expect.arrayContaining(["diger_kaynaklar", "olaganustu_yedekler"]),
+      expect.arrayContaining(["dagitilmasi_ongorulen_diger_kaynaklar", "olaganustu_yedekler"]),
     );
     expect(result.requestedFields.map((field) => field.id)).not.toContain("net_donem_kari");
   });
 
   it("detects stopaj and share/cash rate table intents", () => {
     const stopaj = detectRequestedFields("FROTO B ve C grubu için stopaj oranları ne?");
-    expect(stopaj.requestedFields.map((field) => field.id)).toContain("stopaj_orani");
+    expect(stopaj.requestedFields.map((field) => field.id)).toContain("stopaj_oranlari");
 
     const cashRate = detectRequestedFields("KCHOL A Grubu ve B Grubu için nakit tutarı ve oran satırları ne?");
-    expect(cashRate.requestedFields.map((field) => field.id)).toContain("nakit_tutar_oran");
+    expect(cashRate.requestedFields.map((field) => field.id)).toEqual(
+      expect.arrayContaining(["nakit_tutari", "oran_satirlari"]),
+    );
   });
 
   it("prioritizes explicit list/bullet formatting over generic table wording", () => {
@@ -40,7 +42,9 @@ describe("detectRequestedFields", () => {
       "FROTO kar dağıtım tablosunda A, B ve C grupları için nakit tutarı ve oranları hangi satırlarda geçiyor? Kısa maddelerle yaz, ham tablo basma.",
     );
 
-    expect(result.requestedFields.map((field) => field.id)).toContain("nakit_tutar_oran");
+    expect(result.requestedFields.map((field) => field.id)).toEqual(
+      expect.arrayContaining(["nakit_tutari", "oranlari"]),
+    );
     expect(result.constraints.format).toBe("bullets");
   });
 

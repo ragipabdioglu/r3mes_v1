@@ -113,14 +113,14 @@ describe("queryUnderstanding", () => {
     expect(understanding.quality.clarityScore).toBeGreaterThanOrEqual(55);
   });
 
-  it("detects requested finance table fields and output constraints", () => {
+  it("detects requested table fields and output constraints without core aliases", () => {
     const understanding = buildQueryUnderstanding(
       "EREGL kar payında dağıtılması öngörülen diğer kaynaklar ve olağanüstü yedekler nedir? Sadece rakamları kısa maddelerle yaz, risk yorumu ekleme.",
     );
 
     expect(understanding.mode).toBe("knowledge");
     expect(understanding.requestedFieldDetection.requestedFields.map((field) => field.id)).toEqual(
-      expect.arrayContaining(["diger_kaynaklar", "olaganustu_yedekler"]),
+      expect.arrayContaining(["dagitilmasi_ongorulen_diger_kaynaklar", "olaganustu_yedekler"]),
     );
     expect(understanding.requestedFieldDetection.constraints.forbidCaution).toBe(true);
     expect(understanding.requestedFieldDetection.constraints.noRawTableDump).toBe(true);
@@ -145,7 +145,7 @@ describe("queryUnderstanding", () => {
       },
     });
     expect(understanding.queryContract.requestedFields.map((field) => field.id)).toEqual(
-      expect.arrayContaining(["diger_kaynaklar", "olaganustu_yedekler"]),
+      expect.arrayContaining(["dagitilmasi_ongorulen_diger_kaynaklar", "olaganustu_yedekler"]),
     );
     expect(understanding.queryContract.requestedFields[0]).not.toHaveProperty("aliases");
   });

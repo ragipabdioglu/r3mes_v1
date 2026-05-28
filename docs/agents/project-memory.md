@@ -16,6 +16,10 @@ of truth; these files are the short working charter read before each task.
 - Unranked accessible collections remain visible with `fallback_profile_score_missing`.
 - Collection-suggestion now passes 5/5 after backend restart on new dist.
 - Latest Faz 5 verification: collection-suggestion 5/5, retrieval-quality 16/16, ui-reality 5/5 with provider fallback 0.
+- Faz 5 Dilim 3 replaced hardcoded requested-field aliases with generic phrase/cue extraction.
+- Field extraction no longer treats `ne yapmalıyım` procedure queries as requested fields.
+- Table numeric bridge no longer infers field semantics from stripped row numbers without artifacts.
+- Latest Dilim 3 gates: requested-field/table numeric tests 28/28, retrieval-quality 16/16, collection-suggestion 5/5, ui-reality 5/5.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.

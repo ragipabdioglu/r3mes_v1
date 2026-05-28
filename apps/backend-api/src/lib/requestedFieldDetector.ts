@@ -27,140 +27,176 @@ export interface RequestedFieldDetection {
   };
 }
 
-interface FieldPattern {
-  id: string;
-  label: string;
-  aliases: string[];
+interface CandidatePhrase {
+  phrase: string;
+  confidence: RequestedField["confidence"];
   outputHint: RequestedFieldOutputHint;
 }
 
-const FINANCE_TABLE_FIELDS: FieldPattern[] = [
-  {
-    id: "diger_kaynaklar",
-    label: "Dağıtılması Öngörülen Diğer Kaynaklar",
-    aliases: [
-      "dağıtılması öngörülen diğer kaynaklar",
-      "dagitilmasi ongorulen diger kaynaklar",
-      "öngörülen diğer kaynaklar",
-      "ongorulen diger kaynaklar",
-      "diğer kaynaklar",
-      "diger kaynaklar",
-    ],
-    outputHint: "number",
-  },
-  {
-    id: "olaganustu_yedekler",
-    label: "Olağanüstü Yedekler",
-    aliases: [
-      "olağanüstü yedekler",
-      "olaganustu yedekler",
-      "olağanüstü yedek",
-      "olaganustu yedek",
-    ],
-    outputHint: "number",
-  },
-  {
-    id: "net_donem_kari",
-    label: "Net Dönem Kârı",
-    aliases: [
-      "net dönem kârı",
-      "net dönem karı",
-      "net donem kari",
-      "net profit for the period",
-    ],
-    outputHint: "number",
-  },
-  {
-    id: "donem_kari",
-    label: "Dönem Kârı",
-    aliases: [
-      "dönem kârı",
-      "dönem karı",
-      "donem kari",
-      "profit for the period",
-    ],
-    outputHint: "number",
-  },
-  {
-    id: "stopaj_orani",
-    label: "Stopaj Oranı",
-    aliases: [
-      "stopaj oranı",
-      "stopaj orani",
-      "stopaj",
-      "withholding rate",
-      "withholding tax",
-    ],
-    outputHint: "number",
-  },
-  {
-    id: "nakit_tutar_oran",
-    label: "Nakit Tutar ve Oran",
-    aliases: [
-      "nakit tutar",
-      "nakit oran",
-      "nakit tutarı",
-      "cash amount",
-      "cash rate",
-      "oran satırları",
-      "oran satirlari",
-    ],
-    outputHint: "number",
-  },
-  {
-    id: "bagislar",
-    label: "Yıl İçinde Yapılan Bağışlar",
-    aliases: [
-      "yıl içinde yapılan bağışlar",
-      "yil icinde yapilan bagislar",
-      "bağışlar",
-      "bagislar",
-      "donations",
-    ],
-    outputHint: "number",
-  },
-  {
-    id: "net_dagitilabilir_donem_kari",
-    label: "Net Dağıtılabilir Dönem Kârı",
-    aliases: [
-      "net dağıtılabilir dönem kârı",
-      "net dagitilabilir donem kari",
-      "dağıtılabilir dönem kârı",
-      "dagitilabilir donem kari",
-      "net distributable period profit",
-    ],
-    outputHint: "number",
-  },
-];
+const MAX_REQUESTED_FIELDS = 8;
 
 function unique(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function normalize(value: string): string {
-  return normalizeConceptText(value);
+  return normalizeConceptText(value.normalize("NFD").replace(/\p{Diacritic}/gu, ""));
 }
 
-function includesAlias(normalizedQuery: string, alias: string): boolean {
-  const normalizedAlias = normalize(alias);
-  if (!normalizedAlias || normalizedAlias.length < 3) return false;
-  if (isNegatedAlias(normalizedQuery, normalizedAlias)) return false;
-  return normalizedQuery.includes(normalizedAlias);
+function slugifyFieldId(value: string): string {
+  const slug = normalize(value.normalize("NFD").replace(/\p{Diacritic}/gu, ""))
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "")
+    .slice(0, 80);
+  return slug || "requested_field";
 }
 
-function isNegatedAlias(normalizedQuery: string, normalizedAlias: string): boolean {
-  const index = normalizedQuery.indexOf(normalizedAlias);
-  if (index < 0) return false;
-  const before = normalizedQuery.slice(Math.max(0, index - 36), index);
-  const after = normalizedQuery.slice(index + normalizedAlias.length, index + normalizedAlias.length + 42);
-  return (
-    /\b(degil|değil|haric|hariç|yerine|disinda|dışında)\b/u.test(before) ||
-    /^\s*(?:satiri\w*|satırı\w*|ile|veya)?\s*(?:karistirma|karıştırma|kullanma|alma|cevap\s+sanma|dahil\s+etme)\b/u.test(after)
+function titleLabel(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/gu, " ")
+    .replace(/^['"“”‘’]+|['"“”‘’]+$/gu, "");
+}
+
+function splitFieldList(value: string): string[] {
+  return unique(
+    value
+      .split(/\s*(?:,|;|\bve\b|\bile\b|\band\b)\s*/u)
+      .map((part) => cleanupCandidatePhrase(part)),
+  ).filter((part) => part.length >= 3);
+}
+
+function cleanupCandidatePhrase(value: string): string {
+  let cleaned = normalize(value)
+    .replace(/\b(?:hangi\s+)?(?:rakamlarla|rakamlar|sayilarla|sayılarla|degerlerle|değerlerle|geciyor|geçiyor)\b.*$/u, "")
+    .replace(/\b(?:hangi\s+)?(?:satirlarda|satırlarda|satirda|satırda)\b.*$/u, "")
+    .replace(/\b(?:nedir|ne\s+demek|ne\s+kadar|ne|kac\w*|kaç\w*)\b.*$/u, "")
+    .replace(/\b(?:kayna(?:ga|ğa)|kaynaklara|ders\s+notlarina|ders\s+notlarına)\s+gore\b/gu, " ")
+    .replace(/\b(?:sadece|kisa|kısa|madde\s+madde|tablo\s+halinde|listele|yaz|ver|acikla|açıkla)\b/gu, " ")
+    .replace(/\b(?:nedir|ne\s+demek|ne\s+kadar|nelerdir|neler)\b/gu, " ")
+    .replace(/[?.!]+$/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  // Drop broad context prefixes without knowing any domain vocabulary.
+  cleaned = cleaned.replace(
+    /^.{0,100}\b(?:gore|göre|hakkinda|hakkında|konusunda|icin|için|icinde|içinde|uzerinden|üzerinden|dosyasinda|dosyasında|belgesinde|tablosunda|kaynakta)\s+/u,
+    "",
   );
+  cleaned = cleaned.replace(/^.{0,100}\b[\p{L}0-9_]+(?:da|de|ta|te|nda|nde|inda|inde|unda|unde)\s+/u, "");
+  return cleaned.trim();
+}
+
+function detectOutputHint(normalizedQuery: string, phrase: string): RequestedFieldOutputHint {
+  const around = `${normalizedQuery} ${phrase}`;
+  if (/\b(tablo|table|satir|satır|sutun|sütun)\b/u.test(around)) return "table";
+  if (/\b(tutar\w*|oran\w*|yuzde|yüzde|deger\w*|değer\w*|miktar\w*|sayi\w*|sayı\w*|adet|rakam\w*|kac\w*|kaç\w*|kar\w*|kâr\w*|numeric)\b/u.test(around)) return "number";
+  if (/\b(madde|liste|bullet)\b/u.test(around)) return "bullet";
+  return "text";
+}
+
+function phraseLooksLikeField(phrase: string): boolean {
+  const tokens = phrase.split(/\s+/u).filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 9) return false;
+  if (tokens.every((token) => token.length <= 2)) return false;
+  if (/^(bu|su|şu|hangi|neden|nasil|nasıl|kaynak|belge|dosya|ders|notlar)$/u.test(phrase)) return false;
+  const instructionTokens = new Set([
+    "rakam",
+    "rakami",
+    "rakamlari",
+    "sorulan",
+    "sayi",
+    "sayisi",
+    "sayilari",
+    "deger",
+    "degeri",
+    "madde",
+    "maddelerle",
+    "liste",
+    "kisa",
+    "kisaca",
+    "tablo",
+  ]);
+  if (tokens.every((token) => instructionTokens.has(token))) return false;
+  return tokens.some((token) => token.length >= 4 || /\d/u.test(token));
+}
+
+function extractQuotedCandidates(query: string, normalizedQuery: string): CandidatePhrase[] {
+  const candidates: CandidatePhrase[] = [];
+  for (const match of query.matchAll(/["“”'‘’]([^"“”'‘’]{3,120})["“”'‘’]/gu)) {
+    const phrase = cleanupCandidatePhrase(match[1] ?? "");
+    if (!phraseLooksLikeField(phrase)) continue;
+    candidates.push({
+      phrase,
+      confidence: "high",
+      outputHint: detectOutputHint(normalizedQuery, phrase),
+    });
+  }
+  return candidates;
+}
+
+function extractCueBasedCandidates(normalizedQuery: string): CandidatePhrase[] {
+  const candidates: CandidatePhrase[] = [];
+  const cuePatterns = [
+    /\b(?:hangi|istenen|sorulan)\s+(.{3,160}?)\s+(?:tutari|tutarı|orani|oranı|degeri|değeri|miktari|miktarı|sayisi|sayısı|alanlari|alanları|bilgileri)\b/gu,
+    /\b(?:icin|için)\s+(.{3,180}?)\s+(?:hangi\s+)?(?:satir\w*|satır\w*)\b/gu,
+    /(.{3,180}?)\s+(?:hangi\s+)?(?:rakamlarla|rakamlar|sayilarla|sayılarla|degerlerle|değerlerle)\b/gu,
+    /(.{3,180}?)\s+(?:tutari|tutarı|orani|oranı|degeri|değeri|miktari|miktarı|sayisi|sayısı)\s+(?:nedir|ne\s+kadar|yaz|ver)?\b/gu,
+    /(.{3,180}\bve\b.{3,180}?)\s+(?:yaz|ver|listele)\b/gu,
+    /(.{3,180}?)\s+(?:nedir|ne\s+demek|ne\s+kadar)\b/gu,
+    /(.{3,180}?)\s+(?:ne|kac(?:tir|tır|dir|dır)?|kaç(?:tir|tır|dir|dır)?)\b/gu,
+    /\bsadece\s+(.{3,180}?)\s+(?:yaz|ver|listele)\b/gu,
+  ];
+
+  for (const pattern of cuePatterns) {
+    for (const match of normalizedQuery.matchAll(pattern)) {
+      const raw = match[1] ?? "";
+      if (/\bne\s+(?:yap|et|olur|olmali|olmalı)\w*/u.test(normalizedQuery)) continue;
+      const numericCue = /\b(tutar\w*|oran\w*|yuzde|yüzde|deger\w*|değer\w*|miktar\w*|sayi\w*|sayı\w*|adet|rakam\w*|kac\w*|kaç\w*|kar\w*|kâr\w*|profit)\b/u.test(raw);
+      const listCue = /\bve\b/u.test(raw);
+      const queryAsksForFieldValue = /\bsadece\s+(?:sorulan|rakam|rakamlari|rakamları|sayi|sayı|sayilari|sayıları|deger|değer)\b/u.test(normalizedQuery);
+      const broadQuestionCue = pattern.source.includes("nedir") || pattern.source.includes("(?:ne|kac");
+      if (broadQuestionCue && !numericCue && !queryAsksForFieldValue) continue;
+      if (!numericCue && !listCue && pattern.source.includes("(?:ne|kac|kaç)")) continue;
+      for (const phrase of splitFieldList(raw)) {
+        if (!phraseLooksLikeField(phrase)) continue;
+        candidates.push({
+          phrase,
+          confidence: /\b(tutar|oran|deger|değer|miktar|sayi|sayı|rakam)\b/u.test(normalizedQuery) ? "high" : "medium",
+          outputHint: detectOutputHint(normalizedQuery, phrase),
+        });
+      }
+    }
+  }
+  return candidates;
+}
+
+function suppressNestedFieldMatches(fields: RequestedField[]): RequestedField[] {
+  return fields;
+}
+
+function toRequestedFields(candidates: CandidatePhrase[]): RequestedField[] {
+  const byId = new Map<string, RequestedField>();
+  for (const candidate of candidates) {
+    const label = titleLabel(candidate.phrase);
+    const id = slugifyFieldId(label);
+    if (!id || byId.has(id)) continue;
+    byId.set(id, {
+      id,
+      label,
+      aliases: [label],
+      required: true,
+      outputHint: candidate.outputHint,
+      confidence: candidate.confidence,
+      matchedAliases: [label],
+    });
+    if (byId.size >= MAX_REQUESTED_FIELDS) break;
+  }
+  return suppressNestedFieldMatches([...byId.values()]);
 }
 
 function detectFormat(normalizedQuery: string): RequestedFieldDetection["constraints"]["format"] {
-  if (/\b(madde\w*|bullet|liste\w*)\b/u.test(normalizedQuery)) return "bullets";
+  if (/\b(madde\w*|bullet|liste\w*|sirala|sırala)\b/u.test(normalizedQuery)) return "bullets";
   if (/\b(tablo|table)\b/u.test(normalizedQuery)) return "table";
   if (/\b(kisa|kısa|tek cumle|tek cümle|sadece)\b/u.test(normalizedQuery)) return "short";
   return "freeform";
@@ -168,6 +204,10 @@ function detectFormat(normalizedQuery: string): RequestedFieldDetection["constra
 
 function detectMaxWords(normalizedQuery: string): number | undefined {
   if (/\btek cumle|tek cümle\b/u.test(normalizedQuery)) return 32;
+  if (/\ben fazla\s+(\d+)\s+(?:kelime|word)\b/u.test(normalizedQuery)) {
+    const value = Number(normalizedQuery.match(/\ben fazla\s+(\d+)\s+(?:kelime|word)\b/u)?.[1]);
+    if (Number.isFinite(value) && value > 0) return Math.min(240, value);
+  }
   if (/\bkisa|kısa|sadece\b/u.test(normalizedQuery)) return 80;
   return undefined;
 }
@@ -175,32 +215,24 @@ function detectMaxWords(normalizedQuery: string): number | undefined {
 function detectsCautionSuppression(normalizedQuery: string): boolean {
   return (
     /\b(risk|alarm|uyari|uyarı|yorum|tavsiye)\s+(yorumu\s+)?(ekleme|katma|yazma|verme)\b/u.test(normalizedQuery) ||
-    /\bsadece\s+(sorulan|rakam|rakamlari|rakamları|sayi|sayı|sayilari|sayıları|deger|değer)\b/u.test(normalizedQuery)
+    /\bsadece\s+(sorulan|rakam|rakamlari|rakamları|sayi|sayı|sayilari|sayıları|deger|değer|tanim|tanım|madde|maddeleri?)\b/u.test(normalizedQuery)
   );
 }
 
 export function detectRequestedFields(query: string): RequestedFieldDetection {
   const normalizedQuery = normalize(query);
-  const requestedFields = suppressNestedFieldMatches(normalizedQuery, FINANCE_TABLE_FIELDS
-    .map((field): RequestedField | null => {
-      const matchedAliases = unique(field.aliases.filter((alias) => includesAlias(normalizedQuery, alias)));
-      if (matchedAliases.length === 0) return null;
-      return {
-        id: field.id,
-        label: field.label,
-        aliases: field.aliases,
-        required: true,
-        outputHint: field.outputHint,
-        confidence: matchedAliases.length >= 2 ? "high" : "medium",
-        matchedAliases,
-      };
-    })
-    .filter((field): field is RequestedField => Boolean(field)));
+  const isComparisonQuery = /\b(fark|farki|farkı|karsilastir|karşılaştır|ayni sey mi|aynı şey mi|arasindaki|arasındaki)\b/u.test(normalizedQuery);
+  const requestedFields = toRequestedFields([
+    ...(isComparisonQuery ? [] : extractQuotedCandidates(query, normalizedQuery)),
+    ...(isComparisonQuery ? [] : extractCueBasedCandidates(normalizedQuery)),
+  ]);
   const constraintReasons: string[] = [];
   const forbidCaution = detectsCautionSuppression(normalizedQuery);
   if (forbidCaution) constraintReasons.push("query_suppresses_caution");
-  const noRawTableDump = requestedFields.some((field) => field.outputHint === "number") || /\bsadece\b/u.test(normalizedQuery);
-  if (noRawTableDump) constraintReasons.push("numeric_or_only_query");
+  const noRawTableDump =
+    requestedFields.some((field) => field.outputHint === "number" || field.outputHint === "table") ||
+    /\bsadece\b/u.test(normalizedQuery);
+  if (noRawTableDump) constraintReasons.push("field_or_only_query");
   const format = detectFormat(normalizedQuery);
   if (format !== "freeform") constraintReasons.push(`format_${format}`);
   const maxWords = detectMaxWords(normalizedQuery);
@@ -220,21 +252,4 @@ export function detectRequestedFields(query: string): RequestedFieldDetection {
       constraintReasons,
     },
   };
-}
-
-function suppressNestedFieldMatches(normalizedQuery: string, fields: RequestedField[]): RequestedField[] {
-  const ids = new Set(fields.map((field) => field.id));
-  const explicitlyRequestsGenericPeriodProfit =
-    /\bdonem k[âa]ri\s+ve\s+net donem k[âa]ri\b/u.test(normalizedQuery) ||
-    /\bdonem k[âa]ri.*\bnet donem k[âa]ri\b/u.test(normalizedQuery);
-  return fields.filter((field) => {
-    if (
-      field.id === "donem_kari" &&
-      !explicitlyRequestsGenericPeriodProfit &&
-      (ids.has("net_donem_kari") || ids.has("net_dagitilabilir_donem_kari"))
-    ) {
-      return false;
-    }
-    return true;
-  });
 }

@@ -17,9 +17,9 @@ describe("extractTableNumericFacts", () => {
     });
 
     expect(structuredFacts.map((fact) => fact.field)).toEqual(
-      expect.arrayContaining(["Dağıtılması Öngörülen Diğer Kaynaklar", "Olağanüstü Yedekler"]),
+      expect.arrayContaining(["dagitilmasi ongorulen diger kaynaklar", "olaganustu yedekler"]),
     );
-    expect(structuredFacts.find((fact) => fact.field === "Dağıtılması Öngörülen Diğer Kaynaklar")?.value).toContain(
+    expect(structuredFacts.find((fact) => fact.field === "dagitilmasi ongorulen diger kaynaklar")?.value).toContain(
       "3.352.908.083",
     );
     expect(structuredFacts.every((fact) => fact.provenance.extractor === "table-numeric-v1")).toBe(true);
@@ -42,7 +42,7 @@ describe("extractTableNumericFacts", () => {
       sourceIds: ["kap-doc"],
     });
 
-    expect(structuredFacts[0]?.field).toBe("Net Dönem Kârı");
+    expect(structuredFacts[0]?.field).toBe("net donem kari");
     expect(structuredFacts[0]?.table?.columnLabel).toBe("SPK'ya Göre");
   });
 
@@ -56,15 +56,15 @@ describe("extractTableNumericFacts", () => {
       sourceIds: ["kap-doc"],
     });
 
-    const periodProfit = structuredFacts.find((fact) => fact.field === "Dönem Kârı");
-    const netProfit = structuredFacts.find((fact) => fact.field === "Net Dönem Kârı");
+    const periodProfit = structuredFacts.find((fact) => fact.field === "donem kari");
+    const netProfit = structuredFacts.find((fact) => fact.field === "net donem kari");
 
     expect(periodProfit?.value).toContain("87.713.503.000,00");
     expect(periodProfit?.value).not.toContain("1574205");
     expect(netProfit?.value).toContain("22.000.501.000,00");
   });
 
-  it("uses numbered KAP rows when labels are stripped from table text", () => {
+  it("does not infer labels from stripped numbered rows without table artifacts", () => {
     const structuredFacts = extractTableNumericFacts({
       query: "FROTO 1557060 SPK'ya göre net dönem kârı hangi rakam?",
       facts: [
@@ -73,11 +73,10 @@ describe("extractTableNumericFacts", () => {
       sourceIds: ["froto-doc"],
     });
 
-    expect(structuredFacts[0]?.field).toBe("Net Dönem Kârı");
-    expect(structuredFacts[0]?.value).toContain("33.986.135.000");
+    expect(structuredFacts).toEqual([]);
   });
 
-  it("prefers the requested SPK column over statutory-record facts", () => {
+  it("does not answer a requested column from a different explicit column", () => {
     const structuredFacts = extractTableNumericFacts({
       query: "FROTO SPK'ya göre net dönem kârı hangi rakam?",
       facts: [
@@ -87,9 +86,7 @@ describe("extractTableNumericFacts", () => {
       sourceIds: ["froto-doc"],
     });
 
-    expect(structuredFacts[0]?.table?.columnLabel).toBe("SPK'ya Göre");
-    expect(structuredFacts[0]?.value).toContain("33.986.135.000");
-    expect(structuredFacts[0]?.value).not.toContain("21.893.335.017");
+    expect(structuredFacts).toEqual([]);
   });
 
   it("splits requested share group cash/rate rows into separate structured facts", () => {
@@ -102,7 +99,7 @@ describe("extractTableNumericFacts", () => {
     });
 
     expect(structuredFacts.map((fact) => fact.field)).toEqual(
-      expect.arrayContaining(["A Grubu Nakit Tutar ve Oran", "B Grubu Nakit Tutar ve Oran"]),
+      expect.arrayContaining(["A Grubu Grouped Numeric Values", "B Grubu Grouped Numeric Values"]),
     );
     expect(structuredFacts.find((fact) => fact.field?.startsWith("A Grubu"))?.value).toContain("6,830000");
     expect(structuredFacts.find((fact) => fact.field?.startsWith("B Grubu"))?.value).toContain("11.258.904.726,02");
@@ -119,9 +116,9 @@ describe("extractTableNumericFacts", () => {
 
     expect(structuredFacts.map((fact) => fact.field)).toEqual(
       expect.arrayContaining([
-        "A Grubu Nakit Tutar ve Oran",
-        "B Grubu Nakit Tutar ve Oran",
-        "C Grubu Nakit Tutar ve Oran",
+        "A Grubu Grouped Numeric Values",
+        "B Grubu Grouped Numeric Values",
+        "C Grubu Grouped Numeric Values",
       ]),
     );
     expect(structuredFacts.find((fact) => fact.field?.startsWith("C Grubu"))?.value).toContain("4.979.417.531");

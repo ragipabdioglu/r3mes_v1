@@ -40,7 +40,7 @@ export interface BuildAnswerPlanOptions {
 }
 
 function normalize(value: string | undefined): string {
-  return normalizeConceptText(value ?? "");
+  return normalizeConceptText((value ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, ""));
 }
 
 function factMatchesField(fact: StructuredFact, field: RequestedField): boolean {
@@ -53,7 +53,7 @@ function selectFactsForFields(facts: StructuredFact[], fields: RequestedField[])
   const selected: StructuredFact[] = [];
   const seen = new Set<string>();
   for (const field of fields) {
-    if (field.id === "nakit_tutar_oran") {
+    if (field.outputHint === "table") {
       const matches = facts
         .filter((fact) => !seen.has(fact.id) && factMatchesField(fact, field))
         .sort((left, right) => {

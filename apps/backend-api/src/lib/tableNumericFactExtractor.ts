@@ -12,8 +12,6 @@ export interface TableNumericFactExtractionInput {
   tableFacts?: TableFact[];
 }
 
-const NOISE_NUMBERS = new Set(["20", "21", "2025", "1578858"]);
-
 function hashId(value: string): string {
   let hash = 5381;
   for (let index = 0; index < value.length; index += 1) {
@@ -23,39 +21,29 @@ function hashId(value: string): string {
 }
 
 function normalize(value: string): string {
-  return normalizeConceptText(value).replace(/\s+/g, " ").trim();
+  return normalizeConceptText(value.normalize("NFD").replace(/\p{Diacritic}/gu, "")).replace(/\s+/g, " ").trim();
+}
+
+function isLikelyStandaloneYear(value: string): boolean {
+  if (!/^\d{4}$/u.test(value)) return false;
+  const year = Number(value);
+  return year >= 1900 && year <= 2100;
 }
 
 function extractNumbers(value: string): string[] {
   return Array.from(value.matchAll(/\d+[.,]\d{4,6}|\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+[.,]\d+|\d+/gu))
     .map((match) => match[0])
-    .filter((number) => number.length > 1 && !NOISE_NUMBERS.has(number));
+    .filter((number) => number.length > 1 && !isLikelyStandaloneYear(number));
 }
 
 function extractNumbersForField(value: string, field: RequestedField): string[] {
   const numbers = extractNumbers(value);
-  if (field.id !== "stopaj_orani") return numbers;
+  if (!fieldSuggestsPercentValue(field)) return numbers;
   const percentLike = numbers.filter((number) => {
     const normalizedNumber = Number(number.replace(/\./gu, "").replace(",", "."));
     return Number.isFinite(normalizedNumber) && normalizedNumber >= 0 && normalizedNumber <= 100;
   });
   return percentLike;
-}
-
-function extractRowNumberedValues(value: string, field: RequestedField): string[] {
-  const rowNumberByField: Record<string, string> = {
-    donem_kari: "3",
-    net_donem_kari: "5",
-    net_dagitilabilir_donem_kari: "8",
-  };
-  const rowNumber = rowNumberByField[field.id];
-  if (!rowNumber) return [];
-  const rowPattern = new RegExp(
-    `(?:^|\\s)${rowNumber}\\.?\\s+(?:[^\\d\\n]{0,90})?((?:\\(?\\d{1,3}(?:[.,]\\d{3})+(?:[.,]\\d+)?\\)?\\s*){1,3})`,
-    "u",
-  );
-  const match = value.match(rowPattern);
-  return match?.[1] ? extractNumbers(match[1]).slice(0, 3) : [];
 }
 
 function sourceIdForFact(fact: string, fallback: string): string {
@@ -67,17 +55,27 @@ function sourceIdForFact(fact: string, fallback: string): string {
 function requestedShareGroups(query: string): string[] {
   const normalized = normalize(query);
   const groups = new Set<string>();
-  if (/\ba(?:\s+grubu)?\b/u.test(normalized)) groups.add("A Grubu");
-  if (/\bb(?:\s+grubu)?\b/u.test(normalized)) groups.add("B Grubu");
-  if (/\bc(?:\s+grubu)?\b/u.test(normalized)) groups.add("C Grubu");
+  const mentionsGroupContext = /\b(grub\w*|grup\w*|group\w*)\b/u.test(normalized);
+  if (!mentionsGroupContext) return [];
+  if (/\ba\b/u.test(normalized) || /\ba\s+grup\w*\b/u.test(normalized)) groups.add("A Grubu");
+  if (/\bb\b/u.test(normalized) || /\bb\s+grup\w*\b/u.test(normalized)) groups.add("B Grubu");
+  if (/\bc\b/u.test(normalized) || /\bc\s+grup\w*\b/u.test(normalized)) groups.add("C Grubu");
   return [...groups];
 }
 
 function isFieldAliasContextAllowed(normalizedFact: string, alias: string, field: RequestedField): boolean {
   const index = normalizedFact.indexOf(alias);
   if (index < 0) return false;
+  const aliasTokens = alias.split(/\s+/u).filter(Boolean);
   const before = normalizedFact.slice(Math.max(0, index - 28), index);
-  if (field.id === "donem_kari" && /\b(net|dagitilabilir|dagitilmis|düşülmüş|dusulmus)\s*$/u.test(before)) {
+  const longerRequestedAliasContainsThisAlias = [field.label, ...field.aliases]
+    .map(normalize)
+    .some((candidate) => candidate !== alias && candidate.endsWith(alias));
+  if (
+    aliasTokens.length <= 2 &&
+    !longerRequestedAliasContainsThisAlias &&
+    /\b(net|toplam|ara|nihai|final|dagitilabilir|dagitilmis|düşülmüş|dusulmus)\s*$/u.test(before)
+  ) {
     return false;
   }
   return true;
@@ -164,6 +162,20 @@ function extractQueryTokens(query: string): string[] {
     .filter((token) => token.length >= 3 && !weakTerms.has(token));
 }
 
+function fieldSearchText(field: RequestedField): string {
+  return normalize([field.id, field.label, ...field.aliases].join(" "));
+}
+
+function fieldSuggestsPercentValue(field: RequestedField): boolean {
+  return /\b(oran\w*|rate\w*|ratio\w*|percent\w*|percentage\w*|yuzde\w*)\b/u.test(fieldSearchText(field));
+}
+
+function fieldSuggestsGroupedValue(field: RequestedField, query: string): boolean {
+  const combined = `${fieldSearchText(field)} ${normalize(query)}`;
+  return /\b(grub\w*|grup\w*|group\w*)\b/u.test(combined) &&
+    /\b(tutar\w*|amount\w*|oran\w*|rate\w*|ratio\w*|cash\w*|nakit\w*|deger\w*|value\w*)\b/u.test(combined);
+}
+
 function tableFactMatchesRequestedField(fact: TableFact, field: RequestedField): boolean {
   if (normalize(fact.fieldId) === normalize(field.id)) return true;
   const haystack = tableFactSearchText(fact);
@@ -236,7 +248,7 @@ function extractShareGroupFacts(opts: {
   field: RequestedField;
   fallbackSourceId: string;
 }): StructuredFact[] {
-  if (opts.field.id !== "nakit_tutar_oran") return [];
+  if (!fieldSuggestsGroupedValue(opts.field, opts.query)) return [];
   const groups = requestedShareGroups(opts.query);
   if (groups.length === 0) return [];
   const out: StructuredFact[] = [];
@@ -246,7 +258,7 @@ function extractShareGroupFacts(opts: {
     for (const group of groups) {
       const groupLetter = group[0];
       const pattern = new RegExp(
-        `\\b${groupLetter}\\s*(?:Grubu)?\\s+((?:\\d{1,3}(?:[.,]\\d{3})+(?:[.,]\\d+)?|\\d+[.,]\\d+|\\d+)\\s+){2,6}`,
+        `\\b${groupLetter}\\s*(?:Grubu|Group)?\\s+((?:\\d{1,3}(?:[.,]\\d{3})+(?:[.,]\\d+)?|\\d+[.,]\\d+|\\d+)\\s+){2,6}`,
         "iu",
       );
       const match = fact.match(pattern);
@@ -260,7 +272,7 @@ function extractShareGroupFacts(opts: {
         id: `sf_${hashId(key)}`,
         kind: "table_row",
         sourceId,
-        field: `${group} Nakit Tutar ve Oran`,
+        field: `${group} Grouped Numeric Values`,
         value: numbers.join(" / "),
         unit: unitForValue(numbers.join(" / ")),
         confidence: numbers.length >= 4 ? "high" : "medium",
@@ -280,7 +292,7 @@ function extractShareGroupFacts(opts: {
 
 export function extractTableNumericFacts(input: TableNumericFactExtractionInput): StructuredFact[] {
   const detection = detectAnswerTask(input.query);
-  const requestedFields = detection.requestedFields.filter((field) => field.outputHint === "number");
+  const requestedFields = detection.requestedFields;
   const fallbackSourceId = input.sourceIds?.[0] ?? "unknown-source";
   const tableFactStructuredFacts = structuredFactsFromTableFacts({
     query: input.query,
@@ -296,32 +308,30 @@ export function extractTableNumericFacts(input: TableNumericFactExtractionInput)
   const seen = new Set<string>();
 
   for (const field of requestedFields) {
-    if (field.id === "nakit_tutar_oran") {
-      const groupFacts = extractShareGroupFacts({
-        query: input.query,
-        facts: input.facts,
-        field,
-        fallbackSourceId,
-      });
-      for (const fact of groupFacts) {
-        const key = `${fact.field}|${fact.sourceId}|${fact.value}`.toLocaleLowerCase("tr-TR");
-        if (seen.has(key)) continue;
-        seen.add(key);
-        structuredFacts.push(fact);
-      }
-      if (groupFacts.length > 0) continue;
+    const groupFacts = extractShareGroupFacts({
+      query: input.query,
+      facts: input.facts,
+      field,
+      fallbackSourceId,
+    });
+    for (const fact of groupFacts) {
+      const key = `${fact.field}|${fact.sourceId}|${fact.value}`.toLocaleLowerCase("tr-TR");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      structuredFacts.push(fact);
     }
+    if (groupFacts.length > 0) continue;
     let best: { fact: string; alias: string; numbers: string[]; sourceId: string; columnLabel?: string; score: number } | null = null;
     for (const fact of input.facts) {
       const normalizedFact = normalize(fact);
       const alias = bestAliasMatch(normalizedFact, field);
-      const numberedValues = extractRowNumberedValues(fact, field);
-      if (!alias && numberedValues.length === 0) continue;
+      if (!alias) continue;
       const snippet = alias ? sliceAroundAlias(fact, normalizedFact, alias) : fact.slice(0, 520);
-      const numbers = (numberedValues.length > 0 ? numberedValues : extractNumbersForField(snippet, field)).slice(0, 4);
+      const numbers = extractNumbersForField(snippet, field).slice(0, 4);
       if (numbers.length === 0) continue;
       const sourceId = sourceIdForFact(fact, fallbackSourceId);
       const inferredColumn = inferColumnLabel(fact);
+      if (desiredColumn && inferredColumn && inferredColumn !== desiredColumn) continue;
       const score = columnScore(inferredColumn, desiredColumn) + numbers.length * 8 + Math.min(fact.length / 100, 12);
       if (!best || score > best.score) {
         best = { fact, alias: alias ?? `row:${field.id}`, numbers, sourceId, columnLabel: inferredColumn, score };
