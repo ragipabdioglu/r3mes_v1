@@ -68,6 +68,7 @@ import {
   buildSourceResolutionPlan,
   summarizeSourceResolutionPlan,
   type SourceResolutionPlan,
+  type SourceResolutionRankedCandidate,
 } from "../lib/sourceResolutionPlan.js";
 import type { DomainRoutePlan } from "../lib/queryRouter.js";
 import type { EvidenceExtractorOutput, QueryPlannerOutput } from "../lib/skillPipeline.js";
@@ -420,6 +421,21 @@ async function resolveRetrievalBackedSuggestionIds(opts: {
   } catch {
     return [];
   }
+}
+
+function metadataCandidatesToSourceResolutionRankedCandidates(
+  candidates: KnowledgeMetadataRouteCandidate[],
+): SourceResolutionRankedCandidate[] {
+  return candidates.map((candidate) => ({
+    collectionId: candidate.id,
+    score: candidate.score,
+    reasons: [
+      candidate.reason,
+      `scoring_mode:${candidate.scoreBreakdown?.scoringMode ?? "metadata_profile"}`,
+      ...(candidate.sourceQuality ? [`source_quality:${candidate.sourceQuality}`] : []),
+    ],
+    matchedProfileLevel: "collection",
+  }));
 }
 
 function shouldSkipSourceSuggestions(opts: {
@@ -1997,12 +2013,23 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const accessibleCollectionIds = activeAccessibleCollections.map((item) => item.id);
       const sourceResolutionPlanEnabled = shouldUseSourceResolutionPlan();
       const sourceResolutionLowConfidenceGuard = shouldEnforceSourceResolutionLowConfidenceGuard();
+      const sourceResolutionMetadataCandidates =
+        sourceResolutionPlanEnabled && activeAccessibleCollections.length > 1
+          ? rankMetadataRouteCandidates({
+              collections: activeAccessibleCollections,
+              routePlan,
+              query: plannedRetrievalQuery,
+              limit: Math.max(activeAccessibleCollections.length, 8),
+              fast: true,
+            })
+          : [];
       const sourceResolutionPlan = buildSourceResolutionPlan({
         accessibleCollections: activeAccessibleCollections,
         requestedCollectionIds,
         includePublic,
         retrievalQuery: plannedRetrievalQuery,
         queryUnderstanding: retrievalQueryUnderstanding,
+        rankedCandidates: metadataCandidatesToSourceResolutionRankedCandidates(sourceResolutionMetadataCandidates),
         enforceLowConfidenceGuard: sourceResolutionLowConfidenceGuard,
         sourceDiscoveryIntent,
       });
@@ -2046,6 +2073,7 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
         name: "source_resolution_plan",
         enabled: sourceResolutionPlanEnabled,
         enforceLowConfidenceGuard: sourceResolutionLowConfidenceGuard,
+        profileRankedCandidateCount: sourceResolutionMetadataCandidates.length,
         legacyCollectionCount: accessibleCollectionIds.length,
         retrievalCollectionCount: retrievalCollectionIds.length,
         requestContext: summarizeChatRequestContext(requestContext),

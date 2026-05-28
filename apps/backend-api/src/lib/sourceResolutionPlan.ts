@@ -221,12 +221,24 @@ function rankedAccessibleCandidates(opts: BuildSourceResolutionPlanInput): Sourc
   const provided = opts.rankedCandidates
     ?.filter((candidate) => accessibleIds.has(candidate.collectionId))
     .map(normalizeRankedCandidate);
-  if (provided?.length) return sortCandidates(provided);
   const tokens = queryTokens({
     retrievalQuery: opts.retrievalQuery,
     queryUnderstanding: opts.queryUnderstanding,
   });
-  return sortCandidates(opts.accessibleCollections.map((collection) => scoreAccessibleCollection(collection, tokens)));
+  const fallbackCandidates = opts.accessibleCollections.map((collection) => scoreAccessibleCollection(collection, tokens));
+  if (!provided?.length) return sortCandidates(fallbackCandidates);
+
+  const providedIds = new Set(provided.map((candidate) => candidate.collectionId));
+  const merged = [
+    ...provided,
+    ...fallbackCandidates
+      .filter((candidate) => !providedIds.has(candidate.collectionId))
+      .map((candidate) => ({
+        ...candidate,
+        reasons: ["fallback_profile_score_missing", ...candidate.reasons],
+      })),
+  ];
+  return sortCandidates(merged);
 }
 
 function rejectedMissingRequestedIds(

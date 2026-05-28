@@ -11,7 +11,12 @@ of truth; these files are the short working charter read before each task.
 - Completed: Faz 0, Faz 1, Faz 2, Faz 3, Faz 4.
 - Current implementation phase: Faz 5 - Query / Source Intelligence.
 - Faz 5 Dilim 1 completed metadata/source suggestion quality tie-break.
+- Faz 5 Dilim 2 completed source resolution profile scorer wiring.
+- SourceResolutionPlan now receives metadata/profile ranked candidates from chat runtime.
+- Unranked accessible collections remain visible with `fallback_profile_score_missing`.
 - Collection-suggestion now passes 5/5 after backend restart on new dist.
+- Latest Faz 5 verification: collection-suggestion 5/5, retrieval-quality 16/16, ui-reality 5/5 with provider fallback 0.
+- Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
 - LoRA is not part of knowledge correctness; chat must retain a LoRA-free path.

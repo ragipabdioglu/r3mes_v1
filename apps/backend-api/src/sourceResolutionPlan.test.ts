@@ -195,4 +195,27 @@ describe("buildSourceResolutionPlan", () => {
       score: 0.92,
     });
   });
+
+  it("keeps unranked accessible collections visible as fallback candidates", () => {
+    const plan = buildSourceResolutionPlan({
+      accessibleCollections: [
+        collection("primary", "Primary runbook"),
+        collection("unranked", "Unranked notes"),
+      ],
+      retrievalQuery: "rollback checklist",
+      queryUnderstanding: understanding("high"),
+      rankedCandidates: [
+        { collectionId: "primary", score: 96, reasons: ["profile_scorer"] },
+      ],
+    });
+
+    expect(plan.mode).toBe("auto_private_ranked");
+    expect(plan.candidates.map((item) => item.collectionId)).toEqual(["primary", "unranked"]);
+    expect(plan.candidates[0]).toMatchObject({
+      collectionId: "primary",
+      score: 0.96,
+      reasons: ["profile_scorer"],
+    });
+    expect(plan.candidates[1]?.reasons).toContain("fallback_profile_score_missing");
+  });
 });
