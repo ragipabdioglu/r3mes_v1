@@ -81,6 +81,29 @@ function understanding(confidence: QueryUnderstanding["confidence"]): QueryUnder
       confidence: "low",
       reasons: [],
     },
+    queryContract: {
+      operation: "extract_fields",
+      requiredEvidenceType: "structured_fields",
+      outputFormat: "short",
+      outputConstraints: {
+        forbidCaution: false,
+        noRawTableDump: false,
+        format: "short",
+        sourceGroundedOnly: false,
+      },
+      sourceOnly: false,
+      requestedFields: [],
+      forbiddenAdditions: [],
+      queryQuality: {
+        shape: confidence === "low" ? "short" : "normal",
+        clarityScore: confidence === "low" ? 35 : 72,
+        tokenCount: 3,
+        expandedTokenCount: 3,
+        conceptCount: 1,
+        profileConceptCount: 0,
+        weakSignalCount: 2,
+      },
+    },
     confidence,
     warnings: [],
   } as QueryUnderstanding;
@@ -98,6 +121,13 @@ describe("buildSourceResolutionPlan", () => {
     expect(plan.mode).toBe("explicit");
     expect(plan.selectedCollectionIds).toEqual(["kap"]);
     expect(plan.confidence).toBe(1);
+    expect(plan.decisionDiagnostics).toMatchObject({
+      selectionReason: "explicit_request",
+      queryOperation: "extract_fields",
+      requiredEvidenceType: "structured_fields",
+      explicitRequestedCount: 2,
+      selectedCount: 1,
+    });
     expect(plan.rejected).toEqual([{
       collectionId: "missing",
       reason: "requested_collection_not_accessible",
@@ -130,6 +160,11 @@ describe("buildSourceResolutionPlan", () => {
     expect(plan.mode).toBe("source_discovery");
     expect(plan.selectedCollectionIds).toEqual([]);
     expect(plan.suggestions?.map((item) => item.collectionId).sort()).toEqual(["finance", "hr"]);
+    expect(plan.decisionDiagnostics).toMatchObject({
+      selectionReason: "source_discovery_intent",
+      sourceDiscoveryIntent: true,
+      candidateCount: 2,
+    });
   });
 
   it("requires user scope for multiple private collections when low confidence guard is enforced", () => {
@@ -193,6 +228,12 @@ describe("buildSourceResolutionPlan", () => {
     expect(summary.topCandidates[0]).toMatchObject({
       collectionId: "finance",
       score: 0.92,
+    });
+    expect(summary.decisionDiagnostics).toMatchObject({
+      selectionReason: "profile_ranked_selection",
+      profileRankedCandidateCount: 2,
+      accessibleCollectionCount: 2,
+      selectedCount: 1,
     });
   });
 

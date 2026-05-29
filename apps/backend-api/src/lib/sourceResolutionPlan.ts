@@ -38,6 +38,7 @@ export interface SourceResolutionPlan {
   confidence: number;
   warnings: string[];
   suggestions?: SourceResolutionSuggestion[];
+  decisionDiagnostics: SourceResolutionDecisionDiagnostics;
 }
 
 export interface SourceResolutionSuggestion {
@@ -66,6 +67,29 @@ export interface BuildSourceResolutionPlanInput {
   sourceDiscoveryIntent?: boolean;
 }
 
+export interface SourceResolutionDecisionDiagnostics {
+  queryOperation: string | null;
+  requiredEvidenceType: string | null;
+  outputFormat: string | null;
+  sourceOnly: boolean;
+  requestedFieldCount: number;
+  queryShape: string | null;
+  queryClarityScore: number | null;
+  retrievalIntent: string | null;
+  queryConfidence: string | null;
+  profileRankedCandidateCount: number;
+  accessibleCollectionCount: number;
+  explicitRequestedCount: number;
+  includePublic: boolean;
+  lowConfidenceGuardEnforced: boolean;
+  sourceDiscoveryIntent: boolean;
+  selectedCount: number;
+  candidateCount: number;
+  rejectedCount: number;
+  selectionReason: string;
+  warnings: string[];
+}
+
 export interface SourceResolutionPlanSummary {
   mode: SourceResolutionMode;
   selectedCollectionIds: string[];
@@ -75,6 +99,7 @@ export interface SourceResolutionPlanSummary {
   warnings: string[];
   suggestions: SourceResolutionSuggestion[];
   topCandidates: SourceResolutionCandidate[];
+  decisionDiagnostics: SourceResolutionDecisionDiagnostics;
 }
 
 const HIGH_CONFIDENCE = 0.72;
@@ -268,6 +293,47 @@ function rejectedUnselectedCandidates(
     }));
 }
 
+function buildDecisionDiagnostics(
+  input: BuildSourceResolutionPlanInput,
+  plan: Omit<SourceResolutionPlan, "decisionDiagnostics">,
+  selectionReason: string,
+): SourceResolutionDecisionDiagnostics {
+  const queryContract = input.queryUnderstanding?.queryContract;
+  return {
+    queryOperation: queryContract?.operation ?? null,
+    requiredEvidenceType: queryContract?.requiredEvidenceType ?? null,
+    outputFormat: queryContract?.outputFormat ?? null,
+    sourceOnly: queryContract?.sourceOnly ?? false,
+    requestedFieldCount: queryContract?.requestedFields.length ?? 0,
+    queryShape: input.queryUnderstanding?.quality.shape ?? null,
+    queryClarityScore: input.queryUnderstanding?.quality.clarityScore ?? null,
+    retrievalIntent: input.queryUnderstanding?.retrievalIntent ?? null,
+    queryConfidence: input.queryUnderstanding?.confidence ?? null,
+    profileRankedCandidateCount: input.rankedCandidates?.length ?? 0,
+    accessibleCollectionCount: input.accessibleCollections.length,
+    explicitRequestedCount: input.requestedCollectionIds?.length ?? 0,
+    includePublic: input.includePublic === true,
+    lowConfidenceGuardEnforced: input.enforceLowConfidenceGuard === true,
+    sourceDiscoveryIntent: input.sourceDiscoveryIntent === true || input.queryUnderstanding?.retrievalIntent === "source_selection",
+    selectedCount: plan.selectedCollectionIds.length,
+    candidateCount: plan.candidates.length,
+    rejectedCount: plan.rejected.length,
+    selectionReason,
+    warnings: plan.warnings,
+  };
+}
+
+function withDecisionDiagnostics(
+  input: BuildSourceResolutionPlanInput,
+  plan: Omit<SourceResolutionPlan, "decisionDiagnostics">,
+  selectionReason: string,
+): SourceResolutionPlan {
+  return {
+    ...plan,
+    decisionDiagnostics: buildDecisionDiagnostics(input, plan, selectionReason),
+  };
+}
+
 export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput): SourceResolutionPlan {
   const requestedCollectionIds = unique(input.requestedCollectionIds ?? []);
   const includePublic = input.includePublic === true;
@@ -277,7 +343,7 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
   const hasRetrievalQuery = Boolean(input.retrievalQuery?.trim() || input.queryUnderstanding?.original.trim());
 
   if (!hasRetrievalQuery || input.queryUnderstanding?.retrievalIntent === "conversation") {
-    return {
+    return withDecisionDiagnostics(input, {
       mode: "none",
       selectedCollectionIds: [],
       candidates: [],
@@ -285,12 +351,12 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
       confidence: 0,
       warnings: ["no_knowledge_retrieval_query"],
       suggestions: input.suggestions ?? [],
-    };
+    }, "no_knowledge_retrieval_query");
   }
 
   if (input.sourceDiscoveryIntent === true || input.queryUnderstanding?.retrievalIntent === "source_selection") {
     const candidates = rankedAccessibleCandidates(input);
-    return {
+    return withDecisionDiagnostics(input, {
       mode: "source_discovery",
       selectedCollectionIds: [],
       candidates,
@@ -302,7 +368,7 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
         reason: candidate.reasons[0] ?? "source_candidate",
         score: candidate.score,
       })),
-    };
+    }, "source_discovery_intent");
   }
 
   if (requestedCollectionIds.length > 0) {
@@ -314,7 +380,7 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
       matchedProfileLevel: "collection" as const,
     }));
     if (missingRequested.length > 0) warnings.push("some_requested_collections_not_accessible");
-    return {
+    return withDecisionDiagnostics(input, {
       mode: "explicit",
       selectedCollectionIds,
       candidates,
@@ -322,13 +388,13 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
       confidence: selectedCollectionIds.length > 0 ? 1 : 0,
       warnings,
       suggestions: input.suggestions ?? [],
-    };
+    }, "explicit_request");
   }
 
   if (includePublic) {
     const candidates = rankedAccessibleCandidates(input);
     const selectedCollectionIds = input.accessibleCollections.map((collection) => collection.id);
-    return {
+    return withDecisionDiagnostics(input, {
       mode: "include_public",
       selectedCollectionIds,
       candidates,
@@ -336,12 +402,12 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
       confidence: planConfidence({ queryUnderstanding: input.queryUnderstanding, candidates }),
       warnings: candidates.length === 0 ? ["include_public_without_accessible_sources"] : [],
       suggestions: input.suggestions ?? [],
-    };
+    }, "include_public");
   }
 
   const privateCollections = input.accessibleCollections.filter((collection) => collection.visibility === "PRIVATE");
   if (privateCollections.length === 0) {
-    return {
+    return withDecisionDiagnostics(input, {
       mode: "needs_user_scope",
       selectedCollectionIds: [],
       candidates: [],
@@ -349,12 +415,12 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
       confidence: 0,
       warnings: ["no_private_collections_available"],
       suggestions: input.suggestions ?? [],
-    };
+    }, "no_private_collections_available");
   }
 
   if (privateCollections.length === 1) {
     const collection = privateCollections[0];
-    return {
+    return withDecisionDiagnostics(input, {
       mode: "auto_single_private",
       selectedCollectionIds: [collection.id],
       candidates: [{
@@ -367,7 +433,7 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
       confidence: 1,
       warnings,
       suggestions: input.suggestions ?? [],
-    };
+    }, "only_private_collection");
   }
 
   const privateIds = new Set(privateCollections.map((collection) => collection.id));
@@ -382,7 +448,7 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
   const lowConfidence = confidence < LOW_CONFIDENCE || topScore < LOW_CONFIDENCE || input.queryUnderstanding?.confidence === "low";
 
   if (lowConfidence && input.enforceLowConfidenceGuard === true) {
-    return {
+    return withDecisionDiagnostics(input, {
       mode: "needs_user_scope",
       selectedCollectionIds: [],
       candidates,
@@ -394,7 +460,7 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
         reason: candidate.reasons[0] ?? "source_candidate",
         score: candidate.score,
       })),
-    };
+    }, "low_confidence_guard_enforced");
   }
 
   const maxAutoSelectedCollections = Math.max(1, input.maxAutoSelectedCollections ?? 3);
@@ -413,7 +479,7 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
     selectedCollectionIds.push(candidates[0].collectionId);
   }
 
-  return {
+  return withDecisionDiagnostics(input, {
     mode: "auto_private_ranked",
     selectedCollectionIds,
     candidates,
@@ -421,7 +487,7 @@ export function buildSourceResolutionPlan(input: BuildSourceResolutionPlanInput)
     confidence,
     warnings,
     suggestions: input.suggestions ?? [],
-  };
+  }, lowConfidence ? "legacy_low_confidence_broad_selection" : "profile_ranked_selection");
 }
 
 export function summarizeSourceResolutionPlan(plan: SourceResolutionPlan): SourceResolutionPlanSummary {
@@ -434,5 +500,6 @@ export function summarizeSourceResolutionPlan(plan: SourceResolutionPlan): Sourc
     warnings: plan.warnings,
     suggestions: plan.suggestions ?? [],
     topCandidates: plan.candidates.slice(0, 5),
+    decisionDiagnostics: plan.decisionDiagnostics,
   };
 }
