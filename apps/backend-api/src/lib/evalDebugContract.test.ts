@@ -219,6 +219,18 @@ describe("buildEvalDebugContract", () => {
         fallbackTemplateUsed: false,
         lowLanguageQualityDetected: false,
       },
+      evidenceToAnswerPath: {
+        sufficiencyStatus: "sufficient",
+        shouldAnswer: true,
+        answerPlanCoverage: "partial",
+        requiresModelSynthesis: false,
+        composerPath: "planned_structured",
+        plannedComposerUsed: true,
+        fallbackTemplateUsed: false,
+        safetyPass: null,
+        safetySeverity: null,
+        diagnosis: "evidence_sufficient_planned_answer",
+      },
       sourceCount: 1,
     });
     expect(contract.sourceSelection).toEqual({ selectionMode: "selected" });

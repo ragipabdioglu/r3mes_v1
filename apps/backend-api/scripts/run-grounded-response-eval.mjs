@@ -1801,6 +1801,9 @@ function summarizeAnswerBaselineQuality(results) {
   const evidenceCoverage = {};
   const evidenceSufficiency = {};
   const evidenceSufficiencyReasons = {};
+  const evidenceToAnswerPathDiagnoses = {};
+  const evidenceToAnswerPathBySufficiency = {};
+  const evidenceToAnswerPathByComposer = {};
   const composerPaths = {};
   const confidenceReasons = {};
   const compiledEvidenceConfidences = {};
@@ -1817,6 +1820,10 @@ function summarizeAnswerBaselineQuality(results) {
   let compiledMissingFieldTotal = 0;
   let compiledMissingFieldCases = 0;
   let compiledShouldAnswerCases = 0;
+  let sufficientEvidenceCases = 0;
+  let sufficientEvidenceFallbackCases = 0;
+  let partialEvidenceCases = 0;
+  let contradictionEvidenceCases = 0;
   let missingFieldCases = 0;
   let requiresModelSynthesisCases = 0;
   let plannedComposerCases = 0;
@@ -1838,6 +1845,12 @@ function summarizeAnswerBaselineQuality(results) {
     compiledMissingFieldTotal += compiledMissingFields;
     if (compiledMissingFields > 0) compiledMissingFieldCases += 1;
     if (baseline?.compiledEvidence?.sufficiency?.shouldAnswer === true) compiledShouldAnswerCases += 1;
+    const evidenceToAnswerPath = baseline?.evidenceToAnswerPath;
+    const sufficiencyStatus = baseline?.compiledEvidence?.sufficiency?.status;
+    if (sufficiencyStatus === "sufficient") sufficientEvidenceCases += 1;
+    if (sufficiencyStatus === "partial") partialEvidenceCases += 1;
+    if (sufficiencyStatus === "contradictory") contradictionEvidenceCases += 1;
+    if (evidenceToAnswerPath?.diagnosis === "evidence_sufficient_fallback") sufficientEvidenceFallbackCases += 1;
 
     if (Array.isArray(baseline?.answerPlan?.missingFieldIds) && baseline.answerPlan.missingFieldIds.length > 0) {
       missingFieldCases += 1;
@@ -1854,6 +1867,15 @@ function summarizeAnswerBaselineQuality(results) {
     increment(evidenceCoverage, baseline?.compiledEvidence?.coverage?.status);
     increment(evidenceSufficiency, baseline?.compiledEvidence?.sufficiency?.status);
     increment(evidenceSufficiencyReasons, baseline?.compiledEvidence?.sufficiency?.reason);
+    increment(evidenceToAnswerPathDiagnoses, evidenceToAnswerPath?.diagnosis);
+    increment(
+      evidenceToAnswerPathBySufficiency,
+      `${evidenceToAnswerPath?.sufficiencyStatus ?? "missing"} -> ${evidenceToAnswerPath?.diagnosis ?? "missing"}`,
+    );
+    increment(
+      evidenceToAnswerPathByComposer,
+      `${evidenceToAnswerPath?.composerPath ?? "missing"} -> ${evidenceToAnswerPath?.diagnosis ?? "missing"}`,
+    );
     increment(compiledEvidenceConfidences, baseline?.compiledEvidence?.confidence);
     increment(confidenceReasons, baseline?.compiledEvidence?.confidenceReason);
 
@@ -1898,6 +1920,15 @@ function summarizeAnswerBaselineQuality(results) {
     evidenceSufficiencyReasons: Object.fromEntries(
       Object.entries(evidenceSufficiencyReasons).sort(([a], [b]) => a.localeCompare(b)),
     ),
+    evidenceToAnswerPathDiagnoses: Object.fromEntries(
+      Object.entries(evidenceToAnswerPathDiagnoses).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+    evidenceToAnswerPathBySufficiency: Object.fromEntries(
+      Object.entries(evidenceToAnswerPathBySufficiency).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+    evidenceToAnswerPathByComposer: Object.fromEntries(
+      Object.entries(evidenceToAnswerPathByComposer).sort(([a], [b]) => a.localeCompare(b)),
+    ),
     composerPaths: Object.fromEntries(Object.entries(composerPaths).sort(([a], [b]) => a.localeCompare(b))),
     compiledEvidenceConfidences: Object.fromEntries(
       Object.entries(compiledEvidenceConfidences).sort(([a], [b]) => a.localeCompare(b)),
@@ -1906,6 +1937,10 @@ function summarizeAnswerBaselineQuality(results) {
     missingFieldCaseRatio: caseRatio(missingFieldCases),
     compiledEvidenceMissingFieldCaseRatio: caseRatio(compiledMissingFieldCases),
     compiledEvidenceShouldAnswerRatio: caseRatio(compiledShouldAnswerCases),
+    sufficientEvidenceFallbackRatio:
+      sufficientEvidenceCases === 0 ? 0 : Number((sufficientEvidenceFallbackCases / sufficientEvidenceCases).toFixed(3)),
+    partialEvidenceCaseRatio: caseRatio(partialEvidenceCases),
+    contradictionEvidenceCaseRatio: caseRatio(contradictionEvidenceCases),
     requiresModelSynthesisRatio: caseRatio(requiresModelSynthesisCases),
     plannedComposerUsedRatio: caseRatio(plannedComposerCases),
     fallbackTemplateUsedRatio: caseRatio(fallbackTemplateCases),

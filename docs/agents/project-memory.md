@@ -47,6 +47,11 @@ of truth; these files are the short working charter read before each task.
 - Dilim 3 gates: resolver/compiledEvidence/answerPlan/debug tests 21/21, typecheck, evidence-only 1/1, public boundary/resolver tests 22/22.
 - Dilim 3 answer-quality remains 8/17, but coverage improved: complete 10/partial 6, missing-field ratio 0.375.
 - Next Faz 6 slice should inspect sufficiency-to-composer/safety path diagnostics before changing answer behavior.
+- Faz 6 Dilim 4 added `answerBaseline.evidenceToAnswerPath` diagnostics.
+- Dilim 4 does not change parser/retrieval/composer/safety or public response shape.
+- Dilim 4 gates: evalDebug/boundary tests 3/3, typecheck, eval runner syntax, backend readiness, evidence-only 1/1.
+- Dilim 4 answer-quality remains 8/17, expected; new diagnostic shows 9/9 sufficient-evidence cases still fall to fallback paths.
+- Faz 7 backlog: planned renderer/composer must reduce fallback/template usage when evidence is sufficient.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
