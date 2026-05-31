@@ -442,6 +442,56 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("risk koşulu");
   });
 
+  it("composePlannedAnswer prefers readable requested labels over normalized fact labels", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "general",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Kaynağa göre “Dağıtılması Öngörülen Diğer Kaynaklar” değerini madde olarak yaz.",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment: "Kaynakta ilgili tablo satırı var.",
+      action: "Sadece sorulan değer yazılmalıdır.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Sorulan alan tablodan alınmalıdır.",
+      unknowns: [],
+      sourceIds: ["doc-1"],
+      facts: [],
+      structuredFacts: [
+        {
+          id: "sf-readable-label",
+          kind: "table_row",
+          sourceId: "doc-1",
+          field: "dagitilmasi ongorulen diger kaynaklar",
+          value: "3.352.908.083",
+          confidence: "high",
+          provenance: {
+            quote: "Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083",
+            extractor: "generic-table-row-v1",
+          },
+        },
+      ],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        structuredFacts: answerSpec.structuredFacts,
+        structuredFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Dağıtılması Öngörülen Diğer Kaynaklar");
+    expect(rendered).not.toContain("dagitilmasi ongorulen");
+    expect(rendered).not.toContain("risk koşulu");
+  });
+
   it("composePlannedAnswer does not mine finance table strings unless fallback is explicitly enabled", () => {
     const answerSpec: AnswerSpec = {
       answerDomain: "finance",

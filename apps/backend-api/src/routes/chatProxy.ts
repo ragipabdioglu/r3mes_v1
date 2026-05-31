@@ -976,7 +976,7 @@ function classifyComposerPath(input: {
   if (input.qwenCalled === true) return "qwen_synthesis";
   if (input.safetyFallbackApplied) return "safety_fallback";
   if (input.qualityRepairApplied) return "planned_quality_repair";
-  if (input.plannedComposerUsed && !input.initialFallbackTemplateUsed && input.selectedFactCount > 0) {
+  if (input.plannedComposerUsed && input.selectedFactCount > 0) {
     return "planned_structured";
   }
   if (input.plannedComposerUsed) return "planned_fallback_template";

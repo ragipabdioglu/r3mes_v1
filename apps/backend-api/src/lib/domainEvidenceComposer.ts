@@ -3,6 +3,7 @@ import type { AnswerSpec } from "./answerSpec.js";
 import { buildAnswerSpecFromGroundedAnswer } from "./answerSpec.js";
 import { buildAnswerPlan, type AnswerPlan } from "./answerPlan.js";
 import type { ComposerInput, ComposePlannedAnswerOptions } from "./composerInput.js";
+import { requestedFieldMatchesFact } from "./fieldCoverageResolver.js";
 import { polishAnswerText } from "./answerQuality.js";
 import { getDomainPolicy } from "./domainPolicy.js";
 import { buildSafetyPresentationPolicy, shouldSuppressGenericCaution } from "./safetyPresentationPolicy.js";
@@ -281,6 +282,30 @@ function titleCaseTurkishLabel(label: string): string {
     .join(" ");
 }
 
+function labelFromProvenanceQuote(value: string): string | null {
+  const cleaned = value
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!cleaned) return null;
+  const firstNumber = cleaned.search(/\d/u);
+  if (firstNumber <= 2) return null;
+  const label = cleaned.slice(0, firstNumber).replace(/[-:;,.()\s]+$/gu, "").trim();
+  if (label.length < 3 || label.length > 140) return null;
+  return label;
+}
+
+function displayLabelForStructuredFact(plan: AnswerPlan, fact: AnswerPlan["selectedFacts"][number]): string {
+  const tableRowLabel = fact.table?.rowLabel?.trim();
+  if (tableRowLabel && tableRowLabel.length >= 3) return tableRowLabel;
+  const quoteLabel = labelFromProvenanceQuote(fact.provenance.quote);
+  if (quoteLabel) return quoteLabel;
+  const requestedField = plan.requestedFields.find((field) => requestedFieldMatchesFact(field, fact));
+  const requestedLabel = requestedField?.label?.trim();
+  if (requestedLabel && requestedLabel.length >= 3) return requestedLabel;
+  return fact.field ?? fact.subject ?? "Kaynakta bulunan değer";
+}
+
 function composeFinanceTableFacts(spec: AnswerSpec): string | null {
   if (!shouldOmitOptionalCaution(spec)) return null;
   const labels = tableLabelCandidates(spec.userQuery);
@@ -322,7 +347,7 @@ function composeFinanceTableFacts(spec: AnswerSpec): string | null {
 function composeStructuredFieldAnswer(plan: AnswerPlan): string | null {
   if (plan.taskType !== "field_extraction" || plan.coverage === "none" || plan.selectedFacts.length === 0) return null;
   const lines = plan.selectedFacts.map((fact) => {
-    const baseLabel = fact.field ?? fact.subject ?? "Kaynakta bulunan değer";
+    const baseLabel = displayLabelForStructuredFact(plan, fact);
     const label = fact.table?.columnLabel ? `${baseLabel} (${fact.table.columnLabel})` : baseLabel;
     const value = fact.value ?? fact.provenance.quote;
     return plan.outputFormat === "bullets" ? `- ${label}: ${value}.` : `${label}: ${value}.`;

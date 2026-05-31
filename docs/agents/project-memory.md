@@ -64,6 +64,11 @@ of truth; these files are the short working charter read before each task.
 - Evidence-to-answer path shows 9 sufficient-evidence cases still using fallback/template paths.
 - Fact-level diagnostics show table_row 13, numeric_fact 0, text_fact 79.
 - Faz 7 should focus on answer planning/rendering/safety presentation without weakening evidence contracts.
+- Faz 7 Slice 1 started answer intelligence with structured renderer path baseline.
+- Slice 1 changed only domain composer label resolution, composer path classification, and tests.
+- Gates: domain composer/boundary/evalDebug tests 20/20, backend typecheck, dist build, backend readiness, evidence-only 1/1.
+- Answer-quality remains 8/17, expected; composer paths improved to planned_structured 5, planned_fallback_template 3, safety_fallback 9.
+- Next Faz 7 slice should target partial evidence rendering and safety presentation bridge.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
