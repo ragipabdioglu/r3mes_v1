@@ -363,6 +363,59 @@ function composeStructuredFieldAnswer(plan: AnswerPlan): string | null {
   return lines.join("\n");
 }
 
+function missingFieldLabels(plan: AnswerPlan): string[] {
+  const byId = new Map(plan.requestedFields.map((field) => [field.id, field.label || field.id]));
+  return plan.diagnostics.missingFieldIds.map((id) => byId.get(id) ?? id).filter(Boolean);
+}
+
+function looksLikeRawTableDump(value: string): boolean {
+  const normalized = value.normalize("NFKC");
+  const numbers = extractNumbers(normalized);
+  const separatorCount = (normalized.match(/[|;\t]/gu) ?? []).length;
+  const compactedLength = normalized.replace(/\s+/gu, " ").trim().length;
+  if (/^\s*\|.*\|\s*$/u.test(normalized)) return true;
+  if (numbers.length >= 4 && compactedLength > 80) return true;
+  return separatorCount >= 5 && compactedLength > 100;
+}
+
+function textFactsForPartialFieldExtraction(
+  spec: AnswerSpec,
+  plan: AnswerPlan,
+  input: ComposerInput,
+  opts: ComposePlannedAnswerOptions,
+): string[] {
+  if (plan.taskType !== "field_extraction" || !["partial", "none"].includes(plan.coverage)) return [];
+  const textFacts = uniqueSentences(
+    spec.facts
+      .filter((fact) => !isGenericSourceLimitGuidance(fact) && !isDocumentScaffoldFact(fact))
+      .filter((fact) => !(input.constraints.noRawTableDump && looksLikeRawTableDump(fact)))
+      .filter((fact) => spec.answerDomain !== "finance" || opts.enableFinanceTableStringFallback === true || extractNumbers(fact).length === 0),
+    plan.outputFormat === "bullets" ? 4 : 2,
+  );
+  return textFacts;
+}
+
+function composePartialTextFieldAnswer(
+  spec: AnswerSpec,
+  plan: AnswerPlan,
+  input: ComposerInput,
+  opts: ComposePlannedAnswerOptions,
+): string | null {
+  const facts = textFactsForPartialFieldExtraction(spec, plan, input, opts);
+  if (facts.length === 0) return null;
+  const missing = missingFieldLabels(plan);
+  const missingText = missing.length > 0 ? `Bulunamayan alanlar: ${missing.join(", ")}.` : "";
+
+  if (plan.outputFormat === "bullets") {
+    const lines = facts.map((fact) => `- ${fact}`);
+    if (missingText) lines.push(`- ${missingText}`);
+    return lines.join("\n");
+  }
+
+  const factText = facts.join("; ");
+  return missingText ? `${factText} ${missingText}` : factText;
+}
+
 function composeMissingFieldAnswer(plan: AnswerPlan): string | null {
   if (plan.taskType !== "field_extraction") return null;
   const missingFieldIds = plan.diagnostics.missingFieldIds;
@@ -664,12 +717,17 @@ export function composePlannedAnswer(input: ComposerInput, opts: ComposePlannedA
     return enforceMaxWords(plannedStructuredAnswer, input.constraints.maxWords);
   }
 
+  const spec = withSafetyPresentationPolicy(input.answerSpec, input.answerPlan, input);
+  const partialTextAnswer = composePartialTextFieldAnswer(spec, input.answerPlan, input, opts);
+  if (partialTextAnswer) {
+    return enforceMaxWords(partialTextAnswer, input.constraints.maxWords);
+  }
+
   const missingFieldAnswer = composeMissingFieldAnswer(input.answerPlan);
   if (missingFieldAnswer && (input.constraints.forbidCaution || input.answerPlan.taskType === "field_extraction")) {
     return enforceMaxWords(missingFieldAnswer, input.constraints.maxWords);
   }
 
-  const spec = withSafetyPresentationPolicy(input.answerSpec, input.answerPlan, input);
   const rendered = composeAnswerSpec(spec, {
     enableFinanceTableStringFallback: opts.enableFinanceTableStringFallback === true,
   });

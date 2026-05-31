@@ -69,6 +69,11 @@ of truth; these files are the short working charter read before each task.
 - Gates: domain composer/boundary/evalDebug tests 20/20, backend typecheck, dist build, backend readiness, evidence-only 1/1.
 - Answer-quality remains 8/17, expected; composer paths improved to planned_structured 5, planned_fallback_template 3, safety_fallback 9.
 - Next Faz 7 slice should target partial evidence rendering and safety presentation bridge.
+- Faz 7 Slice 2 used real Pascal worker and Newton verifier agents.
+- Slice 2 added partial field extraction text-fact rendering in domainEvidenceComposer only.
+- Gates: composer/boundary/evalDebug tests 23/23, backend typecheck, dist build, readiness, evidence-only 1/1.
+- Answer-quality remains 8/17 but failure count improved 35 -> 29 and answer-quality failure rate 0.412 -> 0.294.
+- Newton warning: safetyFallbackRenderer can still bypass partial renderer; next slice should bridge that path.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAnswerPlan } from "./answerPlan.js";
+import { buildAnswerPlan, type AnswerPlan } from "./answerPlan.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import type { CompiledEvidence } from "./compiledEvidence.js";
 import { composeAnswerSpec, composeDomainEvidenceAnswer, composePlannedAnswer } from "./domainEvidenceComposer.js";
@@ -19,6 +19,72 @@ function compiledEvidence(overrides: Partial<CompiledEvidence> = {}): CompiledEv
     riskFactCount: 0,
     unknownCount: 0,
     contradictionCount: 0,
+    ...overrides,
+  };
+}
+
+function fieldExtractionPlan(overrides: Partial<AnswerPlan> = {}): AnswerPlan {
+  const requestedFields = [
+    {
+      id: "required_metric",
+      label: "Required Metric",
+      aliases: ["required metric"],
+      required: true,
+      outputHint: "text" as const,
+      confidence: "high" as const,
+      matchedAliases: ["required metric"],
+    },
+    {
+      id: "second_metric",
+      label: "Second Metric",
+      aliases: ["second metric"],
+      required: true,
+      outputHint: "text" as const,
+      confidence: "high" as const,
+      matchedAliases: ["second metric"],
+    },
+  ];
+  return {
+    domain: "general",
+    intent: "explain",
+    taskType: "field_extraction",
+    outputFormat: "short",
+    requestedFields,
+    selectedFacts: [],
+    constraints: {
+      forbidCaution: true,
+      noRawTableDump: true,
+      sourceGroundedOnly: true,
+      format: "short",
+    },
+    coverage: "partial",
+    forbiddenAdditions: ["optional_caution"],
+    requiresModelSynthesis: true,
+    diagnostics: {
+      requestedFieldCount: requestedFields.length,
+      selectedFactCount: 0,
+      missingFieldIds: ["second_metric"],
+    },
+    ...overrides,
+  };
+}
+
+function genericFieldAnswerSpec(overrides: Partial<AnswerSpec> = {}): AnswerSpec {
+  return {
+    answerDomain: "general",
+    answerIntent: "explain",
+    groundingConfidence: "high",
+    userQuery: "Required Metric ve Second Metric alanlarını kısa yaz, uyarı ekleme.",
+    tone: "direct",
+    sections: ["assessment", "action", "summary"],
+    assessment: "Kaynakta istenen alanların bir kısmı bulunuyor.",
+    action: "Sadece kaynakta doğrulanan alanlar yazılmalıdır.",
+    caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+    summary: "Sorulan alanlar kaynakla sınırlıdır.",
+    unknowns: [],
+    sourceIds: ["generic-source"],
+    facts: ["Required Metric kaynakta doğrulanmış bir metin değeri olarak geçiyor."],
+    structuredFacts: [],
     ...overrides,
   };
 }
@@ -440,6 +506,110 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).toContain("- Olağanüstü Yedekler: 3.352.908.083");
     expect(rendered).not.toContain("Dikkat");
     expect(rendered).not.toContain("risk koşulu");
+  });
+
+  it("composePlannedAnswer renders partial field extraction from text facts before missing-field fallback", () => {
+    const answerSpec = genericFieldAnswerSpec();
+    const answerPlan = fieldExtractionPlan();
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Required Metric kaynakta doğrulanmış");
+    expect(rendered).toContain("Bulunamayan alanlar: Second Metric");
+    expect(rendered).not.toContain("Kaynakta sorulan alanlar için tam değer bulunamadı");
+  });
+
+  it("composePlannedAnswer suppresses generic caution on the partial text fact path", () => {
+    const answerSpec = genericFieldAnswerSpec({
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      facts: ["Required Metric için kaynakta doğrulanmış kısa açıklama vardır."],
+    });
+    const answerPlan = fieldExtractionPlan({
+      outputFormat: "bullets",
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+        format: "bullets",
+      },
+    });
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("- Required Metric için kaynakta doğrulanmış kısa açıklama vardır.");
+    expect(rendered).toContain("- Bulunamayan alanlar: Second Metric.");
+    expect(rendered).not.toContain("Dikkat");
+    expect(rendered).not.toContain("risk koşulu");
+  });
+
+  it("composePlannedAnswer keeps structured facts ahead of partial text facts", () => {
+    const answerSpec = genericFieldAnswerSpec({
+      facts: ["Required Metric metin fact olarak farklı bir ifadeyle geçiyor."],
+      structuredFacts: [
+        {
+          id: "sf-generic-1",
+          kind: "text_claim",
+          sourceId: "generic-source",
+          field: "Required Metric",
+          value: "Structured Value",
+          confidence: "high",
+          provenance: {
+            quote: "Required Metric Structured Value",
+            extractor: "generic-structured-test",
+          },
+        },
+      ],
+    });
+    const answerPlan = fieldExtractionPlan({
+      selectedFacts: answerSpec.structuredFacts,
+      coverage: "partial",
+      diagnostics: {
+        requestedFieldCount: 2,
+        selectedFactCount: 1,
+        missingFieldIds: ["second_metric"],
+      },
+    });
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        structuredFacts: answerSpec.structuredFacts,
+        usableFactCount: 1,
+        structuredFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Required Metric: Structured Value");
+    expect(rendered).toContain("Bulunamayan alanlar: second_metric");
+    expect(rendered).not.toContain("metin fact olarak");
   });
 
   it("composePlannedAnswer prefers readable requested labels over normalized fact labels", () => {
