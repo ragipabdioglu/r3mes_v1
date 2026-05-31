@@ -3,7 +3,7 @@ import type { QueryContract } from "@r3mes/shared-types";
 import type { AnswerDomain, AnswerIntent } from "./answerSchema.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import { detectAnswerTask, type AnswerTaskType } from "./answerTaskDetector.js";
-import { normalizeConceptText } from "./conceptNormalizer.js";
+import { requestedFieldMatchesFact } from "./fieldCoverageResolver.js";
 import type { RequestedField } from "./requestedFieldDetector.js";
 import type { StructuredFact } from "./structuredFact.js";
 
@@ -39,14 +39,8 @@ export interface BuildAnswerPlanOptions {
   queryContract?: QueryContract;
 }
 
-function normalize(value: string | undefined): string {
-  return normalizeConceptText((value ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, ""));
-}
-
 function factMatchesField(fact: StructuredFact, field: RequestedField): boolean {
-  const factText = normalize([fact.field, fact.subject, fact.table?.rowLabel, fact.provenance.quote].filter(Boolean).join(" "));
-  const aliases = [field.label, ...field.aliases].map(normalize).filter(Boolean);
-  return aliases.some((alias) => factText.includes(alias));
+  return requestedFieldMatchesFact(field, fact);
 }
 
 function selectFactsForFields(facts: StructuredFact[], fields: RequestedField[]): StructuredFact[] {

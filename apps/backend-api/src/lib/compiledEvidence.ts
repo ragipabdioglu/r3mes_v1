@@ -1,6 +1,7 @@
 import type { GroundingConfidence } from "./answerSchema.js";
 import { getDecisionConfig, getDecisionConfigVersion } from "./decisionConfig.js";
 import { countUsableEvidenceItems, type EvidenceBundle, type EvidenceBundleDiagnostics } from "./evidenceBundle.js";
+import { fieldTextMatchesFact } from "./fieldCoverageResolver.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 import type { StructuredFact } from "./structuredFact.js";
 
@@ -157,10 +158,6 @@ function deriveConfidence(opts: {
   return { confidence: "low", reason: "grounding_low" };
 }
 
-function normalizeFieldId(value: string): string {
-  return value.trim().toLocaleLowerCase("tr-TR");
-}
-
 function deriveCoverage(opts: {
   evidenceBundle?: EvidenceBundle;
   facts: string[];
@@ -169,15 +166,11 @@ function deriveCoverage(opts: {
   contradictionCount: number;
 }): EvidenceCoverage {
   const requestedFieldIds = uniqueText(opts.evidenceBundle?.requestedFieldIds ?? []);
-  const requestedFieldKeys = new Set(requestedFieldIds.map(normalizeFieldId));
-  const coveredFieldIds = uniqueText(
-    opts.structuredFacts
-      .map((fact) => fact.field)
-      .filter((field): field is string => Boolean(field?.trim()))
-      .filter((field) => requestedFieldKeys.size === 0 || requestedFieldKeys.has(normalizeFieldId(field))),
-  );
-  const coveredFieldKeys = new Set(coveredFieldIds.map(normalizeFieldId));
-  const missingFieldIds = requestedFieldIds.filter((field) => !coveredFieldKeys.has(normalizeFieldId(field)));
+  const coveredFieldIds = requestedFieldIds.length === 0
+    ? uniqueText(opts.structuredFacts.map((fact) => fact.field).filter((field): field is string => Boolean(field?.trim())))
+    : requestedFieldIds.filter((fieldId) => opts.structuredFacts.some((fact) => fieldTextMatchesFact(fieldId, fact)));
+  const coveredFieldKeys = new Set(coveredFieldIds.map((field) => field.toLocaleLowerCase("tr-TR")));
+  const missingFieldIds = requestedFieldIds.filter((field) => !coveredFieldKeys.has(field.toLocaleLowerCase("tr-TR")));
   const hasUsableEvidence = opts.facts.length > 0 || opts.structuredFacts.length > 0 || opts.usableEvidenceItemCount > 0;
   const status: EvidenceCoverageStatus =
     requestedFieldIds.length === 0

@@ -338,6 +338,41 @@ describe("compileEvidence", () => {
     expect(hasCompiledUsableGrounding(compiled)).toBe(true);
   });
 
+  it("covers snake-case requested fields with readable structured fact labels", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        sourceIds: ["doc-readable"],
+        structuredFacts: [
+          {
+            id: "sf-total-readable",
+            kind: "numeric_value",
+            sourceId: "doc-readable",
+            field: "Total Amount",
+            value: "120",
+            confidence: "high",
+            provenance: {
+              quote: "Total Amount 120",
+              extractor: "test",
+            },
+          },
+        ],
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Total amount?",
+          requestedFieldIds: ["total_amount"],
+          sourceIds: ["doc-readable"],
+        }),
+      }),
+    });
+
+    expect(compiled.coverage).toMatchObject({
+      status: "complete",
+      coveredFieldIds: ["total_amount"],
+      missingFieldIds: [],
+    });
+    expect(compiled.sufficiency.status).toBe("sufficient");
+  });
+
   it("marks no usable evidence as insufficient", () => {
     const compiled = compileEvidence({
       groundingConfidence: "high",

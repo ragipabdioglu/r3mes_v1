@@ -42,6 +42,11 @@ of truth; these files are the short working charter read before each task.
 - Dilim 2 answer-quality remains 8/17 but now reports coverage complete 5, partial 11, sufficiency sufficient 4, partial 11, contradictory 1.
 - Dilim 2 found requested-field coverage gap: compiledEvidence missing-field case ratio 0.688 in answer-quality.
 - Windows Prisma generate hit locked DLL; dist was updated with tsc and backend restarted for runtime eval.
+- Faz 6 Dilim 3 added generic `fieldCoverageResolver` for requested-field to structured-fact matching.
+- Dilim 3 assumes V2 data for quality judgment and does not change parser/retrieval/composer/safety.
+- Dilim 3 gates: resolver/compiledEvidence/answerPlan/debug tests 21/21, typecheck, evidence-only 1/1, public boundary/resolver tests 22/22.
+- Dilim 3 answer-quality remains 8/17, but coverage improved: complete 10/partial 6, missing-field ratio 0.375.
+- Next Faz 6 slice should inspect sufficiency-to-composer/safety path diagnostics before changing answer behavior.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
