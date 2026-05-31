@@ -167,6 +167,14 @@ const TRACE_PATH_ALIASES = new Map([
   ]],
   ["sourceMode", ["sourceMode", "requestContext.sourceMode", "chatRequestContext.sourceMode"]],
   ["sourceResolutionMode", ["sourceResolution.mode", "sourceResolutionPlan.mode", "sourceSelection.routeDecision.mode"]],
+  ["sourceResolutionAutoSelectionScope", [
+    "sourceResolution.decisionDiagnostics.autoSelectionScope",
+    "sourceResolutionPlan.decisionDiagnostics.autoSelectionScope",
+  ]],
+  ["sourceResolutionRiskSignals", [
+    "sourceResolution.decisionDiagnostics.riskSignals",
+    "sourceResolutionPlan.decisionDiagnostics.riskSignals",
+  ]],
   ["retrievalEngineActual", ["runtime.retrievalEngineActual", "runtimeHealth.retrievalEngineActual"]],
   ["embeddingProviderActual", ["runtime.embeddingProviderActual", "runtimeHealth.embeddingProviderActual"]],
   ["embeddingFallbackUsed", ["runtime.embeddingFallbackUsed", "runtimeHealth.embeddingFallbackUsed"]],
@@ -439,6 +447,10 @@ function scoreCase(testCase, response) {
   const compiledEvidence = retrievalDebug?.compiledEvidence;
   const evidenceBundle = retrievalDebug?.evidenceBundle ?? retrievalDebug?.compiledEvidence?.evidenceBundle ?? null;
   const routeDecision = retrievalDebug?.sourceSelection?.routeDecision;
+  const sourceResolutionDecisionDiagnostics =
+    retrievalDebug?.sourceResolution?.decisionDiagnostics ??
+    retrievalDebug?.sourceResolutionPlan?.decisionDiagnostics ??
+    null;
   const answerPlan =
     response?.answer_plan ??
     retrievalDebug?.answerPlan ??
@@ -1140,6 +1152,14 @@ function scoreCase(testCase, response) {
       retrievalDebug?.sourceResolutionPlan?.mode ??
       routeDecision?.mode ??
       null,
+    sourceResolutionAutoSelectionScope: sourceResolutionDecisionDiagnostics?.autoSelectionScope ?? null,
+    sourceResolutionRiskSignals: Array.isArray(sourceResolutionDecisionDiagnostics?.riskSignals)
+      ? sourceResolutionDecisionDiagnostics.riskSignals
+      : [],
+    sourceResolutionTopCandidateScore: sourceResolutionDecisionDiagnostics?.topCandidateScore ?? null,
+    sourceResolutionSecondCandidateScore: sourceResolutionDecisionDiagnostics?.secondCandidateScore ?? null,
+    sourceResolutionTopCandidateScoreGap: sourceResolutionDecisionDiagnostics?.topCandidateScoreGap ?? null,
+    sourceResolutionSelectionReason: sourceResolutionDecisionDiagnostics?.selectionReason ?? null,
     runtime: retrievalDebug?.runtime ?? null,
     routeDecisionMode: routeDecision?.mode ?? null,
     routeDecisionConfidence: routeDecision?.confidence ?? null,
@@ -1297,6 +1317,7 @@ function resultArray(result, key) {
 function summarizeRouterQuality(results) {
   const casesWithMetadataCandidates = results.filter((result) => resultArray(result, "metadataRouteCandidateIds").length > 0);
   const topMetadataCandidates = results.map((result) => result.metadataRouteCandidateTop).filter(Boolean);
+  const sourceResolutionRiskCases = results.filter((result) => resultArray(result, "sourceResolutionRiskSignals").length > 0);
   const expectedRouteCases = results.filter((result) => result.expectedRouteDecisionMode);
   const routeExpectationMismatches = results
     .filter((result) => result.expectedRouteDecisionMode && result.routeDecisionMode !== result.expectedRouteDecisionMode)
@@ -1379,6 +1400,27 @@ function summarizeRouterQuality(results) {
     routeDecisionConfidences: results.reduce((acc, result) => increment(acc, result.routeDecisionConfidence), {}),
     routePrimaryDomains: results.reduce((acc, result) => increment(acc, result.routePrimaryDomain), {}),
     selectionModes: results.reduce((acc, result) => increment(acc, result.selectionMode), {}),
+    sourceResolution: {
+      modes: results.reduce((acc, result) => increment(acc, result.sourceResolutionMode), {}),
+      autoSelectionScopes: results.reduce((acc, result) => increment(acc, result.sourceResolutionAutoSelectionScope), {}),
+      selectionReasons: results.reduce((acc, result) => increment(acc, result.sourceResolutionSelectionReason), {}),
+      riskSignals: results.reduce((acc, result) => {
+        for (const signal of resultArray(result, "sourceResolutionRiskSignals")) increment(acc, signal);
+        return acc;
+      }, {}),
+      casesWithRiskSignals: sourceResolutionRiskCases.length,
+      riskSignalRatio: results.length === 0
+        ? 0
+        : Number((sourceResolutionRiskCases.length / results.length).toFixed(3)),
+      averageTopCandidateScore: averageField(results, "sourceResolutionTopCandidateScore"),
+      averageTopCandidateScoreGap: averageField(results, "sourceResolutionTopCandidateScoreGap"),
+      broadAutoSelectionCases: results
+        .filter((result) => result.sourceResolutionAutoSelectionScope === "all_private_low_confidence")
+        .map((result) => ({ id: result.id, bucket: result.bucket })),
+      includePublicBroadScopeCases: results
+        .filter((result) => resultArray(result, "sourceResolutionRiskSignals").includes("include_public_broad_scope"))
+        .map((result) => ({ id: result.id, bucket: result.bucket })),
+    },
     metadataCandidateCoverage: {
       casesWithCandidates: casesWithMetadataCandidates.length,
       ratio: results.length === 0 ? 0 : Number((casesWithMetadataCandidates.length / results.length).toFixed(3)),
