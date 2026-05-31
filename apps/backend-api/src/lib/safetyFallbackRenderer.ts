@@ -84,7 +84,17 @@ export function renderSafetyFallback(input: SafetyFallbackRenderInput): string {
     !presentationPolicy.allowGenericCaution &&
     answerPlan.coverage !== "complete"
   ) {
-    return conciseMissingFieldFallback(answerPlan);
+    const fallback = conciseMissingFieldFallback(answerPlan);
+    if (input.fallbackMode !== "low_grounding") return fallback;
+
+    const rendered = composePlannedAnswer({
+      answerSpec: input.answerSpec,
+      answerPlan,
+      evidenceBundle: input.evidenceBundle,
+      constraints,
+    }).trim();
+
+    return rendered && rendered !== fallback ? rendered : fallback;
   }
 
   const spec =

@@ -84,9 +84,9 @@ of truth; these files are the short working charter read before each task.
 | Responsibility | Actor | Agent ID | Product Code Write Permission |
 | --- | --- | --- | --- |
 | Architecture controller | Atlas / main Codex thread | Main thread | No, except announced tiny integration repair |
-| Explorer / risk auditor | Locke | `019e6117-ec95-7d02-87c8-f18c01d84a88` | No |
-| Contract and implementation worker | Pascal | `019e6118-2830-7e40-9003-18a936023b23` | Yes, assigned files only |
-| Verifier / eval guard | Newton | `019e6118-5be4-79d1-84e7-bc5c794dea89` | No |
+| Explorer / risk auditor | Locke | Historical / inactive | No |
+| Contract and implementation worker | Pascal | `019e8021-45a1-7911-a09c-8d4c55608442` | Yes, assigned files only |
+| Verifier / eval guard | Newton | `019e8024-3c25-7901-88c8-0cabc37fda9e` | No |
 | Reserve | Huygens | `019e611e-e0de-7540-b718-2838b670f4a4` | Only after user approval |
 
 ## Non-Negotiable Rules
@@ -120,3 +120,10 @@ of truth; these files are the short working charter read before each task.
 - Default search budget is five targeted `rg` searches per task; explain expansion.
 - Agent handoffs are at most 80 lines; per-task memory additions are at most 15 lines.
 - Report test results as command, exit code, outcome, and failure reason; omit raw logs.
+
+## Latest Phase 7 Note
+
+- Slice 3 added a narrow low-grounding safety fallback bridge in `safetyFallbackRenderer`.
+- Domain-safe must remain cautious and must not be forced into concise missing-field fallback.
+- Latest answer-quality baseline after Slice 3: 8/17 pass, failure count 29, answer-quality failure rate 0.294.
+- Remaining Faz 7 focus: safety presentation compatibility and KAP/table numeric answer planning, not retrieval or parser changes.

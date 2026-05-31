@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAnswerPlan } from "./answerPlan.js";
+import { buildAnswerPlan, type AnswerPlan } from "./answerPlan.js";
 import type { AnswerSpec } from "./answerSpec.js";
 import { renderSafetyFallback } from "./safetyFallbackRenderer.js";
 
@@ -44,6 +44,72 @@ function financeFieldSpec(): AnswerSpec {
   };
 }
 
+function genericFieldSpec(overrides: Partial<AnswerSpec> = {}): AnswerSpec {
+  return {
+    answerDomain: "general",
+    answerIntent: "explain",
+    groundingConfidence: "high",
+    userQuery: "Required Metric ve Second Metric alanlarını kısa yaz, uyarı ekleme.",
+    tone: "direct",
+    sections: ["assessment", "action", "summary"],
+    assessment: "Kaynakta istenen alanların bir kısmı bulunuyor.",
+    action: "Sadece kaynakta doğrulanan alanlar yazılmalıdır.",
+    caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+    summary: "Sorulan alanlar kaynakla sınırlıdır.",
+    unknowns: [],
+    sourceIds: ["generic-source"],
+    facts: ["Required Metric kaynakta doğrulanmış bir metin değeri olarak geçiyor."],
+    structuredFacts: [],
+    ...overrides,
+  };
+}
+
+function genericFieldPlan(overrides: Partial<AnswerPlan> = {}): AnswerPlan {
+  const requestedFields = [
+    {
+      id: "required_metric",
+      label: "Required Metric",
+      aliases: ["required metric"],
+      required: true,
+      outputHint: "text" as const,
+      confidence: "high" as const,
+      matchedAliases: ["required metric"],
+    },
+    {
+      id: "second_metric",
+      label: "Second Metric",
+      aliases: ["second metric"],
+      required: true,
+      outputHint: "text" as const,
+      confidence: "high" as const,
+      matchedAliases: ["second metric"],
+    },
+  ];
+  return {
+    domain: "general",
+    intent: "explain",
+    taskType: "field_extraction",
+    outputFormat: "short",
+    requestedFields,
+    selectedFacts: [],
+    constraints: {
+      forbidCaution: true,
+      noRawTableDump: true,
+      sourceGroundedOnly: true,
+      format: "short",
+    },
+    coverage: "partial",
+    forbiddenAdditions: ["optional_caution"],
+    requiresModelSynthesis: true,
+    diagnostics: {
+      requestedFieldCount: requestedFields.length,
+      selectedFactCount: 0,
+      missingFieldIds: ["second_metric"],
+    },
+    ...overrides,
+  };
+}
+
 describe("renderSafetyFallback", () => {
   it("keeps source suggestions deterministic", () => {
     expect(
@@ -83,5 +149,68 @@ describe("renderSafetyFallback", () => {
     expect(rendered).toContain("3.352.908.083");
     expect(rendered).not.toContain("Dikkat");
     expect(rendered).not.toContain("risk koşulu");
+  });
+
+  it("bridges low-grounding partial field extraction to usable text facts before concise missing fallback", () => {
+    const rendered = renderSafetyFallback({
+      answerSpec: genericFieldSpec(),
+      answerPlan: genericFieldPlan(),
+      sources: [source],
+      fallbackMode: "low_grounding",
+    });
+
+    expect(rendered).toContain("Required Metric kaynakta doğrulanmış");
+    expect(rendered).toContain("Bulunamayan alanlar: Second Metric");
+    expect(rendered).not.toContain("Kaynakta sorulan alanlar için tam değer bulunamadı");
+  });
+
+  it("suppresses generic caution on the low-grounding partial evidence bridge", () => {
+    const rendered = renderSafetyFallback({
+      answerSpec: genericFieldSpec({
+        facts: ["Required Metric için kaynakta doğrulanmış kısa açıklama vardır."],
+      }),
+      answerPlan: genericFieldPlan({
+        outputFormat: "bullets",
+        constraints: {
+          forbidCaution: true,
+          noRawTableDump: true,
+          sourceGroundedOnly: true,
+          format: "bullets",
+        },
+      }),
+      sources: [source],
+      fallbackMode: "low_grounding",
+    });
+
+    expect(rendered).toContain("- Required Metric için kaynakta doğrulanmış kısa açıklama vardır.");
+    expect(rendered).toContain("- Bulunamayan alanlar: Second Metric.");
+    expect(rendered).not.toContain("Dikkat");
+    expect(rendered).not.toContain("risk koşulu");
+  });
+
+  it("keeps concise missing fallback when low-grounding field extraction has no usable facts", () => {
+    const rendered = renderSafetyFallback({
+      answerSpec: genericFieldSpec({
+        facts: [],
+      }),
+      answerPlan: genericFieldPlan(),
+      sources: [source],
+      fallbackMode: "low_grounding",
+    });
+
+    expect(rendered).toBe("Kaynakta sorulan alanlar için tam değer bulunamadı: second_metric.");
+  });
+
+  it("keeps domain-safe field extraction on the cautious blocking fallback path", () => {
+    const rendered = renderSafetyFallback({
+      answerSpec: genericFieldSpec(),
+      answerPlan: genericFieldPlan(),
+      sources: [source],
+      fallbackMode: "domain_safe",
+    });
+
+    expect(rendered).toContain("Required Metric kaynakta doğrulanmış");
+    expect(rendered).toContain("Bulunamayan alanlar: Second Metric");
+    expect(rendered).not.toContain("Ne zaman doktora");
   });
 });
