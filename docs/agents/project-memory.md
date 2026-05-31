@@ -32,6 +32,11 @@ of truth; these files are the short working charter read before each task.
 - Dilim 7 gates: ui-reality 5/5 and source-resolution/knowledge/retrieval-contract tests 46/46; local CPU reranker warning remains Faz 6 backlog.
 - Faz 5 closure completed with 71 query/source tests, backend typecheck, provider smokes, collection-suggestion 5/5, retrieval-quality 16/16, ui-reality 5/5.
 - Faz 6 starts with known backlog: evidence coverage gaps plus local CPU reranker/provider-budget warning.
+- Faz 6 Dilim 1 added `CompiledEvidenceV2` diagnostics with coverage and sufficiency decisions.
+- Dilim 1 did not change retrieval, parser, composer, safety, Qdrant, or public response behavior.
+- Dilim 1 gates: compiledEvidence/evidenceBundle/evalDebugContract tests 16/16, backend typecheck, evidence-only 1/1.
+- Answer-quality remains 8/17 and is expected Faz 6/7 backlog, not Dilim 1 blocker.
+- Next Faz 6 slice should aggregate coverage/sufficiency in evidence diagnostics/eval summaries.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.

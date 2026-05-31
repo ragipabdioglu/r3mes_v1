@@ -239,4 +239,145 @@ describe("compileEvidence", () => {
     expect(compiled.confidence).toBe("high");
     expect(hasCompiledUsableGrounding(compiled)).toBe(true);
   });
+
+  it("exposes V2 complete coverage and sufficiency diagnostics", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        sourceIds: ["doc-structured"],
+        structuredFacts: [
+          {
+            id: "sf-total",
+            kind: "numeric_value",
+            sourceId: "doc-structured",
+            field: "total_amount",
+            value: "120",
+            confidence: "high",
+            provenance: {
+              quote: "Total amount 120",
+              extractor: "test",
+            },
+          },
+        ],
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Toplam tutar nedir?",
+          requestedFieldIds: ["total_amount"],
+          structuredFacts: [
+            {
+              id: "sf-total",
+              kind: "numeric_value",
+              sourceId: "doc-structured",
+              field: "total_amount",
+              value: "120",
+              confidence: "high",
+              provenance: {
+                quote: "Total amount 120",
+                extractor: "test",
+              },
+            },
+          ],
+          sourceIds: ["doc-structured"],
+        }),
+      }),
+    });
+
+    expect(compiled.version).toBe(2);
+    expect(compiled.coverage).toMatchObject({
+      status: "complete",
+      requestedFieldIds: ["total_amount"],
+      coveredFieldIds: ["total_amount"],
+      missingFieldIds: [],
+      structuredFactCount: 1,
+    });
+    expect(compiled.sufficiency).toMatchObject({
+      status: "sufficient",
+      shouldAnswer: true,
+      reason: "sufficient_evidence",
+      coverage: "complete",
+      confidence: "high",
+    });
+  });
+
+  it("marks requested field coverage as partial without changing usable grounding", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        usableFacts: ["Kaynak toplam tutarı açıkça veriyor."],
+        sourceIds: ["doc-partial"],
+        structuredFacts: [
+          {
+            id: "sf-total",
+            kind: "numeric_value",
+            sourceId: "doc-partial",
+            field: "total_amount",
+            value: "120",
+            confidence: "high",
+            provenance: {
+              quote: "Toplam 120",
+              extractor: "test",
+            },
+          },
+        ],
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Toplam ve net tutar nedir?",
+          requestedFieldIds: ["total_amount", "net_amount"],
+          textFacts: ["Kaynak toplam tutarı açıkça veriyor."],
+          sourceIds: ["doc-partial"],
+        }),
+      }),
+    });
+
+    expect(compiled.coverage?.status).toBe("partial");
+    expect(compiled.coverage?.coveredFieldIds).toEqual(["total_amount"]);
+    expect(compiled.coverage?.missingFieldIds).toEqual(["net_amount"]);
+    expect(compiled.sufficiency).toMatchObject({
+      status: "partial",
+      shouldAnswer: true,
+      reason: "partial_requested_field_coverage",
+    });
+    expect(hasCompiledUsableGrounding(compiled)).toBe(true);
+  });
+
+  it("marks no usable evidence as insufficient", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        notSupported: ["Kaynakta istenen bilgi yok."],
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Kaynakta olmayan alan nedir?",
+          requestedFieldIds: ["missing_field"],
+          notSupported: ["Kaynakta istenen bilgi yok."],
+        }),
+      }),
+    });
+
+    expect(compiled.coverage?.status).toBe("none");
+    expect(compiled.sufficiency).toMatchObject({
+      status: "insufficient",
+      shouldAnswer: false,
+      reason: "no_usable_evidence",
+      coverage: "none",
+      confidence: "low",
+    });
+  });
+
+  it("marks contradiction as a sufficiency diagnostic without dropping usable facts", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        usableFacts: ["Kaynak A tutarı 120 olarak verir."],
+        uncertainOrUnusable: ["Kaynak B bununla çelişiyor."],
+        sourceIds: ["doc-a", "doc-b"],
+      }),
+    });
+
+    expect(compiled.confidence).toBe("low");
+    expect(compiled.sufficiency).toMatchObject({
+      status: "contradictory",
+      shouldAnswer: true,
+      reason: "contradiction_present",
+      confidence: "low",
+    });
+    expect(hasCompiledUsableGrounding(compiled)).toBe(true);
+  });
 });

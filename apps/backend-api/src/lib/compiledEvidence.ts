@@ -5,8 +5,34 @@ import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 import type { StructuredFact } from "./structuredFact.js";
 
 export type CompiledEvidenceConfidence = "low" | "medium" | "high";
+export type EvidenceCoverageStatus = "complete" | "partial" | "none";
+export type EvidenceSufficiencyStatus = "sufficient" | "partial" | "insufficient" | "contradictory";
+
+export interface EvidenceCoverage {
+  status: EvidenceCoverageStatus;
+  requestedFieldIds: string[];
+  coveredFieldIds: string[];
+  missingFieldIds: string[];
+  usableEvidenceItemCount: number;
+  structuredFactCount: number;
+  textFactCount: number;
+  contradictionCount: number;
+}
+
+export interface EvidenceSufficiencyDecision {
+  status: EvidenceSufficiencyStatus;
+  shouldAnswer: boolean;
+  reason:
+    | "sufficient_evidence"
+    | "partial_requested_field_coverage"
+    | "no_usable_evidence"
+    | "contradiction_present";
+  coverage: EvidenceCoverageStatus;
+  confidence: CompiledEvidenceConfidence;
+}
 
 export interface CompiledEvidence {
+  version?: 2;
   facts: string[];
   structuredFacts?: StructuredFact[];
   risks: string[];
@@ -14,6 +40,8 @@ export interface CompiledEvidence {
   contradictions: string[];
   sourceIds: string[];
   evidenceBundle?: EvidenceBundle;
+  coverage?: EvidenceCoverage;
+  sufficiency?: EvidenceSufficiencyDecision;
   confidence: CompiledEvidenceConfidence;
   usableFactCount: number;
   structuredFactCount?: number;
@@ -43,6 +71,12 @@ export interface CompiledEvidence {
       usableItemCount: number;
     };
   };
+}
+
+export interface CompiledEvidenceV2 extends CompiledEvidence {
+  version: 2;
+  coverage: EvidenceCoverage;
+  sufficiency: EvidenceSufficiencyDecision;
 }
 
 export interface CompileEvidenceOptions {
@@ -123,7 +157,94 @@ function deriveConfidence(opts: {
   return { confidence: "low", reason: "grounding_low" };
 }
 
-export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence {
+function normalizeFieldId(value: string): string {
+  return value.trim().toLocaleLowerCase("tr-TR");
+}
+
+function deriveCoverage(opts: {
+  evidenceBundle?: EvidenceBundle;
+  facts: string[];
+  structuredFacts: StructuredFact[];
+  usableEvidenceItemCount: number;
+  contradictionCount: number;
+}): EvidenceCoverage {
+  const requestedFieldIds = uniqueText(opts.evidenceBundle?.requestedFieldIds ?? []);
+  const requestedFieldKeys = new Set(requestedFieldIds.map(normalizeFieldId));
+  const coveredFieldIds = uniqueText(
+    opts.structuredFacts
+      .map((fact) => fact.field)
+      .filter((field): field is string => Boolean(field?.trim()))
+      .filter((field) => requestedFieldKeys.size === 0 || requestedFieldKeys.has(normalizeFieldId(field))),
+  );
+  const coveredFieldKeys = new Set(coveredFieldIds.map(normalizeFieldId));
+  const missingFieldIds = requestedFieldIds.filter((field) => !coveredFieldKeys.has(normalizeFieldId(field)));
+  const hasUsableEvidence = opts.facts.length > 0 || opts.structuredFacts.length > 0 || opts.usableEvidenceItemCount > 0;
+  const status: EvidenceCoverageStatus =
+    requestedFieldIds.length === 0
+      ? hasUsableEvidence
+        ? "complete"
+        : "none"
+      : missingFieldIds.length === 0
+        ? "complete"
+        : coveredFieldIds.length > 0 || hasUsableEvidence
+          ? "partial"
+          : "none";
+
+  return {
+    status,
+    requestedFieldIds,
+    coveredFieldIds,
+    missingFieldIds,
+    usableEvidenceItemCount: opts.usableEvidenceItemCount,
+    structuredFactCount: opts.structuredFacts.length,
+    textFactCount: opts.facts.length,
+    contradictionCount: opts.contradictionCount,
+  };
+}
+
+function deriveSufficiency(opts: {
+  coverage: EvidenceCoverage;
+  confidence: CompiledEvidenceConfidence;
+  usableGroundingCount: number;
+  contradictionCount: number;
+}): EvidenceSufficiencyDecision {
+  if (opts.contradictionCount > 0) {
+    return {
+      status: "contradictory",
+      shouldAnswer: opts.usableGroundingCount > 0,
+      reason: "contradiction_present",
+      coverage: opts.coverage.status,
+      confidence: opts.confidence,
+    };
+  }
+  if (opts.usableGroundingCount === 0) {
+    return {
+      status: "insufficient",
+      shouldAnswer: false,
+      reason: "no_usable_evidence",
+      coverage: opts.coverage.status,
+      confidence: opts.confidence,
+    };
+  }
+  if (opts.coverage.status === "partial") {
+    return {
+      status: "partial",
+      shouldAnswer: true,
+      reason: "partial_requested_field_coverage",
+      coverage: opts.coverage.status,
+      confidence: opts.confidence,
+    };
+  }
+  return {
+    status: "sufficient",
+    shouldAnswer: true,
+    reason: "sufficient_evidence",
+    coverage: opts.coverage.status,
+    confidence: opts.confidence,
+  };
+}
+
+export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV2 {
   const evidence = opts.evidence;
   const decisionConfig = getDecisionConfig();
   const budget = decisionConfig.evidenceBudget;
@@ -160,8 +281,22 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
     sourceCount: sourceIds.length,
     contradictionCount: contradictions.length,
   });
+  const coverage = deriveCoverage({
+    evidenceBundle,
+    facts,
+    structuredFacts,
+    usableEvidenceItemCount,
+    contradictionCount: contradictions.length,
+  });
+  const sufficiency = deriveSufficiency({
+    coverage,
+    confidence: confidence.confidence,
+    usableGroundingCount,
+    contradictionCount: contradictions.length,
+  });
 
   return {
+    version: 2,
     facts,
     structuredFacts,
     risks,
@@ -169,6 +304,8 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidence 
     contradictions,
     sourceIds,
     evidenceBundle,
+    coverage,
+    sufficiency,
     confidence: confidence.confidence,
     usableFactCount: usableGroundingCount,
     structuredFactCount: structuredFacts.length,
