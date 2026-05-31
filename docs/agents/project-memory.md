@@ -57,6 +57,13 @@ of truth; these files are the short working charter read before each task.
 - Dilim 5 gates: compiled/evalDebug/boundary tests 17/17, typecheck, eval runner syntax, backend readiness, evidence-only 1/1.
 - Dilim 5 answer-quality remains 8/17; fact diagnostics show 16 observed cases, table_row 13, numeric_fact 0, text_fact 79.
 - Next step should be Faz 6 closure verification before Faz 7 answer intelligence.
+- Faz 6 closure completed with evidence intelligence accepted.
+- Closure gates: compiled/evidence/field/evalDebug/boundary tests 24/24, backend typecheck, eval runner syntax, backend readiness, evidence-only 1/1.
+- Closure answer-quality remains expected 8/17; this is Faz 7 backlog, not Faz 6 blocker.
+- Evidence coverage: 16 observed cases, 0.941 coverage ratio, sufficient 9, partial 6, contradictory 1.
+- Evidence-to-answer path shows 9 sufficient-evidence cases still using fallback/template paths.
+- Fact-level diagnostics show table_row 13, numeric_fact 0, text_fact 79.
+- Faz 7 should focus on answer planning/rendering/safety presentation without weakening evidence contracts.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
