@@ -3,10 +3,17 @@ import type { AnswerPlan } from "./answerPlan.js";
 import type { AnswerQualityFinding } from "./answerQualityValidator.js";
 import type {
   CompiledEvidence,
+  EvidenceFactLevelDiagnostics,
   EvidenceCoverage,
   EvidenceSufficiencyDecision,
 } from "./compiledEvidence.js";
-import { countUsableEvidenceItems, type EvidenceBundle, type EvidenceBundleDiagnostics } from "./evidenceBundle.js";
+import {
+  countUsableEvidenceItems,
+  EVIDENCE_ITEM_KINDS,
+  type EvidenceBundle,
+  type EvidenceBundleDiagnostics,
+  type EvidenceItemKind,
+} from "./evidenceBundle.js";
 import type { SafetyGateResult } from "./safetyGate.js";
 
 export const EVAL_DEBUG_CONTRACT_VERSION = "2026-05-section-04" as const;
@@ -28,6 +35,7 @@ export interface EvalAnswerBaselineDiagnostics {
     contradictionCount: number;
     coverage: EvidenceCoverage | null;
     sufficiency: EvidenceSufficiencyDecision | null;
+    factLevelDiagnostics: EvidenceFactLevelDiagnostics | null;
   };
   answerPlan: {
     taskType: AnswerPlan["taskType"] | null;
@@ -82,6 +90,57 @@ export interface EvalDebugContract {
   runtimeLineage?: RuntimeLineage;
 }
 
+function zeroBundleKindCounts(): Record<EvidenceItemKind, number> {
+  return Object.fromEntries(EVIDENCE_ITEM_KINDS.map((kind) => [kind, 0])) as Record<EvidenceItemKind, number>;
+}
+
+function buildFallbackFactLevelDiagnostics(input: {
+  compiledEvidence: CompiledEvidence | null;
+  evidenceBundle: EvidenceBundle | null;
+}): EvidenceFactLevelDiagnostics | null {
+  const compiledEvidence = input.compiledEvidence;
+  if (!compiledEvidence) return null;
+  const sourceDistribution = (compiledEvidence.sourceIds ?? [])
+    .map((sourceId) => ({
+      sourceId,
+      count: input.evidenceBundle?.items.filter((item) => item.sourceId === sourceId).length ?? 0,
+    }))
+    .sort((a, b) => b.count - a.count || a.sourceId.localeCompare(b.sourceId));
+  const structuredFactKinds = {
+    table_cell: 0,
+    table_row: 0,
+    numeric_value: 0,
+    text_claim: 0,
+  } satisfies EvidenceFactLevelDiagnostics["structuredFactKinds"];
+  const structuredFactConfidenceCounts = {
+    low: 0,
+    medium: 0,
+    high: 0,
+  } satisfies EvidenceFactLevelDiagnostics["structuredFactConfidenceCounts"];
+  for (const fact of compiledEvidence.structuredFacts ?? []) {
+    structuredFactKinds[fact.kind] += 1;
+    structuredFactConfidenceCounts[fact.confidence] += 1;
+  }
+
+  return {
+    usableEvidenceItemCount: compiledEvidence.coverage?.usableEvidenceItemCount ?? countUsableEvidenceItems(input.evidenceBundle),
+    selectedTextFactCount: compiledEvidence.facts.length,
+    selectedStructuredFactCount: compiledEvidence.structuredFactCount ?? compiledEvidence.structuredFacts?.length ?? 0,
+    selectedRiskFactCount: compiledEvidence.riskFactCount,
+    selectedUnknownCount: compiledEvidence.unknownCount,
+    selectedContradictionCount: compiledEvidence.contradictionCount,
+    selectedSourceCount: compiledEvidence.sourceIds.length,
+    bundleKindCounts: input.evidenceBundle?.diagnostics.kindCounts ?? zeroBundleKindCounts(),
+    structuredFactKinds,
+    structuredFactConfidenceCounts,
+    sourceDistribution,
+    contradictionSources: (input.evidenceBundle?.items ?? [])
+      .filter((item) => item.kind === "contradiction")
+      .map((item) => item.sourceId),
+    diagnosticsMode: "observed_only",
+  };
+}
+
 export function buildEvalDebugContract(input: {
   safetyGate?: SafetyGateResult;
   answerQualityFindings?: AnswerQualityFinding[];
@@ -105,6 +164,10 @@ export function buildEvalDebugContract(input: {
   const evidenceBundle = input.evidenceBundle ?? null;
   const compiledEvidence = input.compiledEvidence ?? null;
   const answerPlan = input.answerPlan ?? null;
+  const factLevelDiagnostics = compiledEvidence?.factLevelDiagnostics ?? buildFallbackFactLevelDiagnostics({
+    compiledEvidence,
+    evidenceBundle,
+  });
   const composerPath = input.composerDiagnostics?.path ?? input.runtimeLineage?.composer?.path ?? null;
   const plannedComposerUsed = input.composerDiagnostics?.plannedComposerUsed ?? null;
   const fallbackTemplateUsed = input.composerDiagnostics?.fallbackTemplateUsed ?? null;
@@ -157,6 +220,7 @@ export function buildEvalDebugContract(input: {
         contradictionCount: compiledEvidence?.contradictionCount ?? 0,
         coverage: compiledEvidence?.coverage ?? null,
         sufficiency: compiledEvidence?.sufficiency ?? null,
+        factLevelDiagnostics,
       },
       answerPlan: {
         taskType: answerPlan?.taskType ?? null,

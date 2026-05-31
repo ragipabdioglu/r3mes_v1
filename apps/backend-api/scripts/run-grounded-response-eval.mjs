@@ -1804,6 +1804,9 @@ function summarizeAnswerBaselineQuality(results) {
   const evidenceToAnswerPathDiagnoses = {};
   const evidenceToAnswerPathBySufficiency = {};
   const evidenceToAnswerPathByComposer = {};
+  const factLevelStructuredKinds = {};
+  const factLevelStructuredConfidence = {};
+  const factLevelBundleKinds = {};
   const composerPaths = {};
   const confidenceReasons = {};
   const compiledEvidenceConfidences = {};
@@ -1824,6 +1827,13 @@ function summarizeAnswerBaselineQuality(results) {
   let sufficientEvidenceFallbackCases = 0;
   let partialEvidenceCases = 0;
   let contradictionEvidenceCases = 0;
+  let factLevelDiagnosticsCases = 0;
+  let factLevelStructuredFactTotal = 0;
+  let factLevelTextFactTotal = 0;
+  let factLevelRiskFactTotal = 0;
+  let factLevelUnknownTotal = 0;
+  let factLevelContradictionTotal = 0;
+  let factLevelUsableItemTotal = 0;
   let missingFieldCases = 0;
   let requiresModelSynthesisCases = 0;
   let plannedComposerCases = 0;
@@ -1851,6 +1861,28 @@ function summarizeAnswerBaselineQuality(results) {
     if (sufficiencyStatus === "partial") partialEvidenceCases += 1;
     if (sufficiencyStatus === "contradictory") contradictionEvidenceCases += 1;
     if (evidenceToAnswerPath?.diagnosis === "evidence_sufficient_fallback") sufficientEvidenceFallbackCases += 1;
+    const factLevelDiagnostics = baseline?.compiledEvidence?.factLevelDiagnostics;
+    if (factLevelDiagnostics && typeof factLevelDiagnostics === "object") {
+      factLevelDiagnosticsCases += 1;
+      factLevelStructuredFactTotal += Number(factLevelDiagnostics.selectedStructuredFactCount ?? 0);
+      factLevelTextFactTotal += Number(factLevelDiagnostics.selectedTextFactCount ?? 0);
+      factLevelRiskFactTotal += Number(factLevelDiagnostics.selectedRiskFactCount ?? 0);
+      factLevelUnknownTotal += Number(factLevelDiagnostics.selectedUnknownCount ?? 0);
+      factLevelContradictionTotal += Number(factLevelDiagnostics.selectedContradictionCount ?? 0);
+      factLevelUsableItemTotal += Number(factLevelDiagnostics.usableEvidenceItemCount ?? 0);
+      for (const [kind, count] of Object.entries(factLevelDiagnostics.structuredFactKinds ?? {})) {
+        const numeric = Number(count);
+        if (Number.isFinite(numeric)) increment(factLevelStructuredKinds, kind, numeric);
+      }
+      for (const [confidence, count] of Object.entries(factLevelDiagnostics.structuredFactConfidenceCounts ?? {})) {
+        const numeric = Number(count);
+        if (Number.isFinite(numeric)) increment(factLevelStructuredConfidence, confidence, numeric);
+      }
+      for (const [kind, count] of Object.entries(factLevelDiagnostics.bundleKindCounts ?? {})) {
+        const numeric = Number(count);
+        if (Number.isFinite(numeric)) increment(factLevelBundleKinds, kind, numeric);
+      }
+    }
 
     if (Array.isArray(baseline?.answerPlan?.missingFieldIds) && baseline.answerPlan.missingFieldIds.length > 0) {
       missingFieldCases += 1;
@@ -1934,6 +1966,23 @@ function summarizeAnswerBaselineQuality(results) {
       Object.entries(compiledEvidenceConfidences).sort(([a], [b]) => a.localeCompare(b)),
     ),
     confidenceReasons: Object.fromEntries(Object.entries(confidenceReasons).sort(([a], [b]) => a.localeCompare(b))),
+    factLevelDiagnostics: {
+      observedCases: factLevelDiagnosticsCases,
+      coverageRatio: observedCases === 0 ? 0 : Number((factLevelDiagnosticsCases / observedCases).toFixed(3)),
+      averages: {
+        selectedStructuredFacts: average(factLevelStructuredFactTotal),
+        selectedTextFacts: average(factLevelTextFactTotal),
+        selectedRiskFacts: average(factLevelRiskFactTotal),
+        selectedUnknowns: average(factLevelUnknownTotal),
+        selectedContradictions: average(factLevelContradictionTotal),
+        usableEvidenceItems: average(factLevelUsableItemTotal),
+      },
+      structuredFactKinds: Object.fromEntries(Object.entries(factLevelStructuredKinds).sort(([a], [b]) => a.localeCompare(b))),
+      structuredFactConfidenceCounts: Object.fromEntries(
+        Object.entries(factLevelStructuredConfidence).sort(([a], [b]) => a.localeCompare(b)),
+      ),
+      bundleKindCounts: Object.fromEntries(Object.entries(factLevelBundleKinds).sort(([a], [b]) => a.localeCompare(b))),
+    },
     missingFieldCaseRatio: caseRatio(missingFieldCases),
     compiledEvidenceMissingFieldCaseRatio: caseRatio(compiledMissingFieldCases),
     compiledEvidenceShouldAnswerRatio: caseRatio(compiledShouldAnswerCases),

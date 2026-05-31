@@ -1,6 +1,12 @@
 import type { GroundingConfidence } from "./answerSchema.js";
 import { getDecisionConfig, getDecisionConfigVersion } from "./decisionConfig.js";
-import { countUsableEvidenceItems, type EvidenceBundle, type EvidenceBundleDiagnostics } from "./evidenceBundle.js";
+import {
+  countUsableEvidenceItems,
+  EVIDENCE_ITEM_KINDS,
+  type EvidenceBundle,
+  type EvidenceBundleDiagnostics,
+  type EvidenceItemKind,
+} from "./evidenceBundle.js";
 import { fieldTextMatchesFact } from "./fieldCoverageResolver.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 import type { StructuredFact } from "./structuredFact.js";
@@ -32,6 +38,22 @@ export interface EvidenceSufficiencyDecision {
   confidence: CompiledEvidenceConfidence;
 }
 
+export interface EvidenceFactLevelDiagnostics {
+  usableEvidenceItemCount: number;
+  selectedTextFactCount: number;
+  selectedStructuredFactCount: number;
+  selectedRiskFactCount: number;
+  selectedUnknownCount: number;
+  selectedContradictionCount: number;
+  selectedSourceCount: number;
+  bundleKindCounts: Record<EvidenceItemKind, number>;
+  structuredFactKinds: Record<StructuredFact["kind"], number>;
+  structuredFactConfidenceCounts: Record<StructuredFact["confidence"], number>;
+  sourceDistribution: Array<{ sourceId: string; count: number }>;
+  contradictionSources: string[];
+  diagnosticsMode: "observed_only";
+}
+
 export interface CompiledEvidence {
   version?: 2;
   facts: string[];
@@ -43,6 +65,7 @@ export interface CompiledEvidence {
   evidenceBundle?: EvidenceBundle;
   coverage?: EvidenceCoverage;
   sufficiency?: EvidenceSufficiencyDecision;
+  factLevelDiagnostics?: EvidenceFactLevelDiagnostics;
   confidence: CompiledEvidenceConfidence;
   usableFactCount: number;
   structuredFactCount?: number;
@@ -237,6 +260,72 @@ function deriveSufficiency(opts: {
   };
 }
 
+function emptyBundleKindCounts(): Record<EvidenceItemKind, number> {
+  return Object.fromEntries(EVIDENCE_ITEM_KINDS.map((kind) => [kind, 0])) as Record<EvidenceItemKind, number>;
+}
+
+function deriveFactLevelDiagnostics(opts: {
+  evidenceBundle?: EvidenceBundle;
+  facts: string[];
+  structuredFacts: StructuredFact[];
+  risks: string[];
+  unknowns: string[];
+  contradictions: string[];
+  sourceIds: string[];
+  usableEvidenceItemCount: number;
+}): EvidenceFactLevelDiagnostics {
+  const sourceCounts = new Map<string, number>();
+  for (const item of opts.evidenceBundle?.items ?? []) {
+    sourceCounts.set(item.sourceId, (sourceCounts.get(item.sourceId) ?? 0) + 1);
+  }
+  for (const fact of opts.structuredFacts) {
+    sourceCounts.set(fact.sourceId, (sourceCounts.get(fact.sourceId) ?? 0) + 1);
+  }
+  for (const sourceId of opts.sourceIds) {
+    if (!sourceCounts.has(sourceId)) sourceCounts.set(sourceId, 0);
+  }
+
+  const structuredFactKinds = {
+    table_cell: 0,
+    table_row: 0,
+    numeric_value: 0,
+    text_claim: 0,
+  } satisfies Record<StructuredFact["kind"], number>;
+  const structuredFactConfidenceCounts = {
+    low: 0,
+    medium: 0,
+    high: 0,
+  } satisfies Record<StructuredFact["confidence"], number>;
+  for (const fact of opts.structuredFacts) {
+    structuredFactKinds[fact.kind] += 1;
+    structuredFactConfidenceCounts[fact.confidence] += 1;
+  }
+
+  const contradictionSources = uniqueText(
+    (opts.evidenceBundle?.items ?? [])
+      .filter((item) => item.kind === "contradiction" || CONTRADICTION_PATTERN.test(item.quote))
+      .map((item) => item.sourceId),
+  );
+
+  return {
+    usableEvidenceItemCount: opts.usableEvidenceItemCount,
+    selectedTextFactCount: opts.facts.length,
+    selectedStructuredFactCount: opts.structuredFacts.length,
+    selectedRiskFactCount: opts.risks.length,
+    selectedUnknownCount: opts.unknowns.length,
+    selectedContradictionCount: opts.contradictions.length,
+    selectedSourceCount: opts.sourceIds.length,
+    bundleKindCounts: opts.evidenceBundle?.diagnostics.kindCounts ?? emptyBundleKindCounts(),
+    structuredFactKinds,
+    structuredFactConfidenceCounts,
+    sourceDistribution: [...sourceCounts.entries()]
+      .map(([sourceId, count]) => ({ sourceId, count }))
+      .sort((a, b) => b.count - a.count || a.sourceId.localeCompare(b.sourceId)),
+    contradictionSources,
+    diagnosticsMode: "observed_only",
+  };
+}
+
 export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV2 {
   const evidence = opts.evidence;
   const decisionConfig = getDecisionConfig();
@@ -287,6 +376,16 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV
     usableGroundingCount,
     contradictionCount: contradictions.length,
   });
+  const factLevelDiagnostics = deriveFactLevelDiagnostics({
+    evidenceBundle,
+    facts,
+    structuredFacts,
+    risks,
+    unknowns,
+    contradictions,
+    sourceIds,
+    usableEvidenceItemCount,
+  });
 
   return {
     version: 2,
@@ -299,6 +398,7 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV
     evidenceBundle,
     coverage,
     sufficiency,
+    factLevelDiagnostics,
     confidence: confidence.confidence,
     usableFactCount: usableGroundingCount,
     structuredFactCount: structuredFacts.length,

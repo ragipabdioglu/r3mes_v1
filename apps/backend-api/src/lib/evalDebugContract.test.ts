@@ -98,6 +98,41 @@ describe("buildEvalDebugContract", () => {
         riskFactCount: 0,
         unknownCount: 0,
         contradictionCount: 0,
+        factLevelDiagnostics: {
+          usableEvidenceItemCount: 1,
+          selectedTextFactCount: 1,
+          selectedStructuredFactCount: 1,
+          selectedRiskFactCount: 0,
+          selectedUnknownCount: 0,
+          selectedContradictionCount: 0,
+          selectedSourceCount: 1,
+          bundleKindCounts: {
+            text_fact: 0,
+            definition: 0,
+            list_item: 0,
+            comparison_point: 0,
+            code_fact: 0,
+            table_fact: 0,
+            numeric_fact: 1,
+            procedure_step: 0,
+            source_limit: 0,
+            contradiction: 0,
+          },
+          structuredFactKinds: {
+            table_cell: 0,
+            table_row: 0,
+            numeric_value: 1,
+            text_claim: 0,
+          },
+          structuredFactConfidenceCounts: {
+            low: 0,
+            medium: 0,
+            high: 1,
+          },
+          sourceDistribution: [{ sourceId: "source_1", count: 1 }],
+          contradictionSources: [],
+          diagnosticsMode: "observed_only",
+        },
         diagnostics: {
           decisionConfigVersion: "test",
           confidenceReason: "grounding_high",
@@ -206,6 +241,13 @@ describe("buildEvalDebugContract", () => {
           shouldAnswer: true,
           reason: "sufficient_evidence",
         },
+        factLevelDiagnostics: {
+          selectedStructuredFactCount: 1,
+          bundleKindCounts: {
+            numeric_fact: 1,
+          },
+          diagnosticsMode: "observed_only",
+        },
       },
       answerPlan: {
         taskType: "extract",
@@ -239,6 +281,67 @@ describe("buildEvalDebugContract", () => {
       qwen: { called: false },
       embedding: { fallbackUsed: false },
       controlTower: { qualityFallbackUsed: false },
+    });
+  });
+
+  it("derives observed fact-level diagnostics when compiled evidence does not carry them yet", () => {
+    const contract = buildEvalDebugContract({
+      evidenceBundle: {
+        userQuery: "Toplam nedir?",
+        items: [
+          {
+            id: "fact_1",
+            kind: "text_fact",
+            sourceId: "source_1",
+            quote: "Toplam 42",
+            confidence: "high",
+            provenance: { extractor: "test" },
+          },
+        ],
+        sourceIds: ["source_1"],
+        requestedFieldIds: [],
+        diagnostics: {
+          stringFactCount: 1,
+          structuredFactCount: 0,
+          tableFactCount: 0,
+          contradictionCount: 0,
+          sourceLimitCount: 0,
+          kindCounts: {
+            text_fact: 1,
+            definition: 0,
+            list_item: 0,
+            comparison_point: 0,
+            code_fact: 0,
+            table_fact: 0,
+            numeric_fact: 0,
+            procedure_step: 0,
+            source_limit: 0,
+            contradiction: 0,
+          },
+        },
+      },
+      compiledEvidence: {
+        facts: ["Toplam 42"],
+        risks: [],
+        unknowns: [],
+        contradictions: [],
+        sourceIds: ["source_1"],
+        confidence: "high",
+        usableFactCount: 1,
+        structuredFactCount: 0,
+        riskFactCount: 0,
+        unknownCount: 0,
+        contradictionCount: 0,
+      },
+    });
+
+    expect(contract.answerBaseline?.compiledEvidence.factLevelDiagnostics).toMatchObject({
+      usableEvidenceItemCount: 1,
+      selectedTextFactCount: 1,
+      selectedStructuredFactCount: 0,
+      selectedSourceCount: 1,
+      sourceDistribution: [{ sourceId: "source_1", count: 1 }],
+      diagnosticsMode: "observed_only",
     });
   });
 });

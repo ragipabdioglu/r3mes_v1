@@ -296,6 +296,30 @@ describe("compileEvidence", () => {
       coverage: "complete",
       confidence: "high",
     });
+    expect(compiled.factLevelDiagnostics).toMatchObject({
+      usableEvidenceItemCount: 1,
+      selectedTextFactCount: 0,
+      selectedStructuredFactCount: 1,
+      selectedRiskFactCount: 0,
+      selectedUnknownCount: 0,
+      selectedContradictionCount: 0,
+      selectedSourceCount: 1,
+      diagnosticsMode: "observed_only",
+      structuredFactKinds: {
+        table_cell: 0,
+        table_row: 0,
+        numeric_value: 1,
+        text_claim: 0,
+      },
+      structuredFactConfidenceCounts: {
+        low: 0,
+        medium: 0,
+        high: 1,
+      },
+      sourceDistribution: [{ sourceId: "doc-structured", count: 2 }],
+      contradictionSources: [],
+    });
+    expect(compiled.factLevelDiagnostics?.bundleKindCounts.numeric_fact).toBe(1);
   });
 
   it("marks requested field coverage as partial without changing usable grounding", () => {
@@ -397,12 +421,19 @@ describe("compileEvidence", () => {
   });
 
   it("marks contradiction as a sufficiency diagnostic without dropping usable facts", () => {
+    const bundle = buildEvidenceBundle({
+      userQuery: "Kaynaklar aynı mı?",
+      textFacts: ["Source A says value is 120."],
+      notSupported: ["doc-b: Source B contradicts that value."],
+      sourceIds: ["doc-a", "doc-b"],
+    });
     const compiled = compileEvidence({
       groundingConfidence: "high",
       evidence: evidence({
         usableFacts: ["Kaynak A tutarı 120 olarak verir."],
         uncertainOrUnusable: ["Kaynak B bununla çelişiyor."],
         sourceIds: ["doc-a", "doc-b"],
+        evidenceBundle: bundle,
       }),
     });
 
@@ -414,5 +445,10 @@ describe("compileEvidence", () => {
       confidence: "low",
     });
     expect(hasCompiledUsableGrounding(compiled)).toBe(true);
+    expect(compiled.factLevelDiagnostics).toMatchObject({
+      selectedContradictionCount: 1,
+      contradictionSources: ["doc-b"],
+    });
+    expect(compiled.factLevelDiagnostics?.bundleKindCounts.contradiction).toBe(1);
   });
 });
