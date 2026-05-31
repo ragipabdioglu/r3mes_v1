@@ -8,8 +8,8 @@ of truth; these files are the short working charter read before each task.
 
 ## Current Phase State
 
-- Completed: Faz 0, Faz 1, Faz 2, Faz 3, Faz 4.
-- Current implementation phase: Faz 5 - Query / Source Intelligence.
+- Completed: Faz 0, Faz 1, Faz 2, Faz 3, Faz 4, Faz 5.
+- Current implementation phase: Faz 6 - Full Evidence Intelligence.
 - Faz 5 Dilim 1 completed metadata/source suggestion quality tie-break.
 - Faz 5 Dilim 2 completed source resolution profile scorer wiring.
 - SourceResolutionPlan now receives metadata/profile ranked candidates from chat runtime.
@@ -30,6 +30,8 @@ of truth; these files are the short working charter read before each task.
 - Dilim 6 gates: eval runner syntax, source-resolution tests 46/46, backend typecheck, collection-suggestion 5/5, retrieval-quality 16/16, ui-reality 5/5 with known local CPU reranker warning.
 - Faz 5 Dilim 7 added UI-reality trace assertions for source-resolution autoSelectionScope, selectionReason, and riskSignals.
 - Dilim 7 gates: ui-reality 5/5 and source-resolution/knowledge/retrieval-contract tests 46/46; local CPU reranker warning remains Faz 6 backlog.
+- Faz 5 closure completed with 71 query/source tests, backend typecheck, provider smokes, collection-suggestion 5/5, retrieval-quality 16/16, ui-reality 5/5.
+- Faz 6 starts with known backlog: evidence coverage gaps plus local CPU reranker/provider-budget warning.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
