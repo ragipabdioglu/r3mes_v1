@@ -1130,6 +1130,21 @@ function scoreCase(testCase, response) {
     compiledEvidenceUnknownCount: compiledEvidence?.unknownCount ?? null,
     compiledEvidenceContradictionCount: compiledEvidence?.contradictionCount ?? null,
     compiledEvidenceSourceCount: Array.isArray(compiledEvidence?.sourceIds) ? compiledEvidence.sourceIds.length : null,
+    compiledEvidenceCoverageStatus: compiledEvidence?.coverage?.status ?? null,
+    compiledEvidenceCoverageRequestedFieldCount: Array.isArray(compiledEvidence?.coverage?.requestedFieldIds)
+      ? compiledEvidence.coverage.requestedFieldIds.length
+      : null,
+    compiledEvidenceCoverageCoveredFieldCount: Array.isArray(compiledEvidence?.coverage?.coveredFieldIds)
+      ? compiledEvidence.coverage.coveredFieldIds.length
+      : null,
+    compiledEvidenceCoverageMissingFieldCount: Array.isArray(compiledEvidence?.coverage?.missingFieldIds)
+      ? compiledEvidence.coverage.missingFieldIds.length
+      : null,
+    compiledEvidenceSufficiencyStatus: compiledEvidence?.sufficiency?.status ?? null,
+    compiledEvidenceShouldAnswer: typeof compiledEvidence?.sufficiency?.shouldAnswer === "boolean"
+      ? compiledEvidence.sufficiency.shouldAnswer
+      : null,
+    compiledEvidenceSufficiencyReason: compiledEvidence?.sufficiency?.reason ?? null,
     rerankerMode: reranker?.mode ?? null,
     rerankerFallbackUsed: reranker?.fallbackUsed ?? null,
     rerankerInputCandidateCount: reranker?.inputCandidateCount ?? null,
@@ -1737,18 +1752,40 @@ function summarizeBudgetQuality(results) {
 
 function summarizeCompiledEvidenceQuality(results) {
   const casesWithCompiledEvidence = results.filter((result) => result.compiledEvidenceConfidence);
+  const coverageStatuses = {};
+  const sufficiencyStatuses = {};
+  const sufficiencyReasons = {};
+  let shouldAnswerCases = 0;
+  let missingFieldCases = 0;
+  for (const result of casesWithCompiledEvidence) {
+    increment(coverageStatuses, result.compiledEvidenceCoverageStatus);
+    increment(sufficiencyStatuses, result.compiledEvidenceSufficiencyStatus);
+    increment(sufficiencyReasons, result.compiledEvidenceSufficiencyReason);
+    if (result.compiledEvidenceShouldAnswer === true) shouldAnswerCases += 1;
+    if (Number(result.compiledEvidenceCoverageMissingFieldCount ?? 0) > 0) missingFieldCases += 1;
+  }
+  const caseRatio = (value) =>
+    casesWithCompiledEvidence.length === 0 ? 0 : Number((value / casesWithCompiledEvidence.length).toFixed(3));
   return {
     observedCases: casesWithCompiledEvidence.length,
     coverageRatio:
       results.length === 0 ? 0 : Number((casesWithCompiledEvidence.length / results.length).toFixed(3)),
     confidences: casesWithCompiledEvidence.reduce((acc, result) => increment(acc, result.compiledEvidenceConfidence), {}),
+    coverageStatuses: Object.fromEntries(Object.entries(coverageStatuses).sort(([a], [b]) => a.localeCompare(b))),
+    sufficiencyStatuses: Object.fromEntries(Object.entries(sufficiencyStatuses).sort(([a], [b]) => a.localeCompare(b))),
+    sufficiencyReasons: Object.fromEntries(Object.entries(sufficiencyReasons).sort(([a], [b]) => a.localeCompare(b))),
     averages: {
       facts: averageField(casesWithCompiledEvidence, "compiledEvidenceFactCount"),
       risks: averageField(casesWithCompiledEvidence, "compiledEvidenceRiskCount"),
       unknowns: averageField(casesWithCompiledEvidence, "compiledEvidenceUnknownCount"),
       contradictions: averageField(casesWithCompiledEvidence, "compiledEvidenceContradictionCount"),
       sources: averageField(casesWithCompiledEvidence, "compiledEvidenceSourceCount"),
+      requestedFields: averageField(casesWithCompiledEvidence, "compiledEvidenceCoverageRequestedFieldCount"),
+      coveredFields: averageField(casesWithCompiledEvidence, "compiledEvidenceCoverageCoveredFieldCount"),
+      missingFields: averageField(casesWithCompiledEvidence, "compiledEvidenceCoverageMissingFieldCount"),
     },
+    shouldAnswerRatio: caseRatio(shouldAnswerCases),
+    missingFieldCaseRatio: caseRatio(missingFieldCases),
   };
 }
 
@@ -1761,6 +1798,9 @@ function summarizeAnswerBaselineQuality(results) {
   const taskTypes = {};
   const outputFormats = {};
   const coverage = {};
+  const evidenceCoverage = {};
+  const evidenceSufficiency = {};
+  const evidenceSufficiencyReasons = {};
   const composerPaths = {};
   const confidenceReasons = {};
   const compiledEvidenceConfidences = {};
@@ -1772,6 +1812,11 @@ function summarizeAnswerBaselineQuality(results) {
   let riskFactTotal = 0;
   let unknownTotal = 0;
   let contradictionTotal = 0;
+  let requestedFieldTotal = 0;
+  let coveredFieldTotal = 0;
+  let compiledMissingFieldTotal = 0;
+  let compiledMissingFieldCases = 0;
+  let compiledShouldAnswerCases = 0;
   let missingFieldCases = 0;
   let requiresModelSynthesisCases = 0;
   let plannedComposerCases = 0;
@@ -1787,6 +1832,12 @@ function summarizeAnswerBaselineQuality(results) {
     riskFactTotal += Number(baseline?.compiledEvidence?.riskFactCount ?? 0);
     unknownTotal += Number(baseline?.compiledEvidence?.unknownCount ?? 0);
     contradictionTotal += Number(baseline?.compiledEvidence?.contradictionCount ?? 0);
+    requestedFieldTotal += Number(baseline?.compiledEvidence?.coverage?.requestedFieldIds?.length ?? 0);
+    coveredFieldTotal += Number(baseline?.compiledEvidence?.coverage?.coveredFieldIds?.length ?? 0);
+    const compiledMissingFields = Number(baseline?.compiledEvidence?.coverage?.missingFieldIds?.length ?? 0);
+    compiledMissingFieldTotal += compiledMissingFields;
+    if (compiledMissingFields > 0) compiledMissingFieldCases += 1;
+    if (baseline?.compiledEvidence?.sufficiency?.shouldAnswer === true) compiledShouldAnswerCases += 1;
 
     if (Array.isArray(baseline?.answerPlan?.missingFieldIds) && baseline.answerPlan.missingFieldIds.length > 0) {
       missingFieldCases += 1;
@@ -1800,6 +1851,9 @@ function summarizeAnswerBaselineQuality(results) {
     increment(taskTypes, baseline?.answerPlan?.taskType);
     increment(outputFormats, baseline?.answerPlan?.outputFormat);
     increment(coverage, baseline?.answerPlan?.coverage);
+    increment(evidenceCoverage, baseline?.compiledEvidence?.coverage?.status);
+    increment(evidenceSufficiency, baseline?.compiledEvidence?.sufficiency?.status);
+    increment(evidenceSufficiencyReasons, baseline?.compiledEvidence?.sufficiency?.reason);
     increment(compiledEvidenceConfidences, baseline?.compiledEvidence?.confidence);
     increment(confidenceReasons, baseline?.compiledEvidence?.confidenceReason);
 
@@ -1831,17 +1885,27 @@ function summarizeAnswerBaselineQuality(results) {
       riskFacts: average(riskFactTotal),
       unknowns: average(unknownTotal),
       contradictions: average(contradictionTotal),
+      requestedFields: average(requestedFieldTotal),
+      coveredFields: average(coveredFieldTotal),
+      missingFields: average(compiledMissingFieldTotal),
     },
     kindCounts: Object.fromEntries(Object.entries(kindCounts).sort(([a], [b]) => a.localeCompare(b))),
     taskTypes: Object.fromEntries(Object.entries(taskTypes).sort(([a], [b]) => a.localeCompare(b))),
     outputFormats: Object.fromEntries(Object.entries(outputFormats).sort(([a], [b]) => a.localeCompare(b))),
     coverage: Object.fromEntries(Object.entries(coverage).sort(([a], [b]) => a.localeCompare(b))),
+    evidenceCoverage: Object.fromEntries(Object.entries(evidenceCoverage).sort(([a], [b]) => a.localeCompare(b))),
+    evidenceSufficiency: Object.fromEntries(Object.entries(evidenceSufficiency).sort(([a], [b]) => a.localeCompare(b))),
+    evidenceSufficiencyReasons: Object.fromEntries(
+      Object.entries(evidenceSufficiencyReasons).sort(([a], [b]) => a.localeCompare(b)),
+    ),
     composerPaths: Object.fromEntries(Object.entries(composerPaths).sort(([a], [b]) => a.localeCompare(b))),
     compiledEvidenceConfidences: Object.fromEntries(
       Object.entries(compiledEvidenceConfidences).sort(([a], [b]) => a.localeCompare(b)),
     ),
     confidenceReasons: Object.fromEntries(Object.entries(confidenceReasons).sort(([a], [b]) => a.localeCompare(b))),
     missingFieldCaseRatio: caseRatio(missingFieldCases),
+    compiledEvidenceMissingFieldCaseRatio: caseRatio(compiledMissingFieldCases),
+    compiledEvidenceShouldAnswerRatio: caseRatio(compiledShouldAnswerCases),
     requiresModelSynthesisRatio: caseRatio(requiresModelSynthesisCases),
     plannedComposerUsedRatio: caseRatio(plannedComposerCases),
     fallbackTemplateUsedRatio: caseRatio(fallbackTemplateCases),

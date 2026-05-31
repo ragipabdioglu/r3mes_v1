@@ -1,7 +1,11 @@
 import type { ComposerPathName, RuntimeLineage } from "@r3mes/shared-types";
 import type { AnswerPlan } from "./answerPlan.js";
 import type { AnswerQualityFinding } from "./answerQualityValidator.js";
-import type { CompiledEvidence } from "./compiledEvidence.js";
+import type {
+  CompiledEvidence,
+  EvidenceCoverage,
+  EvidenceSufficiencyDecision,
+} from "./compiledEvidence.js";
 import { countUsableEvidenceItems, type EvidenceBundle, type EvidenceBundleDiagnostics } from "./evidenceBundle.js";
 import type { SafetyGateResult } from "./safetyGate.js";
 
@@ -22,6 +26,8 @@ export interface EvalAnswerBaselineDiagnostics {
     riskFactCount: number;
     unknownCount: number;
     contradictionCount: number;
+    coverage: EvidenceCoverage | null;
+    sufficiency: EvidenceSufficiencyDecision | null;
   };
   answerPlan: {
     taskType: AnswerPlan["taskType"] | null;
@@ -105,6 +111,8 @@ export function buildEvalDebugContract(input: {
         riskFactCount: compiledEvidence?.riskFactCount ?? 0,
         unknownCount: compiledEvidence?.unknownCount ?? 0,
         contradictionCount: compiledEvidence?.contradictionCount ?? 0,
+        coverage: compiledEvidence?.coverage ?? null,
+        sufficiency: compiledEvidence?.sufficiency ?? null,
       },
       answerPlan: {
         taskType: answerPlan?.taskType ?? null,

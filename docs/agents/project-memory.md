@@ -37,6 +37,11 @@ of truth; these files are the short working charter read before each task.
 - Dilim 1 gates: compiledEvidence/evidenceBundle/evalDebugContract tests 16/16, backend typecheck, evidence-only 1/1.
 - Answer-quality remains 8/17 and is expected Faz 6/7 backlog, not Dilim 1 blocker.
 - Next Faz 6 slice should aggregate coverage/sufficiency in evidence diagnostics/eval summaries.
+- Faz 6 Dilim 2 added coverage/sufficiency to eval debug contract and eval summaries.
+- Dilim 2 gates: evalDebug/compiledEvidence tests 13/13, backend typecheck, eval runner syntax, public boundary tests 3/3, evidence-only 1/1.
+- Dilim 2 answer-quality remains 8/17 but now reports coverage complete 5, partial 11, sufficiency sufficient 4, partial 11, contradictory 1.
+- Dilim 2 found requested-field coverage gap: compiledEvidence missing-field case ratio 0.688 in answer-quality.
+- Windows Prisma generate hit locked DLL; dist was updated with tsc and backend restarted for runtime eval.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
