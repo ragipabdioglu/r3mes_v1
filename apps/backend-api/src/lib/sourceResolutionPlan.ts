@@ -87,6 +87,11 @@ export interface SourceResolutionDecisionDiagnostics {
   candidateCount: number;
   rejectedCount: number;
   selectionReason: string;
+  autoSelectionScope: SourceResolutionAutoSelectionScope;
+  topCandidateScore: number | null;
+  secondCandidateScore: number | null;
+  topCandidateScoreGap: number | null;
+  riskSignals: SourceResolutionRiskSignal[];
   warnings: string[];
 }
 
@@ -101,6 +106,29 @@ export interface SourceResolutionPlanSummary {
   topCandidates: SourceResolutionCandidate[];
   decisionDiagnostics: SourceResolutionDecisionDiagnostics;
 }
+
+export type SourceResolutionAutoSelectionScope =
+  | "none"
+  | "explicit"
+  | "source_discovery"
+  | "include_all_accessible"
+  | "single_private"
+  | "ranked_private"
+  | "all_private_low_confidence"
+  | "needs_user_scope";
+
+export type SourceResolutionRiskSignal =
+  | "no_knowledge_retrieval_query"
+  | "source_discovery_only"
+  | "some_requested_collections_not_accessible"
+  | "no_private_collections_available"
+  | "low_confidence_source_resolution"
+  | "low_confidence_guard_enforced"
+  | "legacy_broad_auto_selection"
+  | "ambiguous_top_candidates"
+  | "include_public_broad_scope"
+  | "single_private_auto_scope"
+  | "fallback_profile_score_missing";
 
 const HIGH_CONFIDENCE = 0.72;
 const LOW_CONFIDENCE = 0.5;
@@ -299,6 +327,11 @@ function buildDecisionDiagnostics(
   selectionReason: string,
 ): SourceResolutionDecisionDiagnostics {
   const queryContract = input.queryUnderstanding?.queryContract;
+  const topCandidateScore = plan.candidates[0]?.score ?? null;
+  const secondCandidateScore = plan.candidates[1]?.score ?? null;
+  const topCandidateScoreGap = topCandidateScore === null || secondCandidateScore === null
+    ? null
+    : clampConfidence(topCandidateScore - secondCandidateScore);
   return {
     queryOperation: queryContract?.operation ?? null,
     requiredEvidenceType: queryContract?.requiredEvidenceType ?? null,
@@ -319,8 +352,60 @@ function buildDecisionDiagnostics(
     candidateCount: plan.candidates.length,
     rejectedCount: plan.rejected.length,
     selectionReason,
+    autoSelectionScope: inferAutoSelectionScope(input, plan, selectionReason),
+    topCandidateScore,
+    secondCandidateScore,
+    topCandidateScoreGap,
+    riskSignals: inferRiskSignals(input, plan, selectionReason, topCandidateScoreGap),
     warnings: plan.warnings,
   };
+}
+
+function inferAutoSelectionScope(
+  input: BuildSourceResolutionPlanInput,
+  plan: Omit<SourceResolutionPlan, "decisionDiagnostics">,
+  selectionReason: string,
+): SourceResolutionAutoSelectionScope {
+  if (plan.mode === "none") return "none";
+  if (plan.mode === "explicit") return "explicit";
+  if (plan.mode === "source_discovery") return "source_discovery";
+  if (plan.mode === "include_public") return "include_all_accessible";
+  if (plan.mode === "auto_single_private") return "single_private";
+  if (plan.mode === "needs_user_scope") return "needs_user_scope";
+  if (selectionReason === "legacy_low_confidence_broad_selection") return "all_private_low_confidence";
+  const privateCount = input.accessibleCollections.filter((collection) => collection.visibility === "PRIVATE").length;
+  if (plan.mode === "auto_private_ranked" && plan.selectedCollectionIds.length >= privateCount) {
+    return "all_private_low_confidence";
+  }
+  return "ranked_private";
+}
+
+function inferRiskSignals(
+  input: BuildSourceResolutionPlanInput,
+  plan: Omit<SourceResolutionPlan, "decisionDiagnostics">,
+  selectionReason: string,
+  topCandidateScoreGap: number | null,
+): SourceResolutionRiskSignal[] {
+  const signals = new Set<SourceResolutionRiskSignal>();
+  const warnings = new Set(plan.warnings);
+
+  if (selectionReason === "no_knowledge_retrieval_query") signals.add("no_knowledge_retrieval_query");
+  if (selectionReason === "source_discovery_intent") signals.add("source_discovery_only");
+  if (warnings.has("some_requested_collections_not_accessible")) {
+    signals.add("some_requested_collections_not_accessible");
+  }
+  if (warnings.has("no_private_collections_available")) signals.add("no_private_collections_available");
+  if (warnings.has("low_confidence_source_resolution")) signals.add("low_confidence_source_resolution");
+  if (selectionReason === "low_confidence_guard_enforced") signals.add("low_confidence_guard_enforced");
+  if (selectionReason === "legacy_low_confidence_broad_selection") signals.add("legacy_broad_auto_selection");
+  if (plan.mode === "include_public" && input.accessibleCollections.length > 1) signals.add("include_public_broad_scope");
+  if (plan.mode === "auto_single_private") signals.add("single_private_auto_scope");
+  if (plan.candidates.some((candidate) => candidate.reasons.includes("fallback_profile_score_missing"))) {
+    signals.add("fallback_profile_score_missing");
+  }
+  if ((topCandidateScoreGap ?? 1) < 0.08 && plan.candidates.length > 1) signals.add("ambiguous_top_candidates");
+
+  return [...signals];
 }
 
 function withDecisionDiagnostics(

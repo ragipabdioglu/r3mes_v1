@@ -24,6 +24,8 @@ of truth; these files are the short working charter read before each task.
 - Dilim 4 does not change retrieval scoring, composer, parser, safety, or public response shape.
 - Dilim 4 gates: source-resolution/knowledge/retrieval-contract tests 45/45, BGE-M3 smoke pass, reranker smoke pass, retrieval-quality 16/16, collection-suggestion 5/5.
 - UI-reality passes 5/5 but CPU reranker latency/fallback warning remains a Faz 6 provider-budget backlog item.
+- Faz 5 Dilim 5 added source-resolution risk diagnostics: autoSelectionScope, top/second score, score gap, and riskSignals.
+- Dilim 5 gates: source-resolution/knowledge/retrieval-contract tests 46/46, backend typecheck/build, BGE-M3 smoke, reranker smoke, retrieval-quality 16/16, collection-suggestion 5/5, ui-reality 5/5 with known local CPU reranker warning.
 - Ai-engine local verification used LoRA-free CPU BGE-M3/reranker mode.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.

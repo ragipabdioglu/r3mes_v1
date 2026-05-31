@@ -186,6 +186,17 @@ describe("buildSourceResolutionPlan", () => {
     expect(plan.selectedCollectionIds).toEqual([]);
     expect(plan.warnings).toContain("user_scope_required");
     expect(plan.rejected.map((item) => item.collectionId)).toEqual(["finance", "hr"]);
+    expect(plan.decisionDiagnostics).toMatchObject({
+      autoSelectionScope: "needs_user_scope",
+      topCandidateScore: 0.31,
+      secondCandidateScore: 0.29,
+      topCandidateScoreGap: 0.02,
+      riskSignals: expect.arrayContaining([
+        "low_confidence_source_resolution",
+        "low_confidence_guard_enforced",
+        "ambiguous_top_candidates",
+      ]),
+    });
   });
 
   it("keeps legacy broad private selection when low confidence guard is not enforced", () => {
@@ -205,6 +216,16 @@ describe("buildSourceResolutionPlan", () => {
     expect(plan.mode).toBe("auto_private_ranked");
     expect(plan.selectedCollectionIds).toEqual(["finance", "hr"]);
     expect(plan.warnings).toContain("low_confidence_guard_not_enforced_legacy_selection");
+    expect(plan.decisionDiagnostics).toMatchObject({
+      autoSelectionScope: "all_private_low_confidence",
+      topCandidateScore: 0.31,
+      secondCandidateScore: 0.29,
+      topCandidateScoreGap: 0.02,
+      riskSignals: expect.arrayContaining([
+        "legacy_broad_auto_selection",
+        "ambiguous_top_candidates",
+      ]),
+    });
   });
 
   it("summarizes source resolution plan without losing the top candidate trace", () => {
@@ -234,7 +255,12 @@ describe("buildSourceResolutionPlan", () => {
       profileRankedCandidateCount: 2,
       accessibleCollectionCount: 2,
       selectedCount: 1,
+      autoSelectionScope: "ranked_private",
+      topCandidateScore: 0.92,
+      secondCandidateScore: 0.2,
+      topCandidateScoreGap: 0.72,
     });
+    expect(summary.decisionDiagnostics.riskSignals).not.toContain("legacy_broad_auto_selection");
   });
 
   it("keeps unranked accessible collections visible as fallback candidates", () => {
@@ -258,5 +284,24 @@ describe("buildSourceResolutionPlan", () => {
       reasons: ["profile_scorer"],
     });
     expect(plan.candidates[1]?.reasons).toContain("fallback_profile_score_missing");
+    expect(plan.decisionDiagnostics.riskSignals).toContain("fallback_profile_score_missing");
+  });
+
+  it("marks broad include-public source selection as a risk signal", () => {
+    const plan = buildSourceResolutionPlan({
+      accessibleCollections: [
+        collection("private", "Private notes"),
+        collection("public", "Public docs", "PUBLIC"),
+      ],
+      includePublic: true,
+      retrievalQuery: "migration checklist",
+      queryUnderstanding: understanding("medium"),
+    });
+
+    expect(plan.mode).toBe("include_public");
+    expect(plan.decisionDiagnostics).toMatchObject({
+      autoSelectionScope: "include_all_accessible",
+      riskSignals: expect.arrayContaining(["include_public_broad_scope"]),
+    });
   });
 });
