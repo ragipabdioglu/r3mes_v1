@@ -183,3 +183,10 @@ of truth; these files are the short working charter read before each task.
 - Chat responses now expose safe root-level `suggestions` and `status` without requiring debug mode.
 - Source citations gain a user-facing `whyThisSource` explanation while preserving citation fields.
 - Suggestion reasons strip generic score fragments before reaching public payloads.
+
+## Latest Phase 8 Slice 3 Note
+
+- dApp transport now reads public root-level `suggestions` and `status`.
+- Chat turn state preserves public display fields alongside debug/trace lineage.
+- Source suggestion badge works from public suggestions when debug retrieval data is absent.
+- Source list shows safe `whyThisSource` explanations without exposing raw debug diagnostics.

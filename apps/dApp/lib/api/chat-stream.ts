@@ -10,6 +10,8 @@ import type {
   ChatRetrievalDebug,
   ChatRuntimeLineageSummary,
   ChatSourceCitation,
+  ChatSourceSuggestion,
+  ChatUserFacingStatus,
 } from "@/lib/types/knowledge";
 import { userFacingHttpMessage } from "@/lib/ui/http-messages";
 
@@ -33,6 +35,18 @@ function readAssistantContent(response: unknown): string {
 function readSources(response: unknown): ChatSourceCitation[] {
   const parsed = response as { sources?: unknown };
   return Array.isArray(parsed.sources) ? (parsed.sources as ChatSourceCitation[]) : [];
+}
+
+function readSuggestions(response: unknown): ChatSourceSuggestion[] {
+  const parsed = response as { suggestions?: unknown };
+  return Array.isArray(parsed.suggestions) ? (parsed.suggestions as ChatSourceSuggestion[]) : [];
+}
+
+function readUserFacingStatus(response: unknown): ChatUserFacingStatus | undefined {
+  const parsed = response as { status?: unknown };
+  return parsed.status && typeof parsed.status === "object"
+    ? (parsed.status as ChatUserFacingStatus)
+    : undefined;
 }
 
 function readRetrievalDebug(response: unknown): ChatRetrievalDebug | null {
@@ -250,6 +264,8 @@ export async function* streamChatCompletions(params: {
   includePublic?: boolean;
   auth: R3mesWalletAuthHeaders;
   onSources?: (sources: ChatSourceCitation[]) => void;
+  onSuggestions?: (suggestions: ChatSourceSuggestion[]) => void;
+  onStatus?: (status: ChatUserFacingStatus) => void;
   onRetrievalDebug?: (debug: ChatRetrievalDebug) => void;
   onChatTrace?: (trace: ChatTraceSummary) => void;
   signal?: AbortSignal;
@@ -301,6 +317,10 @@ export async function* streamChatCompletions(params: {
     const parsed = await res.json();
     const sources = readSources(parsed);
     if (sources.length > 0) params.onSources?.(sources);
+    const suggestions = readSuggestions(parsed);
+    params.onSuggestions?.(suggestions);
+    const status = readUserFacingStatus(parsed);
+    if (status) params.onStatus?.(status);
     const debug = readRetrievalDebug(parsed);
     if (debug) params.onRetrievalDebug?.(debug);
     const trace = readChatTrace(parsed);

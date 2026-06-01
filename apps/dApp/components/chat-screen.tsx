@@ -23,6 +23,8 @@ import type {
   ChatRetrievalDebug,
   ChatRuntimeLineageSummary,
   ChatSourceCitation,
+  ChatSourceSuggestion,
+  ChatUserFacingStatus,
   KnowledgeCollectionListItem,
 } from "@/lib/types/knowledge";
 import { useR3mesWalletAuth } from "@/lib/hooks/use-r3mes-wallet-auth";
@@ -48,6 +50,8 @@ const SUGGESTED_PROMPTS = [
 
 type ChatTurn = ChatMessage & {
   sources?: ChatSourceCitation[];
+  suggestions?: ChatSourceSuggestion[];
+  userFacingStatus?: ChatUserFacingStatus;
   retrievalDebug?: ChatRetrievalDebug;
   traceId?: string;
   queryHash?: string;
@@ -365,6 +369,11 @@ function SourceList({
                   {source.excerpt}
                 </p>
               ) : null}
+              {source.whyThisSource ? (
+                <p className="mt-1 leading-relaxed text-emerald-100/70">
+                  {source.whyThisSource}
+                </p>
+              ) : null}
             </li>
           );
         })}
@@ -381,6 +390,18 @@ function SourceList({
       ) : null}
     </details>
   );
+}
+
+function preserveAssistantState(last: ChatTurn | undefined) {
+  return {
+    sources: last?.role === "assistant" ? last.sources ?? [] : [],
+    suggestions: last?.role === "assistant" ? last.suggestions ?? [] : [],
+    userFacingStatus: last?.role === "assistant" ? last.userFacingStatus : undefined,
+    retrievalDebug: last?.role === "assistant" ? last.retrievalDebug : undefined,
+    traceId: last?.role === "assistant" ? last.traceId : undefined,
+    queryHash: last?.role === "assistant" ? last.queryHash : undefined,
+    runtimeLineage: last?.role === "assistant" ? last.runtimeLineage : undefined,
+  };
 }
 
 function buildSourceExplanation(debug: ChatRetrievalDebug | undefined, sourceCount: number): string | null {
@@ -539,38 +560,51 @@ function DomainBadge({ debug }: { debug?: ChatRetrievalDebug }) {
 
 function SourceSelectionActionBadge({
   debug,
+  suggestions,
+  status,
   onSelectCollection,
 }: {
   debug?: ChatRetrievalDebug;
+  suggestions?: ChatSourceSuggestion[];
+  status?: ChatUserFacingStatus;
   onSelectCollection: (collectionId: string) => void;
 }) {
   const selection = debug?.sourceSelection;
-  if (!selection) return null;
-  const isHealthy = selection.hasSources && !selection.warning;
+  if (!selection && !status && !suggestions?.length) return null;
+  const hasSources = selection?.hasSources ?? status?.sourceBacked ?? false;
+  const warning = selection?.warning ?? status?.message ?? null;
+  const isHealthy = hasSources && !warning && status?.kind !== "safety_limited";
   const actionSuggestions = [
-    ...(selection.metadataRouteCandidates ?? []).map((candidate) => ({
+    ...(selection?.metadataRouteCandidates ?? []).map((candidate) => ({
       id: candidate.id,
       name: candidate.name,
       reason: candidate.reason,
       score: candidate.score,
       source: "metadata" as const,
     })),
-    ...selection.suggestedCollections.map((collection) => ({
+    ...(selection?.suggestedCollections ?? []).map((collection) => ({
       id: collection.id,
       name: collection.name,
       reason: collection.reason,
       score: 0,
       source: "retrieval" as const,
     })),
+    ...(suggestions ?? []).map((suggestion) => ({
+      id: suggestion.collectionId,
+      name: suggestion.title,
+      reason: suggestion.reason,
+      score: 0,
+      source: "public" as const,
+    })),
   ].filter((suggestion, index, arr) => arr.findIndex((item) => item.id === suggestion.id) === index).slice(0, 3);
   if (isHealthy && actionSuggestions.length === 0) return null;
 
   const label = isHealthy
     ? "Kaynak uygun"
-    : selection.hasSources
+    : hasSources
       ? "Kaynak temkinli"
       : "Kaynak bulunamadı";
-  const emptySourceMessage = !selection.hasSources
+  const emptySourceMessage = !hasSources
     ? "Seçili veya erişilebilir kaynaklar bu soruyu yeterince desteklemedi. Uygun öneriye tıklayıp aynı soruyu tekrar gönderebilirsiniz."
     : null;
   return (
@@ -578,7 +612,7 @@ function SourceSelectionActionBadge({
       className={`mt-3 rounded-xl border px-3 py-2 text-[11px] leading-relaxed ${
         isHealthy
           ? "border-emerald-500/20 bg-emerald-950/10 text-emerald-100/90"
-          : selection.hasSources
+          : hasSources
             ? "border-amber-500/20 bg-amber-950/10 text-amber-100/90"
             : "border-zinc-700 bg-zinc-950/70 text-zinc-400"
       }`}
@@ -586,11 +620,13 @@ function SourceSelectionActionBadge({
       <span className="font-medium">{label}</span>
       {!isHealthy ? (
         <span className="ml-2 text-zinc-500">
-          {selection.usedCollectionIds.length} / {selection.accessibleCollectionIds.length} collection
+          {selection
+            ? `${selection.usedCollectionIds.length} / ${selection.accessibleCollectionIds.length} collection`
+            : status?.kind ?? "status"}
         </span>
       ) : null}
-      {selection.warning ? (
-        <p className="mt-1">{selection.warning}</p>
+      {warning ? (
+        <p className="mt-1">{warning}</p>
       ) : null}
       {emptySourceMessage ? (
         <p className="mt-1 text-zinc-300">{emptySourceMessage}</p>
@@ -904,20 +940,59 @@ export function ChatScreen() {
         onSources: (sources) => {
           setMessages((current) => {
             const last = current[current.length - 1];
-            const retrievalDebug = last?.role === "assistant" ? last.retrievalDebug : undefined;
-            const traceId = last?.role === "assistant" ? last.traceId : undefined;
-            const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
-            const runtimeLineage = last?.role === "assistant" ? last.runtimeLineage : undefined;
+            const preserved = preserveAssistantState(last);
             return [
               ...history,
               {
                 role: "assistant",
                 content: assistant,
                 sources,
-                retrievalDebug,
-                traceId,
-                queryHash,
-                runtimeLineage,
+                suggestions: preserved.suggestions,
+                userFacingStatus: preserved.userFacingStatus,
+                retrievalDebug: preserved.retrievalDebug,
+                traceId: preserved.traceId,
+                queryHash: preserved.queryHash,
+                runtimeLineage: preserved.runtimeLineage,
+              },
+            ];
+          });
+        },
+        onSuggestions: (suggestions) => {
+          setMessages((current) => {
+            const last = current[current.length - 1];
+            const preserved = preserveAssistantState(last);
+            return [
+              ...history,
+              {
+                role: "assistant",
+                content: assistant,
+                sources: preserved.sources,
+                suggestions,
+                userFacingStatus: preserved.userFacingStatus,
+                retrievalDebug: preserved.retrievalDebug,
+                traceId: preserved.traceId,
+                queryHash: preserved.queryHash,
+                runtimeLineage: preserved.runtimeLineage,
+              },
+            ];
+          });
+        },
+        onStatus: (userFacingStatus) => {
+          setMessages((current) => {
+            const last = current[current.length - 1];
+            const preserved = preserveAssistantState(last);
+            return [
+              ...history,
+              {
+                role: "assistant",
+                content: assistant,
+                sources: preserved.sources,
+                suggestions: preserved.suggestions,
+                userFacingStatus,
+                retrievalDebug: preserved.retrievalDebug,
+                traceId: preserved.traceId,
+                queryHash: preserved.queryHash,
+                runtimeLineage: preserved.runtimeLineage,
               },
             ];
           });
@@ -925,20 +1000,19 @@ export function ChatScreen() {
         onRetrievalDebug: (retrievalDebug) => {
           setMessages((current) => {
             const last = current[current.length - 1];
-            const sources = last?.role === "assistant" ? last.sources : [];
-            const traceId = last?.role === "assistant" ? last.traceId : undefined;
-            const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
-            const runtimeLineage = last?.role === "assistant" ? last.runtimeLineage : undefined;
+            const preserved = preserveAssistantState(last);
             return [
               ...history,
               {
                 role: "assistant",
                 content: assistant,
-                sources,
+                sources: preserved.sources,
+                suggestions: preserved.suggestions,
+                userFacingStatus: preserved.userFacingStatus,
                 retrievalDebug,
-                traceId,
-                queryHash,
-                runtimeLineage,
+                traceId: preserved.traceId,
+                queryHash: preserved.queryHash,
+                runtimeLineage: preserved.runtimeLineage,
               },
             ];
           });
@@ -946,15 +1020,16 @@ export function ChatScreen() {
         onChatTrace: (trace) => {
           setMessages((current) => {
             const last = current[current.length - 1];
-            const sources = last?.role === "assistant" ? last.sources : [];
-            const retrievalDebug = last?.role === "assistant" ? last.retrievalDebug : undefined;
+            const preserved = preserveAssistantState(last);
             return [
               ...history,
               {
                 role: "assistant",
                 content: assistant,
-                sources,
-                retrievalDebug,
+                sources: preserved.sources,
+                suggestions: preserved.suggestions,
+                userFacingStatus: preserved.userFacingStatus,
+                retrievalDebug: preserved.retrievalDebug,
                 traceId: trace.traceId,
                 queryHash: trace.query?.hash,
                 runtimeLineage: trace.runtimeLineage,
@@ -966,14 +1041,10 @@ export function ChatScreen() {
         assistant = sanitizeAssistantText(assistant + piece);
         setMessages((current) => {
           const last = current[current.length - 1];
-          const sources = last?.role === "assistant" ? last.sources : [];
-          const retrievalDebug = last?.role === "assistant" ? last.retrievalDebug : undefined;
-          const traceId = last?.role === "assistant" ? last.traceId : undefined;
-          const queryHash = last?.role === "assistant" ? last.queryHash : undefined;
-          const runtimeLineage = last?.role === "assistant" ? last.runtimeLineage : undefined;
+          const preserved = preserveAssistantState(last);
           return [
             ...history,
-            { role: "assistant", content: assistant, sources, retrievalDebug, traceId, queryHash, runtimeLineage },
+            { role: "assistant", content: assistant, ...preserved },
           ];
         });
       }
@@ -987,10 +1058,10 @@ export function ChatScreen() {
         if (assistant.length > 0) {
           setMessages((current) => {
             const last = current[current.length - 1];
-            const sources = last?.role === "assistant" ? last.sources : [];
+            const preserved = preserveAssistantState(last);
             return [
               ...history,
-              { role: "assistant", content: assistant, sources },
+              { role: "assistant", content: assistant, ...preserved },
             ];
           });
         } else {
@@ -1512,6 +1583,8 @@ export function ChatScreen() {
                 {m.role === "assistant" ? (
                   <SourceSelectionActionBadge
                     debug={m.retrievalDebug}
+                    suggestions={m.suggestions}
+                    status={m.userFacingStatus}
                     onSelectCollection={selectSuggestedCollection}
                   />
                 ) : null}
