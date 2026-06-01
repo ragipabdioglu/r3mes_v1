@@ -162,3 +162,10 @@ of truth; these files are the short working charter read before each task.
 - Field-list extraction now cleans the whole candidate before splitting, so subject prefixes do not become requested fields.
 - Latest answer-quality baseline after Slice 8: 16/17 pass; all KAP answer-quality cases pass.
 - Remaining red case is protected contradiction safety (`SOURCE_METADATA_MISMATCH`), not an answer-quality failure.
+
+## Latest Phase 7 Closure Note
+
+- Faz 7 answer-quality closure reached 17/17 pass after aligning contradiction eval expectation with deterministic safety rewrite.
+- Current answer-quality rates: rawTableDump 0, tableFieldMismatch 0, unnecessaryWarning 0, sourceFoundBadAnswer 0.
+- Runtime lineage coverage remains 1.0 and provider fallback ratios remain 0.
+- Remaining warning is normal RAG p95 latency 8320ms vs 8000ms, backlog for latency/ops rather than Faz 7 correctness.
