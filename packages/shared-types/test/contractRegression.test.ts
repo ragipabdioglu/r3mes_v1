@@ -9,8 +9,10 @@ import {
   AdapterListResponseSchema,
   BenchmarkQueueJobMessageSchema,
   DebugTraceEnvelopeSchema,
+  FeedbackPayloadV2Schema,
   LoRAUploadAcceptedResponseSchema,
   NotImplementedOnChainRestResponseSchema,
+  parseFeedbackPayloadV2,
   parseAdapterListResponse,
   parsePublicChatResponseV2,
   parseNotImplementedOnChainRestResponse,
@@ -228,5 +230,52 @@ describe("Faz 8 public/debug chat contracts", () => {
 
     expect(parsed.enabled).toBe(true);
     expect(parsed.evalDebugContract?.answerBaseline).toEqual({ selectedFactCount: 2 });
+  });
+
+  it("accepts safe feedback lineage without raw diagnostics", () => {
+    const parsed = parseFeedbackPayloadV2({
+      version: 2,
+      feedbackKind: "BAD_ANSWER",
+      sourceCount: 1,
+      selectedCollectionIds: ["col_1"],
+      usedCollectionIds: ["col_1"],
+      suggestedCollectionIds: [],
+      rejectedCollectionIds: [],
+      includePublic: false,
+      routeDecisionMode: "normal_rag",
+      routeDecisionConfidence: "high",
+      routePrimaryDomain: "technical",
+      groundingConfidence: "medium",
+      sourceTitles: ["Ders notu"],
+      runtimeLineage: {
+        answerPathName: "deterministic_grounded",
+        qwenCalled: false,
+        validatorCalled: true,
+        embeddingFallbackUsed: false,
+        rerankerFallbackUsed: false,
+        runtimeProfileName: "local-dev",
+      },
+      redactedQuery: "kisa soru",
+      evalQuerySource: "client_redacted_v1",
+    });
+
+    expect(parsed.runtimeLineage?.answerPathName).toBe("deterministic_grounded");
+  });
+
+  it("rejects raw diagnostics on the feedback payload contract", () => {
+    expect(() =>
+      FeedbackPayloadV2Schema.parse({
+        version: 2,
+        feedbackKind: "BAD_ANSWER",
+        sourceCount: 1,
+        selectedCollectionIds: [],
+        usedCollectionIds: [],
+        suggestedCollectionIds: [],
+        rejectedCollectionIds: [],
+        includePublic: false,
+        sourceTitles: [],
+        retrievalDebug: { score: 0.91 },
+      }),
+    ).toThrow();
   });
 });

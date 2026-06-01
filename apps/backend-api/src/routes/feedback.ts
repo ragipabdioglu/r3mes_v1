@@ -398,6 +398,36 @@ const FEEDBACK_METADATA_BLOCKED_KEYS = new Set([
   "question",
   "prompt",
   "messages",
+  "chatTrace",
+  "chat_trace",
+  "debugTrace",
+  "debug_trace",
+  "retrievalDebug",
+  "retrieval_debug",
+  "retrievalDiagnostics",
+  "retrieval_diagnostics",
+  "evalDebugContract",
+  "eval_debug_contract",
+  "answerBaseline",
+  "answer_baseline",
+  "answerPlan",
+  "answer_plan",
+  "safetyGate",
+  "safety_gate",
+  "safetyRails",
+  "safety_rails",
+  "providerStatus",
+  "provider_status",
+  "qdrantPayload",
+  "qdrant_payload",
+  "qdrantPoint",
+  "qdrant_point",
+  "rawEmbeddingVector",
+  "raw_embedding_vector",
+  "embeddingVector",
+  "embedding_vector",
+  "internalScore",
+  "internal_score",
   "answer",
   "rawAnswer",
   "answerText",
@@ -405,7 +435,30 @@ const FEEDBACK_METADATA_BLOCKED_KEYS = new Set([
   "response",
   "rawResponse",
 ]);
+const FEEDBACK_RUNTIME_LINEAGE_SAFE_KEYS = new Set([
+  "answerPathName",
+  "qwenCalled",
+  "validatorCalled",
+  "embeddingFallbackUsed",
+  "rerankerFallbackUsed",
+  "runtimeProfileName",
+]);
 const FEEDBACK_SAFE_QUERY_LIMIT = 500;
+
+function sanitizeFeedbackRuntimeLineage(value: unknown): Prisma.InputJsonValue | undefined {
+  const record = asObject(value);
+  if (!record) return undefined;
+  const out: Record<string, Prisma.InputJsonValue> = {};
+  for (const key of FEEDBACK_RUNTIME_LINEAGE_SAFE_KEYS) {
+    const entry = record[key];
+    if (typeof entry === "boolean") {
+      out[key] = entry;
+    } else if (typeof entry === "string") {
+      out[key] = entry.slice(0, 120);
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 function sanitizeFeedbackMetadata(value: unknown, depth = 0): Prisma.InputJsonValue | undefined {
   if (value === null) return undefined;
@@ -425,6 +478,11 @@ function sanitizeFeedbackMetadata(value: unknown, depth = 0): Prisma.InputJsonVa
   const out: Record<string, Prisma.InputJsonValue> = {};
   for (const [key, entry] of Object.entries(value).slice(0, FEEDBACK_METADATA_OBJECT_KEYS_LIMIT)) {
     if (FEEDBACK_METADATA_BLOCKED_KEYS.has(key)) continue;
+    if (key === "runtimeLineage") {
+      const safeRuntimeLineage = sanitizeFeedbackRuntimeLineage(entry);
+      if (safeRuntimeLineage !== undefined) out[key] = safeRuntimeLineage;
+      continue;
+    }
     const safeValue = sanitizeFeedbackMetadata(entry, depth + 1);
     if (safeValue !== undefined) out[key] = safeValue;
   }

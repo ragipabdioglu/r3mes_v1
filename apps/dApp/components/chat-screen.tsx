@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import type { FeedbackPayloadV2 } from "@r3mes/shared-types";
 
 import { DevTestPill } from "@/components/dev-test-pill";
 import { fetchAdapterChatMetadata } from "@/lib/api/adapter-detail";
@@ -76,16 +77,17 @@ function buildFeedbackMetadata(opts: {
   turn: ChatTurn;
   selectedCollectionIds: string[];
   includePublic: boolean;
-}): Record<string, unknown> {
+}): FeedbackPayloadV2 {
   const selection = opts.turn.retrievalDebug?.sourceSelection;
   const routeDecision = selection?.routeDecision;
   const suggestedCollectionIds = [
+    ...(opts.turn.suggestions?.map((collection) => collection.collectionId) ?? []),
     ...(selection?.suggestedCollections?.map((collection) => collection.id) ?? []),
     ...(selection?.metadataRouteCandidates?.map((collection) => collection.id) ?? []),
     ...(routeDecision?.suggestedCollectionIds ?? []),
   ];
-  const metadata: Record<string, unknown> = {
-    schemaVersion: 2,
+  const metadata: FeedbackPayloadV2 = {
+    version: 2,
     feedbackKind: opts.kind,
     sourceCount: opts.turn.sources?.length ?? 0,
     selectedCollectionIds: opts.selectedCollectionIds.slice(0, 12),
@@ -97,16 +99,10 @@ function buildFeedbackMetadata(opts: {
     routeDecisionConfidence: routeDecision?.confidence ?? null,
     routePrimaryDomain: routeDecision?.primaryDomain ?? selection?.routeDomain ?? null,
     groundingConfidence: opts.turn.retrievalDebug?.groundingConfidence ?? null,
-    sourceTitles: opts.turn.sources?.slice(0, 3).map((source) => source.title) ?? [],
+    sourceTitles: opts.turn.sources?.slice(0, 5).map((source) => source.title) ?? [],
   };
   const runtimeLineage = opts.turn.runtimeLineage;
   if (runtimeLineage) {
-    metadata.answerPathName = runtimeLineage.answerPathName ?? null;
-    metadata.qwenCalled = runtimeLineage.qwenCalled ?? null;
-    metadata.validatorCalled = runtimeLineage.validatorCalled ?? null;
-    metadata.embeddingFallbackUsed = runtimeLineage.embeddingFallbackUsed ?? null;
-    metadata.rerankerFallbackUsed = runtimeLineage.rerankerFallbackUsed ?? null;
-    metadata.runtimeProfileName = runtimeLineage.runtimeProfileName ?? null;
     metadata.runtimeLineage = {
       answerPathName: runtimeLineage.answerPathName ?? null,
       qwenCalled: runtimeLineage.qwenCalled ?? null,
@@ -884,7 +880,9 @@ export function ChatScreen() {
               ? firstSource?.documentId ?? null
               : null,
           expectedCollectionId:
-            turn.retrievalDebug?.sourceSelection?.suggestedCollections?.[0]?.id ?? null,
+            turn.suggestions?.[0]?.collectionId ??
+            turn.retrievalDebug?.sourceSelection?.suggestedCollections?.[0]?.id ??
+            null,
           reason: kind.toLocaleLowerCase("tr-TR").replace(/_/g, " "),
           metadata,
         },

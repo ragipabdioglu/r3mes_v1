@@ -373,6 +373,34 @@ export type KnowledgeFeedbackKind =
   | "BAD_ANSWER"
   | "GOOD_ANSWER";
 
+export interface FeedbackRuntimeLineageSummaryV2 {
+  answerPathName?: string | null;
+  qwenCalled?: boolean | null;
+  validatorCalled?: boolean | null;
+  embeddingFallbackUsed?: boolean | null;
+  rerankerFallbackUsed?: boolean | null;
+  runtimeProfileName?: string | null;
+}
+
+export interface FeedbackPayloadV2 {
+  version: 2;
+  feedbackKind: KnowledgeFeedbackKind;
+  sourceCount: number;
+  selectedCollectionIds: string[];
+  usedCollectionIds: string[];
+  suggestedCollectionIds: string[];
+  rejectedCollectionIds: string[];
+  includePublic: boolean;
+  routeDecisionMode?: string | null;
+  routeDecisionConfidence?: string | null;
+  routePrimaryDomain?: string | null;
+  groundingConfidence?: string | null;
+  sourceTitles: string[];
+  runtimeLineage?: FeedbackRuntimeLineageSummaryV2 | null;
+  redactedQuery?: string | null;
+  evalQuerySource?: "client_redacted_v1" | "server_redacted_v1" | null;
+}
+
 export interface KnowledgeFeedbackCreateRequest {
   kind: KnowledgeFeedbackKind;
   traceId?: string | null;

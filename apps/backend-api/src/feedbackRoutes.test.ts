@@ -172,6 +172,92 @@ describe("knowledge feedback routes", () => {
     await app.close();
   });
 
+  it("keeps only safe feedback lineage and strips raw diagnostics from metadata", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedback.create).mockResolvedValue({
+      id: "feedback_3",
+      kind: "BAD_ANSWER",
+      queryHash: "abc123abc123abcd",
+      collectionId: null,
+      expectedCollectionId: null,
+      createdAt: new Date("2026-05-05T12:00:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge",
+      headers: { "content-type": "application/json" },
+      payload: {
+        kind: "BAD_ANSWER",
+        query: "Kaynağa göre kısa açıkla",
+        metadata: {
+          version: 2,
+          feedbackKind: "BAD_ANSWER",
+          sourceCount: 1,
+          selectedCollectionIds: ["kc_1"],
+          usedCollectionIds: ["kc_1"],
+          suggestedCollectionIds: [],
+          rejectedCollectionIds: [],
+          includePublic: false,
+          routeDecisionMode: "normal_rag",
+          sourceTitles: ["Ders notu"],
+          runtimeLineage: {
+            answerPathName: "deterministic_grounded",
+            qwenCalled: false,
+            validatorCalled: true,
+            embeddingFallbackUsed: false,
+            rerankerFallbackUsed: false,
+            runtimeProfileName: "local-dev",
+            providerStatus: { embedding: "internal-only" },
+          },
+          retrievalDebug: { internalScore: 0.91 },
+          chatTrace: { raw: true },
+          evalDebugContract: { answerBaseline: { selectedFactCount: 2 } },
+          safetyGate: { railId: "internal" },
+          qdrantPayload: { pointId: "hidden" },
+          rawEmbeddingVector: [0.1, 0.2],
+          nested: {
+            providerStatus: { reranker: "hidden" },
+            internalScore: 0.77,
+            safeNote: "kalabilir",
+          },
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const createCall = vi.mocked(prisma.knowledgeFeedback.create).mock.calls[0]?.[0] as {
+      data?: { metadata?: Record<string, unknown> };
+    };
+    const metadata = createCall.data?.metadata;
+    expect(metadata).toMatchObject({
+      version: 2,
+      feedbackKind: "BAD_ANSWER",
+      routeDecisionMode: "normal_rag",
+      runtimeLineage: {
+        answerPathName: "deterministic_grounded",
+        qwenCalled: false,
+        validatorCalled: true,
+        embeddingFallbackUsed: false,
+        rerankerFallbackUsed: false,
+        runtimeProfileName: "local-dev",
+      },
+      nested: { safeNote: "kalabilir" },
+    });
+    expect(metadata).not.toHaveProperty("retrievalDebug");
+    expect(metadata).not.toHaveProperty("chatTrace");
+    expect(metadata).not.toHaveProperty("evalDebugContract");
+    expect(metadata).not.toHaveProperty("safetyGate");
+    expect(metadata).not.toHaveProperty("qdrantPayload");
+    expect(metadata).not.toHaveProperty("rawEmbeddingVector");
+    expect(JSON.stringify(metadata)).not.toContain("internal-only");
+    expect(JSON.stringify(metadata)).not.toContain("internalScore");
+    await app.close();
+  });
+
   it("rejects feedback for inaccessible collections", async () => {
     const { prisma } = await import("./lib/prisma.js");
     vi.mocked(prisma.knowledgeCollection.findFirst).mockResolvedValue(null);

@@ -9,6 +9,8 @@ import type {
   AdapterListResponse,
   ChatSourceCitation,
   DebugTraceEnvelope,
+  FeedbackPayloadV2,
+  FeedbackRuntimeLineageSummaryV2,
   KnowledgeCollectionListItem,
   KnowledgeDetailResponse,
   KnowledgeFeedbackAggregateItem,
@@ -418,6 +420,34 @@ export const KnowledgeFeedbackKindSchema = z.enum([
   "BAD_ANSWER",
   "GOOD_ANSWER",
 ]);
+
+export const FeedbackRuntimeLineageSummaryV2Schema: z.ZodType<FeedbackRuntimeLineageSummaryV2> = z.object({
+  answerPathName: z.string().max(120).nullable().optional(),
+  qwenCalled: z.boolean().nullable().optional(),
+  validatorCalled: z.boolean().nullable().optional(),
+  embeddingFallbackUsed: z.boolean().nullable().optional(),
+  rerankerFallbackUsed: z.boolean().nullable().optional(),
+  runtimeProfileName: z.string().max(80).nullable().optional(),
+}).strict();
+
+export const FeedbackPayloadV2Schema: z.ZodType<FeedbackPayloadV2> = z.object({
+  version: z.literal(2),
+  feedbackKind: KnowledgeFeedbackKindSchema,
+  sourceCount: z.number().int().nonnegative().max(50),
+  selectedCollectionIds: z.array(z.string().min(1).max(128)).max(12),
+  usedCollectionIds: z.array(z.string().min(1).max(128)).max(12),
+  suggestedCollectionIds: z.array(z.string().min(1).max(128)).max(12),
+  rejectedCollectionIds: z.array(z.string().min(1).max(128)).max(12),
+  includePublic: z.boolean(),
+  routeDecisionMode: z.string().max(80).nullable().optional(),
+  routeDecisionConfidence: z.string().max(80).nullable().optional(),
+  routePrimaryDomain: z.string().max(80).nullable().optional(),
+  groundingConfidence: z.string().max(80).nullable().optional(),
+  sourceTitles: z.array(z.string().max(240)).max(5),
+  runtimeLineage: FeedbackRuntimeLineageSummaryV2Schema.nullable().optional(),
+  redactedQuery: z.string().max(500).nullable().optional(),
+  evalQuerySource: z.enum(["client_redacted_v1", "server_redacted_v1"]).nullable().optional(),
+}).strict();
 
 export const KnowledgeFeedbackCreateRequestSchema: z.ZodType<KnowledgeFeedbackCreateRequest> = z.object({
   kind: KnowledgeFeedbackKindSchema,
@@ -856,6 +886,16 @@ export function safeParseDebugTraceEnvelope(
   input: unknown,
 ): z.SafeParseReturnType<unknown, DebugTraceEnvelope> {
   return DebugTraceEnvelopeSchema.safeParse(input);
+}
+
+export function parseFeedbackPayloadV2(input: unknown): FeedbackPayloadV2 {
+  return FeedbackPayloadV2Schema.parse(input);
+}
+
+export function safeParseFeedbackPayloadV2(
+  input: unknown,
+): z.SafeParseReturnType<unknown, FeedbackPayloadV2> {
+  return FeedbackPayloadV2Schema.safeParse(input);
 }
 
 export function parseKnowledgeFeedbackCreateRequest(input: unknown): KnowledgeFeedbackCreateRequest {

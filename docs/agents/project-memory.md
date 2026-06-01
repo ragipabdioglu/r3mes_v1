@@ -190,3 +190,10 @@ of truth; these files are the short working charter read before each task.
 - Chat turn state preserves public display fields alongside debug/trace lineage.
 - Source suggestion badge works from public suggestions when debug retrieval data is absent.
 - Source list shows safe `whyThisSource` explanations without exposing raw debug diagnostics.
+
+## Latest Phase 8 Slice 4 Note
+
+- Added strict `FeedbackPayloadV2` and `FeedbackRuntimeLineageSummaryV2` contracts.
+- dApp feedback sends safe source/route/lineage summary instead of loose debug-shaped metadata.
+- Backend feedback sanitizer strips raw trace, retrieval, provider, safety, Qdrant, and vector diagnostics recursively.
+- Public/debug boundary tests now cover feedback metadata leakage while preserving safe runtime lineage summary.

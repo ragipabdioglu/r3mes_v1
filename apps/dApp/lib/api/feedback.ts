@@ -1,5 +1,6 @@
 import { getBackendUrl } from "@/lib/env";
 import type { R3mesWalletAuthHeaders } from "@/lib/api/wallet-auth-types";
+import type { FeedbackPayloadV2 } from "@r3mes/shared-types";
 
 export type KnowledgeFeedbackKind =
   | "GOOD_SOURCE"
@@ -18,7 +19,7 @@ export type KnowledgeFeedbackPayload = {
   chunkId?: string | null;
   expectedCollectionId?: string | null;
   reason?: string | null;
-  metadata?: Record<string, unknown> | null;
+  metadata?: FeedbackPayloadV2 | Record<string, unknown> | null;
 };
 
 export type KnowledgeFeedbackProposalStatus = "PENDING" | "APPROVED" | "REJECTED";
