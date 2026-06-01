@@ -72,6 +72,10 @@ function cleanupCandidatePhrase(value: string): string {
     .replace(/\b(?:hangi\s+)?(?:satirlarda|satırlarda|satirda|satırda)\b.*$/u, "")
     .replace(/\b(?:nedir|ne\s+demek|ne\s+kadar|ne|kac\w*|kaç\w*)\b.*$/u, "")
     .replace(/\b(?:kayna(?:ga|ğa)|kaynaklara|ders\s+notlarina|ders\s+notlarına)\s+gore\b/gu, " ")
+    .replace(/\b(?:tek\s+satir\s+cevap|tek\s+satır\s+cevap|tek\s+satir|tek\s+satır)\b.*$/u, " ")
+    .replace(/\b(?:karistirma|karıştırma|kullanma|ekleme|katma|ham\s+tablo\s+basma)\b.*$/u, " ")
+    .replace(/\b(?:kisa|kısa)?\s*(?:maddelerle|maddeler\s+halinde|madde\s+madde|liste\s+halinde)\b.*$/u, " ")
+    .replace(/\b(?:bu|su|şu)\s+(?:iki|uc|üç|dort|dört|\d+)\s+\w+\b.*$/u, " ")
     .replace(/\b(?:sadece|kisa|kısa|madde\s+madde|tablo\s+halinde|listele|yaz|ver|acikla|açıkla)\b/gu, " ")
     .replace(/\b(?:nedir|ne\s+demek|ne\s+kadar|nelerdir|neler)\b/gu, " ")
     .replace(/[?.!]+$/gu, " ")
@@ -100,10 +104,18 @@ function phraseLooksLikeField(phrase: string): boolean {
   if (tokens.length === 0 || tokens.length > 9) return false;
   if (tokens.every((token) => token.length <= 2)) return false;
   if (/^(bu|su|şu|hangi|neden|nasil|nasıl|kaynak|belge|dosya|ders|notlar)$/u.test(phrase)) return false;
+  if (/^(?:bu|su|şu)\s+(?:iki|uc|üç|dort|dört|\d+)\s+\w+(?:\s+\w+)?$/u.test(phrase)) return false;
   const instructionTokens = new Set([
+    "bu",
+    "su",
+    "şu",
+    "iki",
+    "uc",
+    "üç",
     "rakam",
     "rakami",
     "rakamlari",
+    "rakamlarini",
     "sorulan",
     "sayi",
     "sayisi",
@@ -115,6 +127,10 @@ function phraseLooksLikeField(phrase: string): boolean {
     "liste",
     "kisa",
     "kisaca",
+    "karistirma",
+    "karıştırma",
+    "kullanma",
+    "cevap",
     "tablo",
   ]);
   if (tokens.every((token) => instructionTokens.has(token))) return false;

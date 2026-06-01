@@ -148,3 +148,10 @@ of truth; these files are the short working charter read before each task.
 - This is generic operation-level behavior, not KAP/company/document-specific logic.
 - Latest answer-quality baseline after Slice 6: 13/17 pass, failure count 17, answer-quality failure rate 0.176.
 - FROTO share-group case now passes; remaining fails: FROTO net profit, KCHOL share groups, KCHOL zero row, protected contradiction safety.
+
+## Latest Phase 7 Slice 7 Note
+
+- Slice 7 cleans generic output/exclusion instructions before requested field IDs are created.
+- Phrases like `maddelerle`, `karıştırma`, `kullanma`, `tek satır cevap`, and `bu iki grubu` must not become missing fields.
+- Latest answer-quality baseline after Slice 7: 14/17 pass, failure count 14, tableFieldMismatchRate 0.
+- Remaining fails: FROTO exact net profit value, KCHOL explicit zero row, and protected contradiction safety.

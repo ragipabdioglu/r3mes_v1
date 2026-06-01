@@ -61,4 +61,17 @@ describe("detectRequestedFields", () => {
       expect.arrayContaining(["donem_kari", "net_donem_kari"]),
     );
   });
+
+  it("does not turn output instructions into requested fields", () => {
+    const shareGroups = detectRequestedFields("A Grubu ve B Grubu için nakit tutarı ve oran satırlarını bu iki grubu maddelerle yaz.");
+    expect(shareGroups.requestedFields.map((field) => field.id)).toEqual(
+      expect.arrayContaining(["nakit_tutari", "oran"]),
+    );
+    expect(shareGroups.requestedFields.map((field) => field.id)).not.toContain("bu_iki_grubu_maddelerle");
+    expect(shareGroups.requestedFields.map((field) => field.id)).not.toContain("oran_satirlarini_bu_iki_grubu");
+
+    const noMixing = detectRequestedFields("SPK'ya göre net dönem kârı kaç? EREGL rakamlarını kullanma, tek satır cevap.");
+    expect(noMixing.requestedFields.map((field) => field.id)).toContain("net_donem_kari");
+    expect(noMixing.requestedFields.map((field) => field.id)).not.toContain("eregl_rakamlarini_kullanma_tek_satir_cevap");
+  });
 });
