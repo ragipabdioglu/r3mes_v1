@@ -141,3 +141,10 @@ of truth; these files are the short working charter read before each task.
 - Do not recover labels by taking all text before the first numeric value; that caused table-header label pollution.
 - Latest answer-quality baseline after Slice 5: 12/17 pass, failure count 20, raw table dump rate 0.
 - Remaining Faz 7 fails are FROTO/KCHOL field completeness, share-group table mismatch, zero-value extraction, and protected contradiction safety.
+
+## Latest Phase 7 Slice 6 Note
+
+- Slice 6 lets table-shaped AnswerPlan requests select existing table structured facts when literal field labels do not match.
+- This is generic operation-level behavior, not KAP/company/document-specific logic.
+- Latest answer-quality baseline after Slice 6: 13/17 pass, failure count 17, answer-quality failure rate 0.176.
+- FROTO share-group case now passes; remaining fails: FROTO net profit, KCHOL share groups, KCHOL zero row, protected contradiction safety.

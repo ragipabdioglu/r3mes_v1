@@ -154,4 +154,91 @@ describe("buildAnswerPlan", () => {
     });
     expect(plan.requiresModelSynthesis).toBe(true);
   });
+
+  it("uses existing table structured facts for table-shaped field requests without literal field matches", () => {
+    const queryContract: QueryContract = {
+      operation: "extract_fields",
+      requiredEvidenceType: "source_and_structured_fields",
+      outputFormat: "bullets",
+      outputConstraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+        format: "bullets",
+      },
+      sourceOnly: true,
+      requestedFields: [
+        {
+          id: "amounts",
+          label: "amounts",
+          required: true,
+          outputHint: "table",
+          confidence: "medium",
+        },
+        {
+          id: "rates",
+          label: "rates",
+          required: true,
+          outputHint: "table",
+          confidence: "medium",
+        },
+      ],
+      forbiddenAdditions: ["raw_table_dump"],
+      queryQuality: {
+        shape: "normal",
+        clarityScore: 75,
+        tokenCount: 5,
+        expandedTokenCount: 5,
+        conceptCount: 0,
+        profileConceptCount: 0,
+        weakSignalCount: 1,
+      },
+    };
+
+    const plan = buildAnswerPlan(
+      baseSpec({
+        userQuery: "Kaynağa göre tutar ve oran satırlarını maddelerle ver.",
+        structuredFacts: [
+          {
+            id: "sf-table-a",
+            kind: "table_row",
+            sourceId: "source-generic",
+            field: "First Grouped Numeric Values",
+            value: "100 / 10,00",
+            confidence: "high",
+            table: {
+              rowLabel: "First Group",
+              rawRow: "First Group 100 10,00",
+            },
+            provenance: {
+              quote: "First Group 100 10,00",
+              extractor: "generic-table-row-v1",
+            },
+          },
+          {
+            id: "sf-table-b",
+            kind: "table_row",
+            sourceId: "source-generic",
+            field: "Second Grouped Numeric Values",
+            value: "200 / 20,00",
+            confidence: "medium",
+            table: {
+              rowLabel: "Second Group",
+              rawRow: "Second Group 200 20,00",
+            },
+            provenance: {
+              quote: "Second Group 200 20,00",
+              extractor: "generic-table-row-v1",
+            },
+          },
+        ],
+      }),
+      { queryContract },
+    );
+
+    expect(plan.selectedFacts.map((fact) => fact.id)).toEqual(["sf-table-a", "sf-table-b"]);
+    expect(plan.diagnostics.missingFieldIds).toEqual([]);
+    expect(plan.coverage).toBe("complete");
+    expect(plan.requiresModelSynthesis).toBe(false);
+  });
 });

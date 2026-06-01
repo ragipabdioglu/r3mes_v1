@@ -43,6 +43,10 @@ function factMatchesField(fact: StructuredFact, field: RequestedField): boolean 
   return requestedFieldMatchesFact(field, fact);
 }
 
+function isTableStructuredFact(fact: StructuredFact): boolean {
+  return fact.kind === "table_row" || fact.kind === "table_cell" || fact.kind === "numeric_value" || Boolean(fact.table);
+}
+
 function selectFactsForFields(facts: StructuredFact[], fields: RequestedField[]): StructuredFact[] {
   const selected: StructuredFact[] = [];
   const seen = new Set<string>();
@@ -74,13 +78,33 @@ function selectFactsForFields(facts: StructuredFact[], fields: RequestedField[])
     seen.add(match.id);
     selected.push(match);
   }
+  if (selected.length === 0 && fields.some((field) => field.outputHint === "table")) {
+    const confidenceScore = { high: 3, medium: 2, low: 1 };
+    const tableMatches = facts
+      .filter((fact) => !seen.has(fact.id) && isTableStructuredFact(fact))
+      .sort((left, right) => confidenceScore[right.confidence] - confidenceScore[left.confidence])
+      .slice(0, 6);
+    for (const match of tableMatches) {
+      seen.add(match.id);
+      selected.push(match);
+    }
+  }
   return selected;
 }
 
-function coverageFor(fields: RequestedField[], selectedFacts: StructuredFact[]): AnswerPlanCoverage {
+function fieldIsCovered(field: RequestedField, selectedFacts: StructuredFact[]): boolean {
+  if (selectedFacts.some((fact) => factMatchesField(fact, field))) return true;
+  return field.outputHint === "table" && selectedFacts.some(isTableStructuredFact);
+}
+
+function coverageFor(
+  fields: RequestedField[],
+  selectedFacts: StructuredFact[],
+  missingFieldIds: string[],
+): AnswerPlanCoverage {
   if (fields.length === 0) return selectedFacts.length > 0 ? "partial" : "none";
   if (selectedFacts.length === 0) return "none";
-  if (selectedFacts.length >= fields.length) return "complete";
+  if (missingFieldIds.length === 0) return "complete";
   return "partial";
 }
 
@@ -128,13 +152,13 @@ export function buildAnswerPlan(spec: AnswerSpec, opts: BuildAnswerPlanOptions =
   const contractTaskType = opts.queryContract ? taskTypeFromContract(opts.queryContract) : null;
   const selectedFacts = selectFactsForFields(spec.structuredFacts ?? [], requestedFields);
   const missingFieldIds = requestedFields
-    .filter((field) => !selectedFacts.some((fact) => factMatchesField(fact, field)))
+    .filter((field) => !fieldIsCovered(field, selectedFacts))
     .map((field) => field.id);
   const taskType =
     contractTaskType ?? (requestedFields.length > 0 ? "field_extraction" :
       taskDetection.taskType === "unknown" ? "grounded_summary" :
         taskDetection.taskType);
-  const coverage = coverageFor(requestedFields, selectedFacts);
+  const coverage = coverageFor(requestedFields, selectedFacts, missingFieldIds);
 
   return {
     domain: spec.answerDomain,
