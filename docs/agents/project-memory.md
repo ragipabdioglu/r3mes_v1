@@ -127,3 +127,10 @@ of truth; these files are the short working charter read before each task.
 - Domain-safe must remain cautious and must not be forced into concise missing-field fallback.
 - Latest answer-quality baseline after Slice 3: 8/17 pass, failure count 29, answer-quality failure rate 0.294.
 - Remaining Faz 7 focus: safety presentation compatibility and KAP/table numeric answer planning, not retrieval or parser changes.
+
+## Latest Phase 7 Slice 4 Note
+
+- Slice 4 reconciled repaired presentation with answer-quality-only safety rails.
+- Real rails such as source metadata mismatch and risky certainty still block/rewrite.
+- Partial evidence answers with explicit missing-field disclosure no longer fail as table mismatch solely due plan missing fields.
+- Latest answer-quality baseline after Slice 4: 10/17 pass, failure count 23, non-KAP bucket 6/7.

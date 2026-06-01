@@ -64,6 +64,7 @@ import {
 import { evaluateSafetyGate } from "../lib/safetyGate.js";
 import { buildSafetyEvidenceSignals, type SafetyEvidenceSignals } from "../lib/safetyEvidenceSignals.js";
 import { renderSafetyFallback } from "../lib/safetyFallbackRenderer.js";
+import { reconcileSafetyGateAfterPresentationRepair } from "../lib/safetyGatePresentationRepair.js";
 import {
   buildSourceResolutionPlan,
   summarizeSourceResolutionPlan,
@@ -1118,10 +1119,31 @@ function applyRenderedAnswer(
       renderedSafetyFallback = safetyGate.safeFallback;
     }
   }
-  const exposedSafetyGate =
+  let safetyPresentationRepair: ReturnType<typeof reconcileSafetyGateAfterPresentationRepair> | null = null;
+  let exposedSafetyGate =
     renderedSafetyFallback !== safetyGate.safeFallback
       ? { ...safetyGate, safeFallback: renderedSafetyFallback }
       : safetyGate;
+  if (renderedSafetyFallback) {
+    const repairedQualityFindings = validateAnswerQuality({
+      answer: renderedSafetyFallback,
+      query: userQuery || enrichedAnswer.user_query,
+      expectations: qualityExpectations,
+      answerPlan,
+      sourceCount: sources.length,
+      evidenceFactCount: retrievalDebug?.evidence?.usableFacts.length ?? answerSpec.facts.length,
+      evidenceBundleItemCount: evidenceBundle?.items.length ?? 0,
+      noSourceExpected: sources.length === 0 && !retrievalWasUsed,
+    });
+    safetyPresentationRepair = reconcileSafetyGateAfterPresentationRepair({
+      safetyGate: exposedSafetyGate,
+      repairedFindings: repairedQualityFindings,
+    });
+    if (safetyPresentationRepair.applied) {
+      exposedSafetyGate = safetyPresentationRepair.safetyGate;
+      qualityFindings = repairedQualityFindings;
+    }
+  }
   const shouldHideCitations =
     exposedSafetyGate.blockedReasons.includes("NO_USABLE_FACTS") ||
     exposedSafetyGate.blockedReasons.includes("QUERY_SOURCE_MISMATCH") ||
@@ -1137,7 +1159,17 @@ function applyRenderedAnswer(
     qualityRepairApplied: plannedQualityRepairApplied,
     selectedFactCount: answerPlan.diagnostics.selectedFactCount,
   });
-  const answerQualityWithPath = { ...answerQuality, composerPath };
+  const answerQualityWithPath = {
+    ...answerQuality,
+    findings: qualityFindings,
+    composerPath,
+    safetyPresentationRepair: safetyPresentationRepair
+      ? {
+          applied: safetyPresentationRepair.applied,
+          reason: safetyPresentationRepair.reason,
+        }
+      : null,
+  };
   opts.chatTrace?.recordNow("render_safety", "ok", {
     pass: exposedSafetyGate.pass,
     fallbackMode: exposedSafetyGate.fallbackMode,
@@ -1159,6 +1191,12 @@ function applyRenderedAnswer(
     evidenceSignals,
     evidenceBundleDiagnostics: evidenceBundle?.diagnostics ?? null,
     answerQualityFindings: qualityFindings,
+    safetyPresentationRepair: safetyPresentationRepair
+      ? {
+          applied: safetyPresentationRepair.applied,
+          reason: safetyPresentationRepair.reason,
+        }
+      : null,
   });
   const finalContent = shouldHideCitations
     ? (renderedSafetyFallback ?? finalRendered)

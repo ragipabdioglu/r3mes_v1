@@ -137,6 +137,44 @@ function planMissingFieldIds(answerPlan: AnswerQualityPlanTrace | null | undefin
   return Array.isArray(missing) ? missing.map(normalize) : [];
 }
 
+function fieldLabelsForIds(answerPlan: AnswerQualityPlanTrace | null | undefined, fieldIds: string[]): string[] {
+  const requested = answerPlan?.requestedFields ?? [];
+  const labels: string[] = [];
+  for (const fieldId of fieldIds) {
+    const normalizedFieldId = normalize(fieldId);
+    const field = requested.find((item) => normalize(item.id ?? item.fieldId) === normalizedFieldId);
+    labels.push(field?.label ?? field?.id ?? field?.fieldId ?? fieldId);
+  }
+  return labels;
+}
+
+function includesFieldReference(answer: string, field: string): boolean {
+  const normalizedAnswer = normalize(answer).replace(/[_-]+/g, " ");
+  const normalizedField = normalize(field).replace(/[_-]+/g, " ");
+  return Boolean(normalizedField) && normalizedAnswer.includes(normalizedField);
+}
+
+function answerDisclosesMissingFields(
+  answer: string,
+  answerPlan: AnswerQualityPlanTrace | null | undefined,
+  missingFields: string[],
+): boolean {
+  if (missingFields.length === 0) return false;
+  const normalizedAnswer = normalize(answer);
+  const hasDisclosure =
+    /\b(bulunamayan|eksik|bulunamad[ıi]|missing|not found|unavailable)\s+(alan|alanlar|field|fields|de[ğg]er|value|values)\b/iu
+      .test(normalizedAnswer) ||
+    /\b(alan|alanlar|field|fields)\s+(bulunamad[ıi]|eksik|missing|not found|unavailable)\b/iu.test(normalizedAnswer);
+  if (!hasDisclosure) return false;
+  const labels = fieldLabelsForIds(answerPlan, missingFields);
+  return labels.every((label, index) => includesFieldReference(answer, label) || includesFieldReference(answer, missingFields[index] ?? ""));
+}
+
+function hasUsablePartialEvidence(input: ValidateAnswerQualityInput): boolean {
+  const selectedFactCount = Number(input.answerPlan?.diagnostics?.selectedFactCount ?? 0);
+  return selectedFactCount > 0 || (input.evidenceFactCount ?? 0) > 0 || (input.evidenceBundleItemCount ?? 0) > 0;
+}
+
 function missingRequiredFields(
   requiredFields: string[] | undefined,
   answerPlan: AnswerQualityPlanTrace | null | undefined,
@@ -222,7 +260,11 @@ export function validateAnswerQuality(input: ValidateAnswerQualityInput): Answer
   }
 
   const missingFields = missingRequiredFields(expectations.requiredFields, input.answerPlan);
-  if (missingFields.length > 0) {
+  const disclosedPartialMissingFields =
+    input.answerPlan?.coverage !== "complete" &&
+    hasUsablePartialEvidence(input) &&
+    answerDisclosesMissingFields(answer, input.answerPlan, missingFields);
+  if (missingFields.length > 0 && !disclosedPartialMissingFields) {
     pushFinding(findings, "table_field_mismatch", "fail", `missing required fields in answer plan: ${missingFields.join(",")}`);
   }
 
