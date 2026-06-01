@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { chatDebugResponseKeys, stripChatDebugFields } from "./chatResponseBoundary.js";
+import {
+  chatDebugResponseKeys,
+  hasChatDebugField,
+  publicChatResponseV2Keys,
+  stripChatDebugFields,
+} from "./chatResponseBoundary.js";
 
 describe("chat response boundary", () => {
   it("strips internal debug fields from public payloads", () => {
@@ -62,5 +67,24 @@ describe("chat response boundary", () => {
       "runtime_lineage",
       "runtimeLineage",
     ]);
+  });
+
+  it("tracks the public chat response v2 allowlist separately from debug keys", () => {
+    expect(publicChatResponseV2Keys()).toEqual([
+      "version",
+      "answer",
+      "sources",
+      "suggestions",
+      "status",
+    ]);
+
+    for (const key of publicChatResponseV2Keys()) {
+      expect(chatDebugResponseKeys()).not.toContain(key);
+    }
+  });
+
+  it("detects debug fields before public response shaping", () => {
+    expect(hasChatDebugField({ answer: "ok", retrieval_debug: { hidden: true } })).toBe(true);
+    expect(hasChatDebugField({ answer: "ok", sources: [] })).toBe(false);
   });
 });

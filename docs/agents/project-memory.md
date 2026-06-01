@@ -169,3 +169,10 @@ of truth; these files are the short working charter read before each task.
 - Current answer-quality rates: rawTableDump 0, tableFieldMismatch 0, unnecessaryWarning 0, sourceFoundBadAnswer 0.
 - Runtime lineage coverage remains 1.0 and provider fallback ratios remain 0.
 - Remaining warning is normal RAG p95 latency 8320ms vs 8000ms, backlog for latency/ops rather than Faz 7 correctness.
+
+## Latest Phase 8 Slice 1 Note
+
+- Added strict shared-types contracts for `PublicChatResponseV2` and `DebugTraceEnvelope`.
+- Public response contract only allows answer, sources, suggestions, and user-facing status.
+- Debug diagnostics remain in a separate envelope; public schema rejects internal debug fields.
+- Backend boundary now exposes public key allowlist and debug-field detection without changing runtime answer behavior.

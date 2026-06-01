@@ -319,6 +319,53 @@ export interface ChatSourceCitation {
   excerpt?: string | null;
 }
 
+export type UserFacingStatusKind =
+  | "answered"
+  | "no_source"
+  | "suggestions"
+  | "safety_limited"
+  | "error";
+
+export interface UserFacingStatus {
+  kind: UserFacingStatusKind;
+  sourceBacked: boolean;
+  message?: string | null;
+}
+
+export interface SourceDisplayModel {
+  collectionId: string;
+  documentId: string;
+  title: string;
+  chunkIndex?: number | null;
+  excerpt?: string | null;
+  visibility?: KnowledgeVisibility | null;
+  whyThisSource?: string | null;
+}
+
+export interface SuggestionDisplayModel {
+  collectionId: string;
+  title: string;
+  reason: string;
+  action: "select_collection" | "review_source" | "upload_source";
+}
+
+export interface PublicChatResponseV2 {
+  version: 2;
+  answer: string;
+  sources: SourceDisplayModel[];
+  suggestions: SuggestionDisplayModel[];
+  status: UserFacingStatus;
+}
+
+export interface DebugTraceEnvelope {
+  version: 1;
+  enabled: boolean;
+  traceId?: string | null;
+  runtimeLineage?: Record<string, unknown> | null;
+  evalDebugContract?: Record<string, unknown> | null;
+  retrievalDebug?: Record<string, unknown> | null;
+}
+
 export type KnowledgeFeedbackKind =
   | "GOOD_SOURCE"
   | "WRONG_SOURCE"

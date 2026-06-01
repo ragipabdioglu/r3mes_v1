@@ -8,10 +8,13 @@ import {
 import {
   AdapterListResponseSchema,
   BenchmarkQueueJobMessageSchema,
+  DebugTraceEnvelopeSchema,
   LoRAUploadAcceptedResponseSchema,
   NotImplementedOnChainRestResponseSchema,
   parseAdapterListResponse,
+  parsePublicChatResponseV2,
   parseNotImplementedOnChainRestResponse,
+  PublicChatResponseV2Schema,
   QaResultWebhookPayloadSchema,
 } from "../src/schemas.js";
 
@@ -164,5 +167,66 @@ describe("contractGuards", () => {
 
   it("assertBenchmarkScoreSemantic throws above 100", () => {
     expect(() => assertBenchmarkScoreSemantic(101)).toThrow(ContractInvariantError);
+  });
+});
+
+describe("Faz 8 public/debug chat contracts", () => {
+  const publicPayload = {
+    version: 2,
+    answer: "Kaynağa göre kısa cevap.",
+    sources: [
+      {
+        collectionId: "col_1",
+        documentId: "doc_1",
+        title: "Ders notu",
+        chunkIndex: 0,
+        excerpt: "Kısa alıntı",
+        visibility: "PRIVATE",
+        whyThisSource: "Soru ile aynı başlıktaki kaynak seçildi.",
+      },
+    ],
+    suggestions: [
+      {
+        collectionId: "col_2",
+        title: "Alternatif kaynak",
+        reason: "Benzer konu sinyali taşıyor.",
+        action: "select_collection",
+      },
+    ],
+    status: {
+      kind: "answered",
+      sourceBacked: true,
+      message: null,
+    },
+  };
+
+  it("accepts the minimal user-facing chat response shape", () => {
+    const parsed = parsePublicChatResponseV2(publicPayload);
+
+    expect(parsed.version).toBe(2);
+    expect(parsed.sources[0]?.whyThisSource).toContain("Soru");
+  });
+
+  it("rejects internal diagnostics on the public chat response contract", () => {
+    expect(() =>
+      PublicChatResponseV2Schema.parse({
+        ...publicPayload,
+        evalDebugContract: { hidden: true },
+      }),
+    ).toThrow();
+  });
+
+  it("keeps debug diagnostics in a separate envelope", () => {
+    const parsed = DebugTraceEnvelopeSchema.parse({
+      version: 1,
+      enabled: true,
+      traceId: "trace_1",
+      runtimeLineage: { answerPath: "deterministic" },
+      evalDebugContract: { answerBaseline: { selectedFactCount: 2 } },
+      retrievalDebug: { sourceCount: 1 },
+    });
+
+    expect(parsed.enabled).toBe(true);
+    expect(parsed.evalDebugContract?.answerBaseline).toEqual({ selectedFactCount: 2 });
   });
 });

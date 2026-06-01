@@ -8,6 +8,7 @@ import type {
   AdapterListItem,
   AdapterListResponse,
   ChatSourceCitation,
+  DebugTraceEnvelope,
   KnowledgeCollectionListItem,
   KnowledgeDetailResponse,
   KnowledgeFeedbackAggregateItem,
@@ -45,6 +46,10 @@ import type {
   KnowledgeParserCapabilityItem,
   KnowledgeUploadAcceptedResponse,
   NotImplementedOnChainRestResponse,
+  PublicChatResponseV2,
+  SourceDisplayModel,
+  SuggestionDisplayModel,
+  UserFacingStatus,
 } from "./apiContract.js";
 import type {
   BenchmarkJobPayload,
@@ -365,6 +370,46 @@ export const ChatSourceCitationSchema: z.ZodType<ChatSourceCitation> = z.object(
   chunkIndex: z.number().int().nonnegative(),
   excerpt: z.string().nullable().optional(),
 });
+
+export const UserFacingStatusSchema: z.ZodType<UserFacingStatus> = z.object({
+  kind: z.enum(["answered", "no_source", "suggestions", "safety_limited", "error"]),
+  sourceBacked: z.boolean(),
+  message: z.string().nullable().optional(),
+}).strict();
+
+export const SourceDisplayModelSchema: z.ZodType<SourceDisplayModel> = z.object({
+  collectionId: z.string().min(1),
+  documentId: z.string().min(1),
+  title: z.string().min(1),
+  chunkIndex: z.number().int().nonnegative().nullable().optional(),
+  excerpt: z.string().nullable().optional(),
+  visibility: KnowledgeVisibilitySchema.nullable().optional(),
+  whyThisSource: z.string().nullable().optional(),
+}).strict();
+
+export const SuggestionDisplayModelSchema: z.ZodType<SuggestionDisplayModel> = z.object({
+  collectionId: z.string().min(1),
+  title: z.string().min(1),
+  reason: z.string().min(1),
+  action: z.enum(["select_collection", "review_source", "upload_source"]),
+}).strict();
+
+export const PublicChatResponseV2Schema: z.ZodType<PublicChatResponseV2> = z.object({
+  version: z.literal(2),
+  answer: z.string(),
+  sources: z.array(SourceDisplayModelSchema),
+  suggestions: z.array(SuggestionDisplayModelSchema),
+  status: UserFacingStatusSchema,
+}).strict();
+
+export const DebugTraceEnvelopeSchema: z.ZodType<DebugTraceEnvelope> = z.object({
+  version: z.literal(1),
+  enabled: z.boolean(),
+  traceId: z.string().nullable().optional(),
+  runtimeLineage: z.record(z.string(), z.unknown()).nullable().optional(),
+  evalDebugContract: z.record(z.string(), z.unknown()).nullable().optional(),
+  retrievalDebug: z.record(z.string(), z.unknown()).nullable().optional(),
+}).strict();
 
 export const KnowledgeFeedbackKindSchema = z.enum([
   "GOOD_SOURCE",
@@ -791,6 +836,26 @@ export function safeParseKnowledgeParserCapabilitiesResponse(
   input: unknown,
 ): z.SafeParseReturnType<unknown, KnowledgeParserCapabilitiesResponse> {
   return KnowledgeParserCapabilitiesResponseSchema.safeParse(input);
+}
+
+export function parsePublicChatResponseV2(input: unknown): PublicChatResponseV2 {
+  return PublicChatResponseV2Schema.parse(input);
+}
+
+export function safeParsePublicChatResponseV2(
+  input: unknown,
+): z.SafeParseReturnType<unknown, PublicChatResponseV2> {
+  return PublicChatResponseV2Schema.safeParse(input);
+}
+
+export function parseDebugTraceEnvelope(input: unknown): DebugTraceEnvelope {
+  return DebugTraceEnvelopeSchema.parse(input);
+}
+
+export function safeParseDebugTraceEnvelope(
+  input: unknown,
+): z.SafeParseReturnType<unknown, DebugTraceEnvelope> {
+  return DebugTraceEnvelopeSchema.safeParse(input);
 }
 
 export function parseKnowledgeFeedbackCreateRequest(input: unknown): KnowledgeFeedbackCreateRequest {
