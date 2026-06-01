@@ -197,3 +197,10 @@ of truth; these files are the short working charter read before each task.
 - dApp feedback sends safe source/route/lineage summary instead of loose debug-shaped metadata.
 - Backend feedback sanitizer strips raw trace, retrieval, provider, safety, Qdrant, and vector diagnostics recursively.
 - Public/debug boundary tests now cover feedback metadata leakage while preserving safe runtime lineage summary.
+
+## Latest Phase 8 Closure Note
+
+- Faz 8 product boundary is complete enough to enter Faz 9.
+- Public chat contract, source/suggestion/status display, UI public display wiring, and feedback boundary are in place.
+- Closure gates passed: shared build/test, backend typecheck, dApp typecheck, and 35 backend boundary/chat tests.
+- Remaining warning: dApp has no active unit test runner; UI behavior is covered by typecheck plus backend/shared contracts.
