@@ -430,6 +430,8 @@ export type KnowledgeFeedbackProposalAction =
   | "REVIEW_MISSING_SOURCE"
   | "REVIEW_ANSWER_QUALITY";
 
+export type FeedbackRepairTrack = "routing" | "ingestion_evidence" | "answer_quality" | "safety_policy";
+
 export type KnowledgeFeedbackProposalStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export interface KnowledgeFeedbackAggregateItem {
@@ -457,6 +459,7 @@ export interface KnowledgeFeedbackProposalItem {
   id: string;
   action: KnowledgeFeedbackProposalAction;
   status: KnowledgeFeedbackProposalStatus;
+  repairTrack: FeedbackRepairTrack;
   collectionId: string | null;
   expectedCollectionId: string | null;
   queryHash: string | null;

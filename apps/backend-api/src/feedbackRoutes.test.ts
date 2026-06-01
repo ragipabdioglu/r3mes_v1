@@ -347,13 +347,14 @@ describe("knowledge feedback routes", () => {
     expect(proposalRes.statusCode).toBe(200);
     const proposalBody = JSON.parse(proposalRes.body) as {
       generatedCount?: number;
-      data?: Array<{ action?: string; status?: string; collectionId?: string | null }>;
+      data?: Array<{ action?: string; status?: string; collectionId?: string | null; repairTrack?: string }>;
     };
     expect(proposalBody.generatedCount).toBe(1);
     expect(proposalBody.data?.[0]).toMatchObject({
       action: "PENALIZE_SOURCE",
       status: "PENDING",
       collectionId: "kc_wrong",
+      repairTrack: "routing",
     });
     expect(prisma.knowledgeFeedbackProposal.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -362,6 +363,7 @@ describe("knowledge feedback routes", () => {
           collectionId: "kc_wrong",
           expectedCollectionId: "kc_expected",
           queryHash: "hash_1",
+          evidence: expect.objectContaining({ repairTrack: "routing" }),
         }),
       }),
     );
@@ -973,6 +975,158 @@ describe("knowledge feedback routes", () => {
       }),
     );
     expect(prisma.knowledgeFeedbackProposal.update).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("does not create router adjustments for answer-quality repair track plans", async () => {
+    const { prisma } = await import("./lib/prisma.js");
+    vi.mocked(prisma.user.upsert).mockResolvedValue({ id: "user_1" } as never);
+    vi.mocked(prisma.knowledgeFeedbackApplyRecord.findFirst).mockResolvedValue({
+      id: "apply_record_answer_quality",
+      proposalId: "proposal_answer_quality",
+      status: "GATE_PASSED",
+      plan: {
+        proposal: {
+          id: "proposal_answer_quality",
+          action: "REVIEW_ANSWER_QUALITY",
+          status: "APPROVED",
+          repairTrack: "answer_quality",
+          collectionId: "kc_answer",
+          expectedCollectionId: null,
+          queryHash: "hash_answer",
+          confidence: 1,
+          reason: "bad answer should become answer-quality regression",
+          evidence: { badAnswerCount: 2, repairTrack: "answer_quality" },
+          reviewedAt: "2026-05-05T12:05:00.000Z",
+          createdAt: "2026-05-05T12:00:00.000Z",
+          updatedAt: "2026-05-05T12:05:00.000Z",
+        },
+        impact: {
+          proposalId: "proposal_answer_quality",
+          action: "REVIEW_ANSWER_QUALITY",
+          targetCollectionId: "kc_answer",
+          expectedCollectionId: null,
+          queryHash: "hash_answer",
+          estimatedScoreDelta: 0,
+          riskLevel: "low",
+          wouldAutoApply: false,
+          rationale: ["answer quality proposals should become eval cases before router scoring changes"],
+        },
+        steps: [
+          {
+            id: "proposal_answer_quality:answer-quality-eval",
+            kind: "CREATE_ANSWER_QUALITY_EVAL",
+            targetCollectionId: "kc_answer",
+            expectedCollectionId: null,
+            queryHash: "hash_answer",
+            scoreDelta: 0,
+            reversible: true,
+            rollback: "Remove generated answer-quality eval case.",
+            rationale: "Bad-answer feedback should become regression eval first.",
+          },
+          {
+            id: "proposal_answer_quality:bad-score-step",
+            kind: "BOOST_COLLECTION_SCORE",
+            targetCollectionId: "kc_answer",
+            expectedCollectionId: null,
+            queryHash: "hash_answer",
+            scoreDelta: 0.25,
+            reversible: true,
+            rollback: "This score step must be ignored for non-routing repair tracks.",
+            rationale: "Injected malformed plan step.",
+          },
+        ],
+        mutationEnabled: false,
+        applyAllowed: false,
+        requiredGate: "feedback_eval_gate",
+        blockedReasons: ["mutation disabled: controlled apply preview only"],
+      },
+      gateReport: { ok: true, checks: [{ name: "feedback_case_coverage", ok: true }] },
+      reason: "feedback eval gate passed",
+      plannedAt: new Date("2026-05-05T12:06:00.000Z"),
+      gateCheckedAt: new Date("2026-05-05T12:07:00.000Z"),
+      appliedAt: null,
+      rolledBackAt: null,
+      createdAt: new Date("2026-05-05T12:06:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:07:00.000Z"),
+    } as never);
+    vi.mocked(prisma.knowledgeFeedbackRouterAdjustment.findMany)
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([] as never);
+    vi.mocked(prisma.knowledgeFeedbackApplyRecord.update).mockResolvedValue({
+      id: "apply_record_answer_quality",
+      proposalId: "proposal_answer_quality",
+      status: "APPLIED",
+      plan: {
+        proposal: {
+          id: "proposal_answer_quality",
+          action: "REVIEW_ANSWER_QUALITY",
+          status: "APPROVED",
+          repairTrack: "answer_quality",
+          collectionId: "kc_answer",
+          expectedCollectionId: null,
+          queryHash: "hash_answer",
+          confidence: 1,
+          reason: "bad answer should become answer-quality regression",
+          evidence: { badAnswerCount: 2, repairTrack: "answer_quality" },
+          reviewedAt: "2026-05-05T12:05:00.000Z",
+          createdAt: "2026-05-05T12:00:00.000Z",
+          updatedAt: "2026-05-05T12:05:00.000Z",
+        },
+        impact: {
+          proposalId: "proposal_answer_quality",
+          action: "REVIEW_ANSWER_QUALITY",
+          targetCollectionId: "kc_answer",
+          expectedCollectionId: null,
+          queryHash: "hash_answer",
+          estimatedScoreDelta: 0,
+          riskLevel: "low",
+          wouldAutoApply: false,
+          rationale: ["answer quality proposals should become eval cases before router scoring changes"],
+        },
+        steps: [],
+        mutationEnabled: false,
+        applyAllowed: false,
+        requiredGate: "feedback_eval_gate",
+        blockedReasons: ["mutation disabled: controlled apply preview only"],
+      },
+      gateReport: { ok: true, checks: [{ name: "feedback_case_coverage", ok: true }] },
+      reason: "passive router adjustments recorded; router runtime integration remains disabled",
+      plannedAt: new Date("2026-05-05T12:06:00.000Z"),
+      gateCheckedAt: new Date("2026-05-05T12:07:00.000Z"),
+      appliedAt: new Date("2026-05-05T12:08:00.000Z"),
+      rolledBackAt: null,
+      createdAt: new Date("2026-05-05T12:06:00.000Z"),
+      updatedAt: new Date("2026-05-05T12:08:00.000Z"),
+    } as never);
+
+    const { buildApp } = await import("./app.js");
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/feedback/knowledge/apply-records/apply_record_answer_quality/apply-passive",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      mutationApplied?: boolean;
+      routerRuntimeAffected?: boolean;
+      adjustments?: unknown[];
+    };
+    expect(body.mutationApplied).toBe(false);
+    expect(body.routerRuntimeAffected).toBe(false);
+    expect(body.adjustments).toEqual([]);
+    expect(prisma.knowledgeFeedbackRouterAdjustment.createMany).not.toHaveBeenCalled();
+    expect(prisma.knowledgeFeedbackApplyRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          appliedDelta: expect.objectContaining({
+            repairTrack: "answer_quality",
+            adjustmentIds: [],
+          }),
+        }),
+      }),
+    );
     await app.close();
   });
 

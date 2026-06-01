@@ -479,6 +479,13 @@ export const KnowledgeFeedbackProposalActionSchema = z.enum([
   "REVIEW_ANSWER_QUALITY",
 ]);
 
+export const FeedbackRepairTrackSchema = z.enum([
+  "routing",
+  "ingestion_evidence",
+  "answer_quality",
+  "safety_policy",
+]);
+
 export const KnowledgeFeedbackProposalStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
 
 export const KnowledgeFeedbackAggregateItemSchema: z.ZodType<KnowledgeFeedbackAggregateItem> = z.object({
@@ -506,6 +513,7 @@ export const KnowledgeFeedbackProposalItemSchema: z.ZodType<KnowledgeFeedbackPro
   id: z.string().min(1),
   action: KnowledgeFeedbackProposalActionSchema,
   status: KnowledgeFeedbackProposalStatusSchema,
+  repairTrack: FeedbackRepairTrackSchema,
   collectionId: z.string().nullable(),
   expectedCollectionId: z.string().nullable(),
   queryHash: z.string().nullable(),

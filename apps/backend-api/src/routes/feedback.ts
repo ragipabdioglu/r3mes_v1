@@ -22,6 +22,7 @@ import {
   safeParseKnowledgeFeedbackRouterScoringSimulationResponse,
   safeParseKnowledgeFeedbackSummaryResponse,
   type KnowledgeFeedbackCreateResponse,
+  type FeedbackRepairTrack,
   type KnowledgeFeedbackAggregateItem,
   type KnowledgeFeedbackApplyMutationPreviewResponse,
   type KnowledgeFeedbackApplyMutationPreviewStep,
@@ -113,8 +114,6 @@ type FeedbackRow = {
   queryHash: string | null;
 };
 
-type FeedbackRepairTrack = "routing" | "ingestion_evidence" | "answer_quality" | "safety_policy";
-
 function aggregateKey(row: FeedbackRow): string {
   return [
     row.collectionId ?? "-",
@@ -191,6 +190,20 @@ function proposalSignalCount(item: KnowledgeFeedbackAggregateItem, action: Knowl
   return item.badAnswerCount;
 }
 
+function repairTrackForProposalAction(action: KnowledgeFeedbackProposalAction): FeedbackRepairTrack {
+  if (action === "BOOST_SOURCE" || action === "PENALIZE_SOURCE") return "routing";
+  if (action === "REVIEW_MISSING_SOURCE") return "ingestion_evidence";
+  return "answer_quality";
+}
+
+function repairTrackForProposal(proposal: Pick<KnowledgeFeedbackProposalItem, "action" | "evidence">): FeedbackRepairTrack {
+  const raw = proposal.evidence.repairTrack;
+  if (raw === "routing" || raw === "ingestion_evidence" || raw === "answer_quality" || raw === "safety_policy") {
+    return raw;
+  }
+  return repairTrackForProposalAction(proposal.action);
+}
+
 function toProposalItem(row: {
   id: string;
   action: string;
@@ -209,6 +222,12 @@ function toProposalItem(row: {
     id: row.id,
     action: row.action as KnowledgeFeedbackProposalAction,
     status: row.status as KnowledgeFeedbackProposalItem["status"],
+    repairTrack: repairTrackForProposal({
+      action: row.action as KnowledgeFeedbackProposalAction,
+      evidence: row.evidence && typeof row.evidence === "object" && !Array.isArray(row.evidence)
+        ? row.evidence as Record<string, unknown>
+        : {},
+    }),
     collectionId: row.collectionId,
     expectedCollectionId: row.expectedCollectionId,
     queryHash: row.queryHash,
@@ -612,6 +631,24 @@ function summarizeGateReport(value: unknown): KnowledgeFeedbackApplyRecordItem["
   };
 }
 
+function normalizeApplyPlanResponse(value: unknown): KnowledgeFeedbackApplyPlanResponse {
+  const plan = value as KnowledgeFeedbackApplyPlanResponse;
+  const proposal = plan.proposal
+    ? {
+        ...plan.proposal,
+        repairTrack: plan.proposal.repairTrack ?? repairTrackForProposal(plan.proposal),
+      }
+    : plan.proposal;
+  return {
+    ...plan,
+    proposal,
+  };
+}
+
+function repairTrackForApplyRecord(record: KnowledgeFeedbackApplyRecordItem): FeedbackRepairTrack {
+  return record.plan.proposal.repairTrack ?? repairTrackForProposal(record.plan.proposal);
+}
+
 function toApplyRecordItem(row: {
   id: string;
   proposalId: string;
@@ -630,7 +667,7 @@ function toApplyRecordItem(row: {
     id: row.id,
     proposalId: row.proposalId,
     status: row.status as KnowledgeFeedbackApplyRecordItem["status"],
-    plan: row.plan as KnowledgeFeedbackApplyPlanResponse,
+    plan: normalizeApplyPlanResponse(row.plan),
     gateReportSummary: summarizeGateReport(row.gateReport),
     reason: row.reason,
     plannedAt: row.plannedAt.toISOString(),
@@ -1088,6 +1125,7 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
         select: { id: true },
       });
       if (existing) continue;
+      const repairTrack = repairTrackForProposalAction(action);
       const proposal = await prisma.knowledgeFeedbackProposal.create({
         data: {
           userId: user.id,
@@ -1097,7 +1135,7 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
           queryHash: item.queryHash,
           confidence: Math.min(1, signalCount / Math.max(minSignals, 1)),
           reason: proposalReason(item, action),
-          evidence: item as unknown as Prisma.InputJsonValue,
+          evidence: { ...item, repairTrack } as unknown as Prisma.InputJsonValue,
         },
       });
       generated.push(toProposalItem(proposal));
@@ -1294,9 +1332,10 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
 
     if (adjustments.length === 0) {
       const preview = buildMutationPreview(record);
-      const routerAdjustmentSteps = preview.previewSteps.filter(
-        (step) => step.mutationPath === "query_scoped_collection_adjustment",
-      );
+      const recordRepairTrack = repairTrackForApplyRecord(record);
+      const routerAdjustmentSteps = recordRepairTrack === "routing"
+        ? preview.previewSteps.filter((step) => step.mutationPath === "query_scoped_collection_adjustment")
+        : [];
       if (routerAdjustmentSteps.length > 0) {
         await prisma.knowledgeFeedbackRouterAdjustment.createMany({
           data: routerAdjustmentSteps.map((step) => adjustmentDataFromPreviewStep({ userId: user.id, record, step })),
@@ -1316,7 +1355,10 @@ export async function registerFeedbackRoutes(app: FastifyInstance) {
             routerRuntimeAffected: false,
             adjustmentIds: adjustments.map((item) => item.id),
             previewSteps: preview.previewSteps,
-            reviewOnlySteps: preview.previewSteps.filter((step) => step.mutationPath !== "query_scoped_collection_adjustment"),
+            reviewOnlySteps: preview.previewSteps.filter(
+              (step) => recordRepairTrack !== "routing" || step.mutationPath !== "query_scoped_collection_adjustment",
+            ),
+            repairTrack: recordRepairTrack,
           } as unknown as Prisma.InputJsonValue,
           reason: "passive router adjustments recorded; router runtime integration remains disabled",
         },

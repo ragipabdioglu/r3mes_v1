@@ -204,3 +204,10 @@ of truth; these files are the short working charter read before each task.
 - Public chat contract, source/suggestion/status display, UI public display wiring, and feedback boundary are in place.
 - Closure gates passed: shared build/test, backend typecheck, dApp typecheck, and 35 backend boundary/chat tests.
 - Remaining warning: dApp has no active unit test runner; UI behavior is covered by typecheck plus backend/shared contracts.
+
+## Latest Phase 9 Slice 1 Note
+
+- Added `FeedbackRepairTrack` and proposal-level `repairTrack` contract.
+- Generated proposals persist repair track in evidence and derive it for older records.
+- Passive apply now creates router adjustments only for `routing` repair-track plans.
+- BAD_ANSWER / answer-quality plans stay eval/review-only even if malformed score steps appear.
