@@ -134,3 +134,10 @@ of truth; these files are the short working charter read before each task.
 - Real rails such as source metadata mismatch and risky certainty still block/rewrite.
 - Partial evidence answers with explicit missing-field disclosure no longer fail as table mismatch solely due plan missing fields.
 - Latest answer-quality baseline after Slice 4: 10/17 pass, failure count 23, non-KAP bucket 6/7.
+
+## Latest Phase 7 Slice 5 Note
+
+- Slice 5 narrowed structured fact row-label recovery to exact token-span matching from `rawRow`/provenance.
+- Do not recover labels by taking all text before the first numeric value; that caused table-header label pollution.
+- Latest answer-quality baseline after Slice 5: 12/17 pass, failure count 20, raw table dump rate 0.
+- Remaining Faz 7 fails are FROTO/KCHOL field completeness, share-group table mismatch, zero-value extraction, and protected contradiction safety.

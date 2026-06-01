@@ -662,6 +662,182 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("risk koşulu");
   });
 
+  it("composePlannedAnswer recovers readable row labels from raw row text", () => {
+    const answerSpec = genericFieldAnswerSpec({
+      facts: [],
+      structuredFacts: [
+        {
+          id: "sf-readable-row",
+          kind: "table_row",
+          sourceId: "generic-source",
+          field: "olcum degeri",
+          value: "123",
+          confidence: "high",
+          table: {
+            rowLabel: "olcum degeri",
+            rawRow: "Ölçüm Değeri 123",
+          },
+          provenance: {
+            quote: "Ölçüm Değeri 123",
+            extractor: "generic-table-row-v1",
+          },
+        },
+      ],
+    });
+    const answerPlan = fieldExtractionPlan({
+      selectedFacts: answerSpec.structuredFacts,
+      coverage: "partial",
+    });
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        structuredFacts: answerSpec.structuredFacts,
+        structuredFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Ölçüm Değeri: 123");
+    expect(rendered).not.toContain("olcum degeri: 123");
+  });
+
+  it("composePlannedAnswer strips source prefixes before recovering readable row labels", () => {
+    const answerSpec = genericFieldAnswerSpec({
+      facts: [],
+      structuredFacts: [
+        {
+          id: "sf-prefixed-row",
+          kind: "table_row",
+          sourceId: "generic-source",
+          field: "kaynak alani",
+          value: "456",
+          confidence: "high",
+          table: {
+            rowLabel: "kaynak alani",
+            rawRow: "generic-file.pdf: Kaynak Alanı 456",
+          },
+          provenance: {
+            quote: "generic-file.pdf: Kaynak Alanı 456",
+            extractor: "generic-table-row-v1",
+          },
+        },
+      ],
+    });
+    const answerPlan = fieldExtractionPlan({
+      selectedFacts: answerSpec.structuredFacts,
+      coverage: "partial",
+    });
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        structuredFacts: answerSpec.structuredFacts,
+        structuredFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Kaynak Alanı: 456");
+    expect(rendered).not.toContain("generic-file.pdf");
+  });
+
+  it("composePlannedAnswer recovers only the matching label span from noisy table rows", () => {
+    const answerSpec = genericFieldAnswerSpec({
+      facts: [],
+      structuredFacts: [
+        {
+          id: "sf-noisy-row",
+          kind: "table_row",
+          sourceId: "generic-source",
+          field: "olcum degeri",
+          value: "123",
+          confidence: "high",
+          table: {
+            rowLabel: "olcum degeri",
+            rawRow: "Başlık A Başlık B İlk Alan 111 - Ölçüm Değeri 123",
+          },
+          provenance: {
+            quote: "Başlık A Başlık B İlk Alan 111 - Ölçüm Değeri 123",
+            extractor: "generic-table-row-v1",
+          },
+        },
+      ],
+    });
+    const answerPlan = fieldExtractionPlan({
+      selectedFacts: answerSpec.structuredFacts,
+      coverage: "partial",
+    });
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        structuredFacts: answerSpec.structuredFacts,
+        structuredFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Ölçüm Değeri: 123");
+    expect(rendered).not.toContain("Başlık A Başlık B");
+    expect(rendered).not.toContain("İlk Alan");
+  });
+
+  it("composePlannedAnswer falls back to existing row labels when recovery fails", () => {
+    const answerSpec = genericFieldAnswerSpec({
+      facts: [],
+      structuredFacts: [
+        {
+          id: "sf-fallback-row",
+          kind: "table_row",
+          sourceId: "generic-source",
+          field: "fallback label",
+          value: "value without numeric anchor",
+          confidence: "high",
+          table: {
+            rowLabel: "fallback label",
+            rawRow: "Unrelated source text without a matching value",
+          },
+          provenance: {
+            quote: "Unrelated source text without a matching value",
+            extractor: "generic-table-row-v1",
+          },
+        },
+      ],
+    });
+    const answerPlan = fieldExtractionPlan({
+      selectedFacts: answerSpec.structuredFacts,
+      coverage: "partial",
+    });
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        structuredFacts: answerSpec.structuredFacts,
+        structuredFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("fallback label: value without numeric anchor");
+  });
+
   it("composePlannedAnswer does not mine finance table strings unless fallback is explicitly enabled", () => {
     const answerSpec: AnswerSpec = {
       answerDomain: "finance",

@@ -295,9 +295,90 @@ function labelFromProvenanceQuote(value: string): string | null {
   return label;
 }
 
+function normalizeLabelForRecovery(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[çğıİöşü]/g, (char) => ({
+      ç: "c",
+      ğ: "g",
+      ı: "i",
+      İ: "i",
+      ö: "o",
+      ş: "s",
+      ü: "u",
+    })[char] ?? char)
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function stripTrailingLabelNoise(value: string): string {
+  return value
+    .replace(/^[\s:;,.|/-]+/gu, "")
+    .replace(/[\s:;,.|/-]+$/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+type LabelToken = {
+  normalized: string;
+  start: number;
+  end: number;
+};
+
+function labelTokens(value: string): LabelToken[] {
+  const tokens: LabelToken[] = [];
+  for (const match of value.matchAll(/[\p{L}\p{N}-]+/gu)) {
+    const raw = match[0];
+    const normalized = normalizeLabelForRecovery(raw);
+    if (!normalized) continue;
+    const start = match.index ?? 0;
+    tokens.push({
+      normalized,
+      start,
+      end: start + raw.length,
+    });
+  }
+  return tokens;
+}
+
+function recoverLabelSpanFromSource(sourceText: string, normalizedRowLabel: string): string | null {
+  const rowTokens = normalizedRowLabel.split(/\s+/u).filter(Boolean);
+  if (rowTokens.length === 0) return null;
+  const sourceTokens = labelTokens(sourceText);
+  if (sourceTokens.length < rowTokens.length) return null;
+
+  for (let index = 0; index <= sourceTokens.length - rowTokens.length; index += 1) {
+    const window = sourceTokens.slice(index, index + rowTokens.length);
+    if (window.some((token, offset) => token.normalized !== rowTokens[offset])) continue;
+    const recovered = stripTrailingLabelNoise(sourceText.slice(window[0].start, window[window.length - 1].end));
+    if (recovered.length >= 3 && recovered.length <= 140) return recovered;
+  }
+  return null;
+}
+
+function recoverReadableRowLabel(
+  rowLabel: string,
+  fact: AnswerPlan["selectedFacts"][number],
+): string | null {
+  const normalizedRowLabel = normalizeLabelForRecovery(rowLabel);
+  if (!normalizedRowLabel || normalizedRowLabel.length < 3) return null;
+  const sourceCandidates = [fact.table?.rawRow, fact.provenance.quote].filter((value): value is string => Boolean(value?.trim()));
+  for (const sourceCandidate of sourceCandidates) {
+    const sourceText = stripSourcePrefix(sourceCandidate.normalize("NFKC").replace(/\s+/gu, " ").trim());
+    const recovered = recoverLabelSpanFromSource(sourceText, normalizedRowLabel);
+    if (recovered) return recovered;
+  }
+  return null;
+}
+
 function displayLabelForStructuredFact(plan: AnswerPlan, fact: AnswerPlan["selectedFacts"][number]): string {
   const tableRowLabel = fact.table?.rowLabel?.trim();
-  if (tableRowLabel && tableRowLabel.length >= 3) return tableRowLabel;
+  if (tableRowLabel && tableRowLabel.length >= 3) {
+    return recoverReadableRowLabel(tableRowLabel, fact) ?? tableRowLabel;
+  }
   const quoteLabel = labelFromProvenanceQuote(fact.provenance.quote);
   if (quoteLabel) return quoteLabel;
   const requestedField = plan.requestedFields.find((field) => requestedFieldMatchesFact(field, fact));
