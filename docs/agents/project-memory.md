@@ -155,3 +155,10 @@ of truth; these files are the short working charter read before each task.
 - Phrases like `maddelerle`, `karıştırma`, `kullanma`, `tek satır cevap`, and `bu iki grubu` must not become missing fields.
 - Latest answer-quality baseline after Slice 7: 14/17 pass, failure count 14, tableFieldMismatchRate 0.
 - Remaining fails: FROTO exact net profit value, KCHOL explicit zero row, and protected contradiction safety.
+
+## Latest Phase 7 Slice 8 Note
+
+- Slice 8 handles generic row/value cues such as `hangi rakam`, `satırı kaç`, and `sadece sonucu yaz`.
+- Field-list extraction now cleans the whole candidate before splitting, so subject prefixes do not become requested fields.
+- Latest answer-quality baseline after Slice 8: 16/17 pass; all KAP answer-quality cases pass.
+- Remaining red case is protected contradiction safety (`SOURCE_METADATA_MISMATCH`), not an answer-quality failure.

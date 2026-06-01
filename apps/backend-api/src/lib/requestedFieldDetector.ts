@@ -59,8 +59,9 @@ function titleLabel(value: string): string {
 }
 
 function splitFieldList(value: string): string[] {
+  const cleanedValue = cleanupCandidatePhrase(value);
   return unique(
-    value
+    cleanedValue
       .split(/\s*(?:,|;|\bve\b|\bile\b|\band\b)\s*/u)
       .map((part) => cleanupCandidatePhrase(part)),
   ).filter((part) => part.length >= 3);
@@ -68,8 +69,8 @@ function splitFieldList(value: string): string[] {
 
 function cleanupCandidatePhrase(value: string): string {
   let cleaned = normalize(value)
-    .replace(/\b(?:hangi\s+)?(?:rakamlarla|rakamlar|sayilarla|sayılarla|degerlerle|değerlerle|geciyor|geçiyor)\b.*$/u, "")
-    .replace(/\b(?:hangi\s+)?(?:satirlarda|satırlarda|satirda|satırda)\b.*$/u, "")
+    .replace(/\b(?:hangi\s+)?(?:rakamla|rakamlarla|rakam|rakamlar|sayiyla|sayıyla|sayilarla|sayılarla|degerle|değerle|degerlerle|değerlerle|geciyor|geçiyor)\b.*$/u, "")
+    .replace(/\b(?:hangi\s+)?(?:satiri|satırı|satirlari|satırları|satirlarda|satırlarda|satirda|satırda)\b.*$/u, "")
     .replace(/\b(?:nedir|ne\s+demek|ne\s+kadar|ne|kac\w*|kaç\w*)\b.*$/u, "")
     .replace(/\b(?:kayna(?:ga|ğa)|kaynaklara|ders\s+notlarina|ders\s+notlarına)\s+gore\b/gu, " ")
     .replace(/\b(?:tek\s+satir\s+cevap|tek\s+satır\s+cevap|tek\s+satir|tek\s+satır)\b.*$/u, " ")
@@ -131,6 +132,8 @@ function phraseLooksLikeField(phrase: string): boolean {
     "karıştırma",
     "kullanma",
     "cevap",
+    "sonuc",
+    "sonucu",
     "tablo",
   ]);
   if (tokens.every((token) => instructionTokens.has(token))) return false;
@@ -154,6 +157,7 @@ function extractQuotedCandidates(query: string, normalizedQuery: string): Candid
 function extractCueBasedCandidates(normalizedQuery: string): CandidatePhrase[] {
   const candidates: CandidatePhrase[] = [];
   const cuePatterns = [
+    /(.{3,180}?)\s+(?:satiri|satırı|satirlari|satırları)\s+(?:kac|kaç|ne\s+kadar|hangi\s+rakam)\b/gu,
     /\b(?:hangi|istenen|sorulan)\s+(.{3,160}?)\s+(?:tutari|tutarı|orani|oranı|degeri|değeri|miktari|miktarı|sayisi|sayısı|alanlari|alanları|bilgileri)\b/gu,
     /\b(?:icin|için)\s+(.{3,180}?)\s+(?:hangi\s+)?(?:satir\w*|satır\w*)\b/gu,
     /(.{3,180}?)\s+(?:hangi\s+)?(?:rakamlarla|rakamlar|sayilarla|sayılarla|degerlerle|değerlerle)\b/gu,

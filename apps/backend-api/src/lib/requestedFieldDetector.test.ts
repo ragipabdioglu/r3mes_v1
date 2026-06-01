@@ -33,8 +33,9 @@ describe("detectRequestedFields", () => {
 
     const cashRate = detectRequestedFields("KCHOL A Grubu ve B Grubu için nakit tutarı ve oran satırları ne?");
     expect(cashRate.requestedFields.map((field) => field.id)).toEqual(
-      expect.arrayContaining(["nakit_tutari", "oran_satirlari"]),
+      expect.arrayContaining(["nakit_tutari", "oran"]),
     );
+    expect(cashRate.requestedFields.map((field) => field.id)).not.toContain("kchol_a_grubu");
   });
 
   it("prioritizes explicit list/bullet formatting over generic table wording", () => {
@@ -73,5 +74,14 @@ describe("detectRequestedFields", () => {
     const noMixing = detectRequestedFields("SPK'ya göre net dönem kârı kaç? EREGL rakamlarını kullanma, tek satır cevap.");
     expect(noMixing.requestedFields.map((field) => field.id)).toContain("net_donem_kari");
     expect(noMixing.requestedFields.map((field) => field.id)).not.toContain("eregl_rakamlarini_kullanma_tek_satir_cevap");
+  });
+
+  it("keeps row value requests while ignoring generic result instructions", () => {
+    const result = detectRequestedFields(
+      "Tabloda dağıtılması öngörülen diğer kaynaklar satırı kaç görünüyor? Başka satırı cevap sanma. Sadece sonucu yaz.",
+    );
+
+    expect(result.requestedFields.map((field) => field.id)).toContain("dagitilmasi_ongorulen_diger_kaynaklar");
+    expect(result.requestedFields.map((field) => field.id)).not.toContain("sonucu");
   });
 });
