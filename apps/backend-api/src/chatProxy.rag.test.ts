@@ -181,7 +181,9 @@ describe("chat proxy RAG orchestration", () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body) as {
-      sources?: Array<{ documentId: string }>;
+      sources?: Array<{ documentId: string; whyThisSource?: string | null }>;
+      suggestions?: Array<{ collectionId: string; reason: string; action: string }>;
+      status?: { kind?: string; sourceBacked?: boolean; message?: string | null };
       grounded_answer?: { grounding_confidence?: string };
       safety_gate?: { pass?: boolean };
       retrieval_debug?: {
@@ -215,6 +217,9 @@ describe("chat proxy RAG orchestration", () => {
       };
     };
     expect(body.sources?.[0]?.documentId).toBe("doc_1");
+    expect(body.sources?.[0]?.whyThisSource).toBeTruthy();
+    expect(body.suggestions).toEqual([]);
+    expect(body.status).toMatchObject({ kind: "answered", sourceBacked: true });
     expect(body.choices?.[0]?.message?.content).toContain("LoRA");
     expect(body.answer_quality?.fallbackTemplateUsed).toBe(false);
     expect(body.grounded_answer?.grounding_confidence).toBe("low");

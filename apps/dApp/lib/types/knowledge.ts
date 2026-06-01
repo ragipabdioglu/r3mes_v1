@@ -293,6 +293,21 @@ export type ChatSourceCitation = {
   title: string;
   chunkIndex: number;
   excerpt?: string | null;
+  visibility?: KnowledgeVisibility | null;
+  whyThisSource?: string | null;
+};
+
+export type ChatSourceSuggestion = {
+  collectionId: string;
+  title: string;
+  reason: string;
+  action: "select_collection" | "review_source" | "upload_source";
+};
+
+export type ChatUserFacingStatus = {
+  kind: "answered" | "no_source" | "suggestions" | "safety_limited" | "error";
+  sourceBacked: boolean;
+  message?: string | null;
 };
 
 export type ChatAnswerPathName =

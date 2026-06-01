@@ -176,3 +176,10 @@ of truth; these files are the short working charter read before each task.
 - Public response contract only allows answer, sources, suggestions, and user-facing status.
 - Debug diagnostics remain in a separate envelope; public schema rejects internal debug fields.
 - Backend boundary now exposes public key allowlist and debug-field detection without changing runtime answer behavior.
+
+## Latest Phase 8 Slice 2 Note
+
+- Added `publicChatDisplay` mapper for source display, suggestion display, and user-facing status.
+- Chat responses now expose safe root-level `suggestions` and `status` without requiring debug mode.
+- Source citations gain a user-facing `whyThisSource` explanation while preserving citation fields.
+- Suggestion reasons strip generic score fragments before reaching public payloads.

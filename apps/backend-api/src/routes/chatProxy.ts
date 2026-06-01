@@ -38,6 +38,11 @@ import {
   type KnowledgeMetadataRouteCandidate,
 } from "../lib/knowledgeAccess.js";
 import { retrieveKnowledgeContext } from "../lib/knowledgeRetrieval.js";
+import {
+  buildSourceDisplayModels,
+  buildSuggestionDisplayModels,
+  buildUserFacingStatus,
+} from "../lib/publicChatDisplay.js";
 import { retrieveKnowledgeContextQdrant } from "../lib/qdrantRetrieval.js";
 import { buildQueryUnderstanding, summarizeQueryUnderstandingForTrace } from "../lib/queryUnderstanding.js";
 import { renderGroundedMedicalAnswer } from "../lib/renderMedicalAnswer.js";
@@ -1150,6 +1155,7 @@ function applyRenderedAnswer(
     exposedSafetyGate.fallbackMode === "source_suggestion" ||
     exposedSafetyGate.fallbackMode === "privacy_safe";
   const exposedSources = shouldHideCitations ? [] : sources;
+  const publicSuggestions = buildSuggestionDisplayModels(retrievalDebug?.sourceSelection.suggestedCollections);
   const exposedAnswer = shouldHideCitations ? { ...enrichedAnswer, used_source_ids: [] } : enrichedAnswer;
   const composerPath = classifyComposerPath({
     qwenCalled: opts.qwenCalled,
@@ -1218,7 +1224,14 @@ function applyRenderedAnswer(
     choices[0] = first;
   }
   next.choices = choices;
-  next.sources = exposedSources;
+  next.sources = buildSourceDisplayModels(exposedSources);
+  next.suggestions = publicSuggestions;
+  next.status = buildUserFacingStatus({
+    sourceCount: exposedSources.length,
+    suggestionCount: publicSuggestions.length,
+    noSource: retrievalWasUsed && exposedSources.length === 0,
+    safetyLimited: shouldHideCitations && sources.length > 0,
+  });
   const runtimeLineage = buildRuntimeLineage({
     answerPath: opts.answerPath ?? "ai_engine",
     stream: opts.stream ?? false,
@@ -1393,6 +1406,8 @@ function createConversationalIntentPayload(opts: {
 }): Record<string, unknown> {
   const payload = createChatCompletionPayload(opts.decision.response);
   payload.sources = [];
+  payload.suggestions = [];
+  payload.status = buildUserFacingStatus({ sourceCount: 0 });
   const runtimeLineage = buildRuntimeLineage({
     answerPath: "conversational_intent",
     stream: false,
@@ -2846,7 +2861,14 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
             );
           }
           const safeParsed = exposeDebug ? parsed : stripChatDebugFields(parsed);
-          safeParsed.sources = retrieval.sources;
+          const publicSuggestions = buildSuggestionDisplayModels(retrievalDebug?.sourceSelection.suggestedCollections);
+          safeParsed.sources = buildSourceDisplayModels(retrieval.sources);
+          safeParsed.suggestions = publicSuggestions;
+          safeParsed.status = buildUserFacingStatus({
+            sourceCount: retrieval.sources.length,
+            suggestionCount: publicSuggestions.length,
+            noSource: retrievalWasUsed && retrieval.sources.length === 0,
+          });
           const runtimeLineage = buildRuntimeLineage({
             answerPath: "ai_engine_raw_json",
             stream,
