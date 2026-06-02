@@ -211,10 +211,154 @@ function releaseSeverity(blocker) {
   return "warning";
 }
 
+const WORK_PACKAGE_DEFINITIONS = {
+  "provider-runtime": {
+    id: "wp-provider-runtime-strict",
+    title: "Provider/runtime strictness closure",
+    priority: 1,
+    ownerPhase: "Phase 3 - Storage / Embedding / Index Backbone",
+    acceptanceGates: [
+      "qualityFallbackRatio must be 0 in strict real-data suites",
+      "rerankerFallbackRatio must be 0 in strict real-data suites",
+      "providerStrictFailures must be 0",
+      "eval:real-data-certification must show no provider-runtime blockers",
+    ],
+    scope: "Remove or fix strict-profile provider fallback across B.Y, G.P, UI reality, and stress suites before judging answer quality.",
+  },
+  "context-evidence-coverage": {
+    id: "wp-evidence-coverage",
+    title: "Evidence/context coverage closure",
+    priority: 2,
+    ownerPhase: "Phase 6 - Full Evidence Intelligence",
+    acceptanceGates: [
+      "evidenceOnly failed cases must be triaged to retrieval, artifact, or evidence compiler",
+      "context_coverage_failure count must decrease in real-data suites",
+      "required context terms should appear before answer generation for supported queries",
+      "no-source cases must expose not-supported evidence without hallucination",
+    ],
+    scope: "Fix cases where the source exists but enough usable context/facts do not reach the answer layer.",
+  },
+  "structured-evidence-table": {
+    id: "wp-structured-table-evidence",
+    title: "Structured table/numeric evidence closure",
+    priority: 3,
+    ownerPhase: "Phase 6 - Full Evidence Intelligence",
+    acceptanceGates: [
+      "KAP numeric/table blockers must expose structured facts or explicit missing-field diagnostics",
+      "table/numeric required fields must be covered before composer runs",
+      "kap-pilot suite should not fail table row or share group grounding cases",
+    ],
+    scope: "Improve table and numeric evidence readiness for KAP-style disclosures without hardcoding company-specific values.",
+  },
+  retrieval: {
+    id: "wp-retrieval-quality",
+    title: "Retrieval wrong source/chunk closure",
+    priority: 4,
+    ownerPhase: "Phase 4 - Retrieval Quality",
+    acceptanceGates: [
+      "wrong_source and wrong_chunk blockers must have candidate/rerank/alignment diagnosis",
+      "same-domain wrong-topic cases should not reach composer",
+      "retrieval-quality suite should pass strict guardrails",
+    ],
+    scope: "Address wrong source and wrong chunk failures after provider fallback is stable.",
+  },
+  "safety-presentation": {
+    id: "wp-answer-safety-presentation",
+    title: "Answer safety/presentation closure",
+    priority: 5,
+    ownerPhase: "Phase 7 - Full Answer Intelligence",
+    acceptanceGates: [
+      "template pollution and unnecessary warning cases must disappear from B.Y/G.P smoke",
+      "safety rewrites must not hide sufficient evidence",
+      "answer-quality and UI reality should remain public/debug clean",
+    ],
+    scope: "Fix cases where evidence is sufficient but deterministic safety/presentation/composer output is poor.",
+  },
+  "certification-triage": {
+    id: "wp-certification-triage",
+    title: "Certification triage leftovers",
+    priority: 6,
+    ownerPhase: "Phase 10 - Real Data Certification",
+    acceptanceGates: [
+      "Every remaining backlog item must have a concrete owner phase",
+      "No unknown/certification-only blocker should remain before Phase 11",
+    ],
+    scope: "Resolve unclassified items and keep the release report actionable.",
+  },
+};
+
+function buildWorkPackages(items, datasetSuites) {
+  const grouped = new Map();
+  for (const item of items) {
+    const key = item.layerFamily || "certification-triage";
+    const definition = WORK_PACKAGE_DEFINITIONS[key] ?? WORK_PACKAGE_DEFINITIONS["certification-triage"];
+    if (!grouped.has(definition.id)) {
+      grouped.set(definition.id, {
+        ...definition,
+        layerFamilies: new Set([key]),
+        affectedSuites: new Set(),
+        affectedDatasets: new Set(),
+        blockerCount: 0,
+        warningCount: 0,
+        itemCount: 0,
+        sampleItems: [],
+      });
+    }
+    const packageItem = grouped.get(definition.id);
+    packageItem.layerFamilies.add(key);
+    packageItem.affectedSuites.add(item.suite);
+    if (item.datasetId) packageItem.affectedDatasets.add(item.datasetId);
+    packageItem.itemCount += 1;
+    if (item.releaseSeverity === "blocker") packageItem.blockerCount += 1;
+    if (item.releaseSeverity === "warning") packageItem.warningCount += 1;
+    if (packageItem.sampleItems.length < 8) {
+      packageItem.sampleItems.push({
+        suite: item.suite,
+        id: item.id,
+        bucket: item.bucket,
+        severity: item.releaseSeverity,
+      });
+    }
+  }
+
+  for (const suite of datasetSuites) {
+    if (suite.releaseSeverity !== "blocker" && suite.releaseSeverity !== "warning") continue;
+    const key = Number(suite.rerankerFallbackRatio ?? 0) > 0 || Number(suite.qualityFallbackRatio ?? 0) > 0
+      ? "provider-runtime"
+      : "certification-triage";
+    const definition = WORK_PACKAGE_DEFINITIONS[key];
+    if (!grouped.has(definition.id)) {
+      grouped.set(definition.id, {
+        ...definition,
+        layerFamilies: new Set([key]),
+        affectedSuites: new Set(),
+        affectedDatasets: new Set(),
+        blockerCount: 0,
+        warningCount: 0,
+        itemCount: 0,
+        sampleItems: [],
+      });
+    }
+    const packageItem = grouped.get(definition.id);
+    packageItem.affectedSuites.add(suite.suiteId);
+    packageItem.affectedDatasets.add(suite.datasetId);
+  }
+
+  return [...grouped.values()]
+    .map((packageItem) => ({
+      ...packageItem,
+      layerFamilies: [...packageItem.layerFamilies].sort(),
+      affectedSuites: [...packageItem.affectedSuites].filter(Boolean).sort(),
+      affectedDatasets: [...packageItem.affectedDatasets].filter(Boolean).sort(),
+    }))
+    .sort((a, b) => a.priority - b.priority);
+}
+
 function buildCertificationItems(blockers) {
   return blockers.map((blocker) => {
     const ownership = classifyOwnerPhase(blocker);
     return {
+      datasetId: blocker.datasetId ?? null,
       suite: blocker.suite ?? "unknown",
       id: blocker.id ?? "unknown",
       bucket: blocker.bucket ?? "unknown",
@@ -291,6 +435,23 @@ function toMarkdown(report) {
   for (const [family, count] of Object.entries(report.layerFamilyCounts)) {
     lines.push(`- ${family}: ${count}`);
   }
+  lines.push("", "## Closure Work Packages", "");
+  for (const workPackage of report.workPackages) {
+    lines.push(`### ${workPackage.id}`);
+    lines.push(`- Priority: ${workPackage.priority}`);
+    lines.push(`- Title: ${workPackage.title}`);
+    lines.push(`- Owner phase: ${workPackage.ownerPhase}`);
+    lines.push(`- Items: ${workPackage.itemCount}`);
+    lines.push(`- Blockers: ${workPackage.blockerCount}`);
+    lines.push(`- Warnings: ${workPackage.warningCount}`);
+    lines.push(`- Affected suites: ${workPackage.affectedSuites.join(", ") || "none"}`);
+    lines.push(`- Scope: ${workPackage.scope}`);
+    lines.push("- Acceptance gates:");
+    for (const gate of workPackage.acceptanceGates) {
+      lines.push(`  - ${gate}`);
+    }
+    lines.push("");
+  }
   lines.push("", "## Certification Backlog", "");
   for (const item of report.items) {
     lines.push(`### ${item.suite} / ${item.id}`);
@@ -316,6 +477,7 @@ async function main() {
     ...asArray(suite.providerStrictFailures),
   ]);
   const items = buildCertificationItems([...blockers, ...suiteBlockers]);
+  const workPackages = buildWorkPackages(items, datasetSuites);
   const totals = productionTotals(production);
   const report = {
     schemaVersion: "RealDataCertificationReport.v2",
@@ -364,6 +526,12 @@ async function main() {
     ownerPhaseCounts: countBy(items.map((item) => item.ownerPhase)),
     layerFamilyCounts: countBy(items.map((item) => item.layerFamily)),
     failedSuiteCounts: countBy(items.map((item) => item.suite)),
+    workPackageCounts: {
+      total: workPackages.length,
+      blockerPackages: workPackages.filter((workPackage) => workPackage.blockerCount > 0).length,
+      warningOnlyPackages: workPackages.filter((workPackage) => workPackage.blockerCount === 0 && workPackage.warningCount > 0).length,
+    },
+    workPackages,
     items,
     nextRecommendedPhase: items.length > 0 ? "Phase 10 triage, then route each blocker to its owner phase before Phase 11 cleanup." : "Phase 11 - Legacy Cleanup / Production Hardening",
     note: "This report classifies existing eval output only. It does not change runtime behavior.",

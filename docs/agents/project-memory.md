@@ -288,3 +288,10 @@ of truth; these files are the short working charter read before each task.
 - Certification now reads active dataset manifests and latest suite artifacts for KAP, B.Y, G.P, and synthetic stress suites.
 - Current release gate is fail with 73 backlog items, 72 blockers, 8 active suite blockers, and 0 missing suite artifacts.
 - Main owner phases are Phase 3 provider/runtime, Phase 6 evidence, Phase 7 answer intelligence, and Phase 4 retrieval.
+
+## Latest Phase 10 Slice 6 Note
+
+- Added certification work packages to `RealDataCertificationReport.v2`.
+- Backlog now groups into 6 packages: provider runtime, evidence coverage, structured table evidence, retrieval, answer safety/presentation, and certification triage.
+- Top priority is `wp-provider-runtime-strict`: 41 blockers across B.Y, G.P, real-world-stress, realistic-rag, and ui-reality.
+- Next implementation should start with provider/runtime strict fallback before judging evidence or composer quality.
