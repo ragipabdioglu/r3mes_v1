@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "DatasetManifest.v1",
+  "id": "by-course-pdfs",
+  "displayName": "B.Y Ders PDFleri",
+  "status": "active",
+  "datasetType": "real_documents",
+  "sourceKind": "user_uploaded_course_materials",
+  "dataPath": "data/B.Y",
+  "privacyClass": "private_test_data",
+  "domains": ["education", "technology"],
+  "sourceTypes": ["pdf"],
+  "documentCountExpected": 7,
+  "collectionIds": ["cmpmh50070002kll4mdk1mlnf"],
+  "expectedArtifacts": ["definition", "list", "comparison", "procedure", "table", "visual_layout"],
+  "certificationBuckets": [
+    "definition_extraction",
+    "list_extraction",
+    "comparison_extraction",
+    "bad_turkish",
+    "no_source",
+    "format_following"
+  ],
+  "evalSuites": [
+    {
+      "id": "by-course-smoke",
+      "path": "infrastructure/evals/by-course-smoke/golden.jsonl",
+      "status": "planned",
+      "modes": ["evidence", "answer", "ui_parity"]
+    }
+  ],
+  "notes": "Real course PDFs used for UI answer-quality probes. Existing collection may need V2 reingestion before certification scores are trusted."
+}

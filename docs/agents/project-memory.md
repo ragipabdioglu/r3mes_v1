@@ -260,3 +260,10 @@ of truth; these files are the short working charter read before each task.
 - Current release decision is `fail`: 185 total cases, 166 passed, 19 failed.
 - Certification backlog has 16 items: 15 blockers and 1 warning.
 - Main owner phases are Phase 6 evidence/context coverage, Phase 7 safety/presentation, plus Phase 4 retrieval and Phase 3 provider-runtime.
+
+## Latest Phase 10 Slice 2 Note
+
+- Added DatasetManifest.v1 files for KAP pilot, B.Y course PDFs, G.P visual programming PDFs, and synthetic stress evals.
+- Added `eval:real-data-manifests` to validate dataset paths, document counts, certification buckets, and linked eval suites.
+- Manifest validation is warn-only: 4 datasets valid, 0 failures, 2 warnings for planned B.Y/G.P eval suite fixture paths.
+- Runtime behavior is unchanged; this slice only adds certification inventory and validation.

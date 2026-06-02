@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "DatasetManifest.v1",
+  "id": "synthetic-stress-evals",
+  "displayName": "Synthetic Stress / Dirty OCR / No-source Eval Sets",
+  "status": "active",
+  "datasetType": "synthetic_eval",
+  "sourceKind": "seeded_eval_fixtures",
+  "privacyClass": "internal_test_fixture",
+  "domains": ["medical", "legal", "education", "technical", "general"],
+  "sourceTypes": ["text_fixture", "seed_script"],
+  "documentCountExpected": 0,
+  "collectionIds": [
+    "stress-dirty-user-docs",
+    "stress-long-near-miss-docs",
+    "stress-clean-legal-consumer",
+    "stress-clean-kvkk-inventory",
+    "stress-clean-medical-cervix"
+  ],
+  "expectedArtifacts": ["dirty_text", "definition", "procedure", "contradiction", "no_source"],
+  "certificationBuckets": [
+    "dirty_ocr",
+    "near_miss_wrong_topic",
+    "contradictory_evidence",
+    "auto_private_grounded",
+    "no_source",
+    "wrong_source_suggestion"
+  ],
+  "evalSuites": [
+    {
+      "id": "real-world-stress",
+      "path": "infrastructure/evals/real-world-stress/golden.jsonl",
+      "status": "active",
+      "modes": ["evidence", "answer", "production"]
+    },
+    {
+      "id": "grounded-response",
+      "path": "infrastructure/evals/grounded-response/golden.jsonl",
+      "status": "active",
+      "modes": ["answer", "production"]
+    },
+    {
+      "id": "context-pruning",
+      "path": "infrastructure/evals/context-pruning/golden.jsonl",
+      "status": "active",
+      "modes": ["evidence", "production"]
+    },
+    {
+      "id": "ui-reality",
+      "path": "infrastructure/evals/ui-reality/golden.jsonl",
+      "status": "active",
+      "modes": ["ui_parity"]
+    }
+  ],
+  "notes": "Synthetic fixture family that covers dirty OCR, contradiction, near-miss, no-source, and UI parity risks."
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "DatasetManifest.v1",
+  "id": "kap-pilot",
+  "displayName": "KAP Pilot Real Company Disclosures",
+  "status": "active",
+  "datasetType": "real_documents",
+  "sourceKind": "downloaded_public_documents",
+  "dataPath": "data/kap-pilot/raw",
+  "privacyClass": "public",
+  "domains": ["finance", "public_disclosure"],
+  "sourceTypes": ["pdf"],
+  "documentCountExpected": 30,
+  "collectionIds": ["kap-pilot-real-disclosures"],
+  "expectedArtifacts": ["definition", "table", "numeric_value", "list", "multilingual_text"],
+  "certificationBuckets": [
+    "kap_numeric_table_grounding",
+    "kap_company_disambiguation",
+    "kap_language_and_detail_grounding",
+    "kap_table_row_disambiguation",
+    "kap_share_group_table_grounding",
+    "no_source"
+  ],
+  "evalSuites": [
+    {
+      "id": "kap-pilot",
+      "path": "infrastructure/evals/kap-pilot/golden.jsonl",
+      "status": "active",
+      "modes": ["evidence", "answer", "production"]
+    },
+    {
+      "id": "answer-quality",
+      "path": "infrastructure/evals/answer-quality/golden.jsonl",
+      "status": "active",
+      "modes": ["answer"]
+    }
+  ],
+  "notes": "Public KAP PDFs and tables. Dataset-specific terms stay in this manifest, source documents, or eval fixtures only."
+}

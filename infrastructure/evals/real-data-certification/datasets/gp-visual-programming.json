@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "DatasetManifest.v1",
+  "id": "gp-visual-programming",
+  "displayName": "G.P Visual Programming PDFs",
+  "status": "active",
+  "datasetType": "real_documents",
+  "sourceKind": "user_uploaded_course_materials",
+  "dataPath": "data/G.P",
+  "privacyClass": "private_test_data",
+  "domains": ["education", "programming"],
+  "sourceTypes": ["pdf"],
+  "documentCountExpected": 10,
+  "collectionIds": [],
+  "expectedArtifacts": ["definition", "list", "comparison", "code", "procedure", "visual_layout"],
+  "certificationBuckets": [
+    "source_resolution",
+    "definition_extraction",
+    "list_extraction",
+    "comparison_extraction",
+    "code_understanding",
+    "procedure_extraction",
+    "visual_layout",
+    "no_source",
+    "format_following",
+    "bad_turkish"
+  ],
+  "evalSuites": [
+    {
+      "id": "gp-visual-programming-smoke",
+      "path": "infrastructure/evals/gp-visual-programming-smoke/golden.jsonl",
+      "status": "planned",
+      "modes": ["evidence", "answer", "ui_parity"]
+    }
+  ],
+  "notes": "Real Visual Programming PDFs. Certification requires V2 ingestion and a 15-case smoke suite before full scoring."
+}
