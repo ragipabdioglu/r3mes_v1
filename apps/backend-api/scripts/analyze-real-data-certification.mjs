@@ -85,12 +85,57 @@ function suiteReleaseSeverity(summary, artifactExists) {
   return "pass";
 }
 
+function resultDiagnosticById(artifact) {
+  const results = asArray(artifact?.results);
+  const map = new Map();
+  for (const result of results) {
+    const id = String(result?.id ?? "");
+    if (!id || map.has(id)) continue;
+    map.set(id, result);
+  }
+  return map;
+}
+
+function enrichBlockerWithResultDiagnostics(blocker, result) {
+  if (!result) return blocker;
+  return {
+    ...blocker,
+    evidenceOnly: result.evidenceOnly ?? blocker.evidenceOnly,
+    answerBaseline: result.answerBaseline ?? blocker.answerBaseline,
+    sourceCount: result.sourceCount ?? blocker.sourceCount,
+    factCount: result.factCount ?? blocker.factCount,
+    notSupportedCount: result.notSupportedCount ?? blocker.notSupportedCount,
+    compiledEvidenceConfidence: result.compiledEvidenceConfidence ?? blocker.compiledEvidenceConfidence,
+    compiledEvidenceFactCount: result.compiledEvidenceFactCount ?? blocker.compiledEvidenceFactCount,
+    compiledEvidenceSourceCount: result.compiledEvidenceSourceCount ?? blocker.compiledEvidenceSourceCount,
+    compiledEvidenceSufficiencyStatus: result.compiledEvidenceSufficiencyStatus ?? blocker.compiledEvidenceSufficiencyStatus,
+    compiledEvidenceShouldAnswer: result.compiledEvidenceShouldAnswer ?? blocker.compiledEvidenceShouldAnswer,
+    compiledEvidenceSufficiencyReason:
+      result.compiledEvidenceSufficiencyReason ?? blocker.compiledEvidenceSufficiencyReason,
+    alignmentFastFailed: result.alignmentFastFailed ?? blocker.alignmentFastFailed,
+    alignmentDroppedCandidateCount:
+      result.alignmentDroppedCandidateCount ?? blocker.alignmentDroppedCandidateCount,
+    budgetFinalSourceCount: result.budgetFinalSourceCount ?? blocker.budgetFinalSourceCount,
+    budgetEvidenceFactCandidateCount:
+      result.budgetEvidenceFactCandidateCount ?? blocker.budgetEvidenceFactCandidateCount,
+    budgetEvidenceFactSelectedCount:
+      result.budgetEvidenceFactSelectedCount ?? blocker.budgetEvidenceFactSelectedCount,
+    budgetEvidenceUsableFactCount: result.budgetEvidenceUsableFactCount ?? blocker.budgetEvidenceUsableFactCount,
+    fallbackMode: result.fallbackMode ?? blocker.fallbackMode,
+    routeDecisionMode: result.routeDecisionMode ?? blocker.routeDecisionMode,
+    routeDecisionConfidence: result.routeDecisionConfidence ?? blocker.routeDecisionConfidence,
+    selectionMode: result.selectionMode ?? blocker.selectionMode,
+    answerPathName: result.answerPathName ?? blocker.answerPathName,
+  };
+}
+
 function buildSuiteRollup(dataset, suite, artifact, artifactPath) {
   const summary = artifact ? readSummary(artifact) : null;
   const totals = artifact ? readTotals(artifact) : { status: "missing", total: 0, passed: 0, failed: 0, passRate: 0 };
   const severity = suiteReleaseSeverity(summary, Boolean(artifact));
+  const resultById = resultDiagnosticById(artifact);
   const blockers = asArray(summary?.failureTaxonomy?.blockers).map((blocker) => ({
-    ...blocker,
+    ...enrichBlockerWithResultDiagnostics(blocker, resultById.get(String(blocker?.id ?? ""))),
     suite: suite.id,
     datasetId: dataset.id,
   }));
@@ -145,11 +190,74 @@ async function buildDatasetSuiteRollups(manifests) {
   return rollups;
 }
 
+async function buildSuiteResultIndex(manifests) {
+  const index = new Map();
+  for (const dataset of manifests.filter((manifest) => manifest.status === "active")) {
+    for (const suite of asArray(dataset.evalSuites).filter((item) => item.status === "active")) {
+      const artifact = await readJsonIfExists(suiteArtifactPath(suite));
+      const resultById = resultDiagnosticById(artifact);
+      for (const [id, result] of resultById.entries()) {
+        const key = `${suite.id}::${id}`;
+        if (!index.has(key)) index.set(key, result);
+      }
+    }
+  }
+  return index;
+}
+
+async function buildAdditionalSuiteResultIndex(suiteIds, existingIndex) {
+  const index = new Map(existingIndex);
+  for (const suiteId of unique(suiteIds)) {
+    const artifact = await readJsonIfExists(resolve(repoRoot, `artifacts/evals/${suiteId}/latest.json`));
+    const resultById = resultDiagnosticById(artifact);
+    for (const [id, result] of resultById.entries()) {
+      const key = `${suiteId}::${id}`;
+      if (!index.has(key)) index.set(key, result);
+    }
+  }
+  return index;
+}
+
+function enrichBlockersFromSuiteIndex(blockers, suiteResultIndex) {
+  return blockers.map((blocker) => {
+    const key = `${blocker?.suite ?? ""}::${blocker?.id ?? ""}`;
+    return enrichBlockerWithResultDiagnostics(blocker, suiteResultIndex.get(key));
+  });
+}
+
 function classifyOwnerPhase(blocker) {
   const failures = asArray(blocker.failures).join(" ").toLowerCase();
   const classes = asArray(blocker.classes);
   const subtypes = asArray(blocker.subtypes);
   const diagnosisClasses = asArray(blocker.phaseDiagnosis?.classes);
+  const evidenceOnlyOk = blocker.evidenceOnly?.ok === true || blocker.phaseDiagnosis?.evidenceOnlyOk === true;
+  const answerBaseline = blocker.answerBaseline;
+  const compiledSufficiency =
+    blocker.compiledEvidenceSufficiencyStatus ??
+    answerBaseline?.compiledEvidence?.sufficiency?.status ??
+    null;
+  const compiledShouldAnswer = answerBaseline?.compiledEvidence?.sufficiency?.shouldAnswer === true;
+  const hasSufficientEvidence =
+    evidenceOnlyOk ||
+    compiledShouldAnswer ||
+    blocker.compiledEvidenceShouldAnswer === true ||
+    compiledSufficiency === "sufficient" ||
+    compiledSufficiency === "partial" ||
+    Number(blocker.factCount ?? 0) > 0;
+  const sourceCount = Number(blocker.sourceCount ?? 0);
+  const budgetFinalSourceCount = Number(blocker.budgetFinalSourceCount ?? 0);
+  const selectedEvidenceFactCount = Number(blocker.budgetEvidenceFactSelectedCount ?? 0);
+  const candidateEvidenceFactCount = Number(blocker.budgetEvidenceFactCandidateCount ?? 0);
+  const usableEvidenceFactCount = Number(blocker.budgetEvidenceUsableFactCount ?? 0);
+  const compiledEvidenceFactCount = Number(blocker.compiledEvidenceFactCount ?? 0);
+  const alignmentFastFailed = blocker.alignmentFastFailed === true;
+  const routeSuggestMode = String(blocker.routeDecisionMode ?? "").toLowerCase() === "suggest";
+  const noSelectedSource = sourceCount === 0 || budgetFinalSourceCount === 0;
+  const retrievalStoppedBeforeEvidence = noSelectedSource && (alignmentFastFailed || candidateEvidenceFactCount === 0);
+  const evidenceCandidateButNoUsableFact =
+    selectedEvidenceFactCount > 0 &&
+    usableEvidenceFactCount === 0 &&
+    compiledEvidenceFactCount === 0;
   const suite = String(blocker.suite ?? "");
   const id = String(blocker.id ?? "");
   const bucket = String(blocker.bucket ?? "");
@@ -203,20 +311,53 @@ function classifyOwnerPhase(blocker) {
   }
 
   if (diagnosisClasses.includes("retrieval_or_evidence_failure")) {
+    if (retrievalStoppedBeforeEvidence) {
+      return {
+        ownerPhase: routeSuggestMode ? "Phase 5 - Query / Source Intelligence" : "Phase 4 - Retrieval Quality",
+        layerFamily: routeSuggestMode ? "query-source-intelligence" : "retrieval",
+        nextAction: routeSuggestMode
+          ? "Selected-source request fell into suggest/no-source before usable evidence; inspect query/source contract and profile gating."
+          : "Retrieval/alignment stopped before usable evidence; inspect candidate trace, alignment gate, and V2 payload readiness.",
+      };
+    }
     const kapOrTable = /kap|table|cash|share|withholding|dividend/i.test(`${suite} ${id} ${bucket}`);
     return {
       ownerPhase: "Phase 6 - Full Evidence Intelligence",
       layerFamily: kapOrTable ? "structured-evidence-table" : "context-evidence-coverage",
-      nextAction: "Evidence-only failed; inspect source selection, artifact readiness, selected facts, and required context coverage.",
+      nextAction: evidenceCandidateButNoUsableFact
+        ? "Evidence candidates were selected but no usable facts compiled; inspect artifact-to-evidence extraction and source_limit classification."
+        : "Evidence-only failed; inspect source selection, artifact readiness, selected facts, and required context coverage.",
+    };
+  }
+
+  if (
+    hasSufficientEvidence &&
+    (subtypes.includes("context_coverage_failure") || failures.includes("missing_concepts"))
+  ) {
+    return {
+      ownerPhase: "Phase 7 - Full Answer Intelligence",
+      layerFamily: "answer-presentation",
+      nextAction: "Evidence diagnostics are sufficient or evidence-only passed; inspect AnswerPlan/composer wording and required answer-term projection.",
     };
   }
 
   if (subtypes.includes("context_coverage_failure") || failures.includes("missing_concepts")) {
+    if (retrievalStoppedBeforeEvidence) {
+      return {
+        ownerPhase: routeSuggestMode ? "Phase 5 - Query / Source Intelligence" : "Phase 4 - Retrieval Quality",
+        layerFamily: routeSuggestMode ? "query-source-intelligence" : "retrieval",
+        nextAction: routeSuggestMode
+          ? "Selected-source request fell into suggest/no-source before usable evidence; inspect query/source contract and profile gating."
+          : "Retrieval/alignment stopped before usable evidence; inspect candidate trace, alignment gate, and V2 payload readiness.",
+      };
+    }
     const kapOrTable = /kap|table|cash|share|withholding|dividend/i.test(`${suite} ${id} ${bucket}`);
     return {
       ownerPhase: kapOrTable ? "Phase 6 - Full Evidence Intelligence" : "Phase 6 - Full Evidence Intelligence",
       layerFamily: kapOrTable ? "structured-evidence-table" : "context-evidence-coverage",
-      nextAction: "Check evidence-only result, selected facts, required concept coverage, and whether V2 reingestion/profile refresh is needed.",
+      nextAction: evidenceCandidateButNoUsableFact
+        ? "Evidence candidates were selected but no usable facts compiled; inspect artifact-to-evidence extraction and source_limit classification."
+        : "Check evidence-only result, selected facts, required concept coverage, and whether V2 reingestion/profile refresh is needed.",
     };
   }
 
@@ -509,7 +650,13 @@ async function main() {
   const production = JSON.parse(await readFile(inputFile, "utf8"));
   const manifests = await readDatasetManifests();
   const datasetSuites = await buildDatasetSuiteRollups(manifests);
-  const blockers = asArray(production.failureTaxonomy?.blockers);
+  const productionBlockers = asArray(production.failureTaxonomy?.blockers);
+  const manifestSuiteResultIndex = await buildSuiteResultIndex(manifests);
+  const suiteResultIndex = await buildAdditionalSuiteResultIndex(
+    productionBlockers.map((blocker) => blocker?.suite),
+    manifestSuiteResultIndex,
+  );
+  const blockers = enrichBlockersFromSuiteIndex(productionBlockers, suiteResultIndex);
   const suiteBlockers = datasetSuites.flatMap((suite) => [
     ...asArray(suite.blockers),
     ...asArray(suite.providerStrictFailures),
