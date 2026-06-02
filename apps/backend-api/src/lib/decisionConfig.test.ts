@@ -13,6 +13,7 @@ describe("decision config registry", () => {
     expect(config.hybridRetrieval.lexicalWeight).toBeCloseTo(0.75);
     expect(config.hybridRetrieval.embeddingWeight).toBeCloseTo(0.25);
     expect(config.reranker.mode).toBe("model");
+    expect(config.reranker.timeoutMs).toBe(15000);
     expect(config.reranker.fastCandidateLimit).toBe(3);
     expect(config.reranker.normalCandidateLimit).toBe(4);
     expect(config.reranker.deepCandidateLimit).toBe(8);
@@ -47,6 +48,7 @@ describe("decision config registry", () => {
       R3MES_HYBRID_LEXICAL_WEIGHT: "3",
       R3MES_HYBRID_EMBEDDING_WEIGHT: "1",
       R3MES_RERANKER_CANDIDATE_LIMIT: "9",
+      R3MES_RERANKER_TIMEOUT_MS: "12000",
       R3MES_RERANKER_FAST_CANDIDATE_LIMIT: "2",
       R3MES_RERANKER_DEEP_CANDIDATE_LIMIT: "10",
       R3MES_RERANKER_SCOPED_CANDIDATE_LIMIT: "6",
@@ -85,6 +87,7 @@ describe("decision config registry", () => {
     expect(config.hybridRetrieval.lexicalWeight).toBeCloseTo(0.75);
     expect(config.hybridRetrieval.embeddingWeight).toBeCloseTo(0.25);
     expect(config.reranker.candidateLimit).toBe(9);
+    expect(config.reranker.timeoutMs).toBe(12000);
     expect(config.reranker.fastCandidateLimit).toBe(2);
     expect(config.reranker.deepCandidateLimit).toBe(10);
     expect(config.reranker.scopedCandidateLimit).toBe(6);

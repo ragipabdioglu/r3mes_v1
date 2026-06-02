@@ -295,3 +295,12 @@ of truth; these files are the short working charter read before each task.
 - Backlog now groups into 6 packages: provider runtime, evidence coverage, structured table evidence, retrieval, answer safety/presentation, and certification triage.
 - Top priority is `wp-provider-runtime-strict`: 41 blockers across B.Y, G.P, real-world-stress, realistic-rag, and ui-reality.
 - Next implementation should start with provider/runtime strict fallback before judging evidence or composer quality.
+
+## Latest Phase 10 Provider Runtime Closure Note
+
+- After reboot, local services were healthy: backend, dApp, ai-engine, Qdrant, Postgres, Redis, and IPFS gateway; llama remained false by design.
+- Closed `wp-provider-runtime-strict`: BGE-M3 smoke and reranker smoke now pass with fallback false after reranker timeout/config hygiene.
+- Runtime lineage now counts Qdrant fallback only from explicit provider-failure diagnostics, not from source-resolution/no-retrieval paths.
+- Eval taxonomy no longer treats `reranker_fallback:missing` as provider/runtime fallback; actual fallback still maps to provider failure.
+- Latest certification still fails release gate, but provider-runtime is gone from owner phases/layer families.
+- Remaining blockers are now real product-quality work: Phase 6 evidence coverage, Phase 7 safety/presentation, Phase 4 retrieval, Phase 5 query/source, and certification triage.

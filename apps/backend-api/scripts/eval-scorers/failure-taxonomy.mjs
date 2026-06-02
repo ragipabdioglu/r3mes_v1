@@ -1,5 +1,9 @@
 export function classifyFailure(failure) {
   const value = String(failure ?? "unknown");
+  const actualRuntimeFallback =
+    value.startsWith("runtime_fallback:") ||
+    value === "reranker_fallback:true" ||
+    value === "qdrant_fallback:true";
   if (
     value.startsWith("provider_strict_failure:") ||
     value.startsWith("reranker_real_required_fallback:") ||
@@ -16,10 +20,8 @@ export function classifyFailure(failure) {
     return "debug_contract";
   }
   if (
-    value.startsWith("runtime_fallback:") ||
-    value.startsWith("fallback_template:") ||
-    value.startsWith("reranker_fallback:") ||
-    value.startsWith("qdrant_fallback:")
+    actualRuntimeFallback ||
+    value.startsWith("fallback_template:")
   ) {
     return "runtime_fallback";
   }
@@ -98,12 +100,14 @@ function isEvidenceDemandCoverageFailure(value) {
 
 export function classifyFailureSubtype(failure) {
   const value = String(failure ?? "unknown");
+  const actualRuntimeFallback =
+    value.startsWith("runtime_fallback:") ||
+    value === "reranker_fallback:true" ||
+    value === "qdrant_fallback:true";
   if (
     value.startsWith("provider_strict_failure:") ||
     value.startsWith("reranker_real_required_fallback:") ||
-    value.startsWith("runtime_fallback:") ||
-    value.startsWith("reranker_fallback:") ||
-    value.startsWith("qdrant_fallback:") ||
+    actualRuntimeFallback ||
     value.includes("QDRANT_PROVIDER_UNAVAILABLE") ||
     value.includes("qdrant_provider_failed")
   ) {

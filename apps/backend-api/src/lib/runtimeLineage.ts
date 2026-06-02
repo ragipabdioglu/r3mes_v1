@@ -112,10 +112,7 @@ export function buildRuntimeLineage(input: RuntimeLineageInput): RuntimeLineage 
     readBoolean(diagnostics.qdrantProviderFailed);
   const qdrantFallbackUsed = input.retrieval?.qdrantFallbackUsed ??
     qdrantFallbackFromDiagnostics ??
-    ((
-      runtime.retrievalEngineRequested === "qdrant" ||
-      runtime.retrievalEngineRequested === "hybrid"
-    ) && runtime.retrievalEngineActual === "prisma");
+    false;
   const fallbackPolicy = fallbackPolicyForProfile(profile);
 
   return {

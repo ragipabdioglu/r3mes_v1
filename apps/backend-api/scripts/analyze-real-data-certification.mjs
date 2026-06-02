@@ -153,7 +153,15 @@ function classifyOwnerPhase(blocker) {
   const id = String(blocker.id ?? "");
   const bucket = String(blocker.bucket ?? "");
 
-  if (classes.includes("runtime_fallback") || subtypes.includes("provider_fallback") || failures.includes("fallback")) {
+  const hasActualProviderFallback =
+    classes.includes("runtime_fallback") ||
+    subtypes.includes("provider_fallback") ||
+    failures.includes("provider_strict_failure") ||
+    failures.includes("runtime_fallback:") ||
+    failures.includes("reranker_fallback:true") ||
+    failures.includes("qdrant_fallback:true");
+
+  if (hasActualProviderFallback) {
     return {
       ownerPhase: "Phase 3 - Storage / Embedding / Index Backbone",
       layerFamily: "provider-runtime",

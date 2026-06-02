@@ -684,7 +684,7 @@ export function getDecisionConfig(env: NodeJS.ProcessEnv = process.env): Decisio
     }),
     reranker: {
       mode: (env.R3MES_RERANKER_MODE ?? "model").trim().toLowerCase() === "deterministic" ? "deterministic" : "model",
-      timeoutMs: readPositiveInt(env.R3MES_RERANKER_TIMEOUT_MS, 8_000),
+      timeoutMs: readPositiveInt(env.R3MES_RERANKER_TIMEOUT_MS, 15_000),
       modelWeight: readPositiveFloat(env.R3MES_RERANKER_MODEL_WEIGHT, 1.75),
       candidateLimit: readPositiveInt(env.R3MES_RERANKER_CANDIDATE_LIMIT, 5),
       fastCandidateLimit: readPositiveInt(env.R3MES_RERANKER_FAST_CANDIDATE_LIMIT, 3),

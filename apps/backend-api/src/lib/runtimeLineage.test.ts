@@ -83,6 +83,9 @@ describe("buildRuntimeLineage", () => {
           rerankerFallbackUsed: true,
           rerankerFallbackReason: "timeout",
         },
+        diagnostics: {
+          qdrantProviderFailed: true,
+        },
       },
       safety: {
         fallbackMode: "privacy_safe",
