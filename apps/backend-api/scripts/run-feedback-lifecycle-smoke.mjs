@@ -67,6 +67,7 @@ async function main() {
       metadata: {
         evalQuery: query,
         smoke: "feedback_lifecycle",
+        regressionExcluded: true,
         generatedAt: new Date().toISOString(),
       },
     }),

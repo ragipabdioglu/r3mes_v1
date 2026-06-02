@@ -239,3 +239,10 @@ of truth; these files are the short working charter read before each task.
 - Feedback eval gate quick run failed on current live DB-derived regression cases: 4/4 feedback_good_source cases fell into no-source/suggest with wrong_source taxonomy.
 - Public/debug boundary focused tests passed: 37 backend tests.
 - Phase 9 implementation slices are complete, but full phase closure remains blocked until feedback regression failures are triaged or fixed in the correct source/retrieval/reingestion phase.
+
+## Latest Phase 9 Smoke Regression Hygiene Note
+
+- Lifecycle smoke feedback is now explicitly excluded from production feedback regression generation and approved-proposal coverage counts.
+- New smoke feedback rows carry `metadata.regressionExcluded: true`; older smoke rows are detected by `metadata.smoke` or query shape.
+- Beta feedback fixture generation now uses golden expected suggestions as truth instead of observed runtime suggestions.
+- Quick feedback gate now passes; DB feedback regression generates 0 production cases and skips 5 smoke rows.

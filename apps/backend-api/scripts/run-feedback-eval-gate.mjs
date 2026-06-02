@@ -37,6 +37,7 @@ const productionCommandTimeoutMs = Number(argValue(
   process.env.R3MES_FEEDBACK_PRODUCTION_GATE_TIMEOUT_MS || "900000",
 ));
 const applyRecordId = argValue("--apply-record-id", process.env.R3MES_FEEDBACK_APPLY_RECORD_ID || "");
+const REGRESSION_EXCLUDED_SMOKE_KINDS = new Set(["feedback_lifecycle"]);
 
 function commandToString(command, args) {
   return [command, ...args].join(" ");
@@ -229,35 +230,73 @@ async function fileExists(file) {
   }
 }
 
-async function approvedProposalCount() {
-  const wallet = process.env.R3MES_DEV_WALLET || "0x0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d";
-  const user = await prisma.user.findUnique({ where: { walletAddress: wallet }, select: { id: true } });
-  if (!user) return 0;
-  return prisma.knowledgeFeedbackProposal.count({
-    where: {
-      userId: user.id,
-      status: "APPROVED",
-    },
-  });
+function metadataObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-async function approvedBadAnswerProposalCount() {
+function isRegressionExcludedFeedback(row) {
+  const metadata = metadataObject(row.metadata);
+  if (metadata.regressionExcluded === true) return true;
+  if (typeof metadata.smoke === "string" && REGRESSION_EXCLUDED_SMOKE_KINDS.has(metadata.smoke)) return true;
+  const query =
+    typeof metadata.evalQuery === "string"
+      ? metadata.evalQuery
+      : typeof metadata.redactedQuery === "string"
+        ? metadata.redactedQuery
+        : typeof metadata.safeQuery === "string"
+          ? metadata.safeQuery
+          : "";
+  return /^feedback lifecycle smoke\b/i.test(query.trim());
+}
+
+async function regressionExcludedQueryHashes(userId) {
+  const rows = await prisma.knowledgeFeedback.findMany({
+    where: { userId },
+    select: {
+      queryHash: true,
+      metadata: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 1000,
+  });
+  return new Set(
+    rows
+      .filter((row) => row.queryHash && isRegressionExcludedFeedback(row))
+      .map((row) => row.queryHash),
+  );
+}
+
+async function approvedProposalCounts() {
   const wallet = process.env.R3MES_DEV_WALLET || "0x0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d0badf00d";
   const user = await prisma.user.findUnique({ where: { walletAddress: wallet }, select: { id: true } });
-  if (!user) return 0;
-  return prisma.knowledgeFeedbackProposal.count({
+  if (!user) return { approvedCount: 0, approvedBadAnswerCount: 0, regressionExcludedApprovedCount: 0 };
+  const excludedHashes = await regressionExcludedQueryHashes(user.id);
+  const proposals = await prisma.knowledgeFeedbackProposal.findMany({
     where: {
       userId: user.id,
       status: "APPROVED",
-      action: "REVIEW_ANSWER_QUALITY",
+    },
+    select: {
+      id: true,
+      action: true,
+      queryHash: true,
     },
   });
+  const productionProposals = proposals.filter((proposal) => !proposal.queryHash || !excludedHashes.has(proposal.queryHash));
+  return {
+    approvedCount: productionProposals.length,
+    approvedBadAnswerCount: productionProposals.filter((proposal) => proposal.action === "REVIEW_ANSWER_QUALITY").length,
+    regressionExcludedApprovedCount: proposals.length - productionProposals.length,
+  };
 }
 
 async function main() {
   const started = Date.now();
-  const approvedCount = await approvedProposalCount();
-  const approvedBadAnswerCount = await approvedBadAnswerProposalCount();
+  const {
+    approvedCount,
+    approvedBadAnswerCount,
+    regressionExcludedApprovedCount,
+  } = await approvedProposalCounts();
   const checks = [];
 
   if (requireApproved && approvedCount === 0) {
@@ -266,6 +305,7 @@ async function main() {
       applyAllowed: false,
       reason: "no approved feedback proposals",
       approvedProposalCount: approvedCount,
+      regressionExcludedApprovedCount,
       checks,
       durationMs: Date.now() - started,
       generatedAt: new Date().toISOString(),
@@ -437,6 +477,7 @@ async function main() {
       durationMs: 0,
       approvedProposalCount: approvedCount,
       approvedBadAnswerProposalCount: approvedBadAnswerCount,
+      regressionExcludedApprovedCount,
       feedbackCaseCount,
       ...feedbackCaseSummary,
     });
@@ -454,6 +495,7 @@ async function main() {
         : "one or more feedback eval gate checks failed",
     approvedProposalCount: approvedCount,
     approvedBadAnswerProposalCount: approvedBadAnswerCount,
+    regressionExcludedApprovedCount,
     feedbackCaseCount,
     feedbackCaseCoverageOk: !approvedWithoutFeedbackCases && !approvedBadAnswerWithoutStrongCases,
     feedbackCaseSummary,
@@ -480,6 +522,7 @@ async function main() {
     applyAllowed: report.applyAllowed,
     approvedProposalCount: report.approvedProposalCount,
     approvedBadAnswerProposalCount: report.approvedBadAnswerProposalCount,
+    regressionExcludedApprovedCount: report.regressionExcludedApprovedCount,
     feedbackCaseCount: report.feedbackCaseCount,
     feedbackCaseSummary: report.feedbackCaseSummary,
     recordedGateResult: gateResult

@@ -75,7 +75,7 @@ function fixtureFromCandidate(candidate, goldenById) {
   if (!golden?.query || typeof golden.query !== "string") return null;
 
   const usedCollectionId = first(candidate.rejectedCollectionIds) ?? first(candidate.usedCollectionIds);
-  const expectedCollectionId = first(candidate.suggestedCollectionIds);
+  const expectedCollectionId = first(golden.expectedSuggestedCollectionIds) ?? first(candidate.suggestedCollectionIds);
   if (kind === "WRONG_SOURCE" && (!usedCollectionId || !expectedCollectionId)) return null;
   if (kind === "MISSING_SOURCE" && !expectedCollectionId) return null;
 

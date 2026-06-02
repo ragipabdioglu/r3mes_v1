@@ -30,6 +30,7 @@ const QUALITY_BUCKETS = new Set([
 ]);
 const OUTPUT_FORMATS = new Set(["short", "bullets", "table", "freeform"]);
 const HASH_RE = /^[a-f0-9]{8,128}$/i;
+const REGRESSION_EXCLUDED_SMOKE_KINDS = new Set(["feedback_lifecycle"]);
 
 function normalize(value) {
   return String(value ?? "")
@@ -259,6 +260,14 @@ function readEvalQuery(metadata) {
   return trimmed.length >= 3 ? trimmed : null;
 }
 
+function isRegressionExcludedFeedback(row) {
+  const metadata = metadataObject(row.metadata);
+  if (metadata.regressionExcluded === true) return true;
+  if (typeof metadata.smoke === "string" && REGRESSION_EXCLUDED_SMOKE_KINDS.has(metadata.smoke)) return true;
+  const query = readEvalQuery(metadata) ?? "";
+  return /^feedback lifecycle smoke\b/i.test(query.trim());
+}
+
 function readStringArray(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()) : [];
 }
@@ -475,7 +484,19 @@ async function main() {
   const cases = [];
   const seen = new Set();
   const skippedWithoutQuery = [];
+  const skippedRegressionExcluded = [];
   for (const row of rows) {
+    if (isRegressionExcludedFeedback(row)) {
+      skippedRegressionExcluded.push({
+        id: row.id,
+        kind: row.kind,
+        queryHash: row.queryHash,
+        collectionId: row.collectionId,
+        expectedCollectionId: row.expectedCollectionId,
+        reason: "regression_excluded_smoke_feedback",
+      });
+      continue;
+    }
     const testCase = caseFromFeedback(row);
     if (!testCase) {
       skippedWithoutQuery.push({
@@ -501,7 +522,9 @@ async function main() {
     feedbackRows: rows.length,
     generatedCases: cases.length,
     skippedWithoutSafeQuery: skippedWithoutQuery.length,
+    skippedRegressionExcluded: skippedRegressionExcluded.length,
     skippedPreview: skippedWithoutQuery.slice(0, 10),
+    skippedRegressionExcludedPreview: skippedRegressionExcluded.slice(0, 10),
     note: "Only feedback rows with metadata.evalQuery/redactedQuery/safeQuery become eval cases.",
   }, null, 2));
 }
