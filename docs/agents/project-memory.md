@@ -281,3 +281,10 @@ of truth; these files are the short working charter read before each task.
 - Manifest validation now passes fully: 4 datasets, 0 failures, 0 warnings.
 - B.Y strict smoke is red baseline: 1/12 pass, runtime lineage coverage 1.0, reranker fallback ratio 0.75.
 - Main observed blockers: provider fallback, composer/template output, incomplete answers, wrong output format, and two evidence-only failures.
+
+## Latest Phase 10 Slice 5 Note
+
+- Upgraded `eval:real-data-certification` to `RealDataCertificationReport.v2`.
+- Certification now reads active dataset manifests and latest suite artifacts for KAP, B.Y, G.P, and synthetic stress suites.
+- Current release gate is fail with 73 backlog items, 72 blockers, 8 active suite blockers, and 0 missing suite artifacts.
+- Main owner phases are Phase 3 provider/runtime, Phase 6 evidence, Phase 7 answer intelligence, and Phase 4 retrieval.

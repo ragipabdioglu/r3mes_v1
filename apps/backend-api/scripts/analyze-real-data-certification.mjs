@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 function argValue(name, fallback) {
@@ -12,6 +12,7 @@ const repoRoot = resolve(appRoot, "..", "..");
 const inputFile = resolve(repoRoot, argValue("--input", "artifacts/evals/production-rag/feedback-gate.json"));
 const outFile = resolve(repoRoot, argValue("--out", "artifacts/evals/real-data-certification/latest.json"));
 const markdownFile = resolve(repoRoot, argValue("--markdown", "artifacts/evals/real-data-certification/latest.md"));
+const manifestDir = resolve(repoRoot, argValue("--manifest-dir", "infrastructure/evals/real-data-certification/datasets"));
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -26,6 +27,122 @@ function countBy(values) {
     acc[value] = (acc[value] ?? 0) + 1;
     return acc;
   }, {});
+}
+
+async function exists(path) {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readSummary(artifact) {
+  return artifact?.summary && typeof artifact.summary === "object" ? artifact.summary : artifact;
+}
+
+function readTotals(artifact) {
+  const summary = readSummary(artifact);
+  const totals = summary?.totals && typeof summary.totals === "object" ? summary.totals : summary;
+  return {
+    status: summary?.status ?? (Number(totals?.failed ?? 0) > 0 ? "fail" : "pass"),
+    total: Number(totals?.total ?? totals?.expectedCases ?? 0),
+    passed: Number(totals?.passed ?? 0),
+    failed: Number(totals?.failed ?? 0),
+    passRate: Number(totals?.passRate ?? 0),
+  };
+}
+
+async function readJsonIfExists(path) {
+  if (!(await exists(path))) return null;
+  return JSON.parse(await readFile(path, "utf8"));
+}
+
+async function readDatasetManifests() {
+  if (!(await exists(manifestDir))) return [];
+  const files = (await readdir(manifestDir)).filter((file) => file.endsWith(".json")).sort();
+  const manifests = [];
+  for (const file of files) {
+    const path = resolve(manifestDir, file);
+    const manifest = JSON.parse(await readFile(path, "utf8"));
+    manifests.push({ ...manifest, manifestFile: path });
+  }
+  return manifests;
+}
+
+function suiteArtifactPath(suite) {
+  return resolve(repoRoot, suite.artifactPath ?? `artifacts/evals/${suite.id}/latest.json`);
+}
+
+function suiteReleaseSeverity(summary, artifactExists) {
+  if (!artifactExists) return "blocker";
+  if (summary?.evalGuardrails?.status === "fail") return "blocker";
+  if (Number(summary?.failed ?? 0) > 0) return "blocker";
+  if (Number(summary?.runtimeControlTower?.qualityFallbackRatio ?? 0) > 0) return "blocker";
+  if (Number(summary?.rerankerQuality?.fallbackRatio ?? summary?.rerankerFallbackRatio ?? 0) > 0) return "blocker";
+  if (summary?.evalGuardrails?.status === "warn") return "warning";
+  return "pass";
+}
+
+function buildSuiteRollup(dataset, suite, artifact, artifactPath) {
+  const summary = artifact ? readSummary(artifact) : null;
+  const totals = artifact ? readTotals(artifact) : { status: "missing", total: 0, passed: 0, failed: 0, passRate: 0 };
+  const severity = suiteReleaseSeverity(summary, Boolean(artifact));
+  const blockers = asArray(summary?.failureTaxonomy?.blockers).map((blocker) => ({
+    ...blocker,
+    suite: suite.id,
+    datasetId: dataset.id,
+  }));
+  const providerStrictFailures = asArray(summary?.providerStrictFailures).map((failure) => ({
+    ...failure,
+    suite: suite.id,
+    datasetId: dataset.id,
+    classes: ["runtime_fallback"],
+    subtypes: ["provider_fallback"],
+    failures: [failure.failure ?? "provider_strict_failure"],
+  }));
+  return {
+    datasetId: dataset.id,
+    datasetName: dataset.displayName,
+    datasetType: dataset.datasetType,
+    privacyClass: dataset.privacyClass,
+    suiteId: suite.id,
+    suitePath: suite.path,
+    artifactPath,
+    artifactExists: Boolean(artifact),
+    status: totals.status,
+    total: totals.total,
+    passed: totals.passed,
+    failed: totals.failed,
+    passRate: totals.passRate,
+    releaseSeverity: severity,
+    modes: asArray(suite.modes),
+    runtimeLineageCoverage: summary?.runtimeControlTower?.coverageRatio ?? null,
+    qualityFallbackRatio: summary?.runtimeControlTower?.qualityFallbackRatio ?? null,
+    rerankerFallbackRatio: summary?.rerankerQuality?.fallbackRatio ?? summary?.rerankerFallbackRatio ?? null,
+    qwenCallRatio: summary?.qwenCallRatio ?? summary?.runtimeControlTower?.qwenCallRatio ?? null,
+    answerPathDistribution: summary?.answerPathDistribution ?? summary?.runtimeControlTower?.answerPathDistribution ?? {},
+    failureClasses: summary?.failureTaxonomy?.classes ?? {},
+    failureSubtypes: summary?.failureTaxonomy?.subtypes ?? {},
+    phaseDiagnosisClasses: summary?.failureTaxonomy?.phaseDiagnosis?.classes ?? {},
+    blockerCount: blockers.length,
+    providerStrictFailureCount: providerStrictFailures.length,
+    blockers,
+    providerStrictFailures,
+  };
+}
+
+async function buildDatasetSuiteRollups(manifests) {
+  const rollups = [];
+  for (const dataset of manifests.filter((manifest) => manifest.status === "active")) {
+    for (const suite of asArray(dataset.evalSuites).filter((item) => item.status === "active")) {
+      const artifactPath = suiteArtifactPath(suite);
+      const artifact = await readJsonIfExists(artifactPath);
+      rollups.push(buildSuiteRollup(dataset, suite, artifact, artifactPath));
+    }
+  }
+  return rollups;
 }
 
 function classifyOwnerPhase(blocker) {
@@ -121,9 +238,11 @@ function productionTotals(production) {
   return { total, passed, failed };
 }
 
-function decideReleaseGate(items, production) {
+function decideReleaseGate(items, production, suiteRollups = []) {
   if (production.status !== "ok" && production.status !== "pass") return "fail";
+  if (suiteRollups.some((suite) => suite.releaseSeverity === "blocker")) return "fail";
   if (items.some((item) => item.releaseSeverity === "blocker")) return "fail";
+  if (suiteRollups.some((suite) => suite.releaseSeverity === "warning")) return "conditional_pass";
   if (items.some((item) => item.releaseSeverity === "warning")) return "conditional_pass";
   return "pass";
 }
@@ -145,9 +264,26 @@ function toMarkdown(report) {
     `- Runtime lineage coverage: ${report.production.runtimeLineageCoverage}`,
     `- Quality fallback ratio: ${report.production.qualityFallbackRatio}`,
     "",
-    "## Owner Phase Summary",
+    "## Dataset Suite Summary",
     "",
   ];
+  for (const suite of report.datasetSuites) {
+    lines.push(`### ${suite.datasetId} / ${suite.suiteId}`);
+    lines.push(`- Severity: ${suite.releaseSeverity}`);
+    lines.push(`- Status: ${suite.status}`);
+    lines.push(`- Total: ${suite.total}`);
+    lines.push(`- Passed: ${suite.passed}`);
+    lines.push(`- Failed: ${suite.failed}`);
+    lines.push(`- Runtime lineage coverage: ${suite.runtimeLineageCoverage}`);
+    lines.push(`- Quality fallback ratio: ${suite.qualityFallbackRatio}`);
+    lines.push(`- Reranker fallback ratio: ${suite.rerankerFallbackRatio}`);
+    lines.push(`- Artifact: ${suite.artifactPath}`);
+    lines.push("");
+  }
+  lines.push(
+    "## Owner Phase Summary",
+    "",
+  );
   for (const [phase, count] of Object.entries(report.ownerPhaseCounts)) {
     lines.push(`- ${phase}: ${count}`);
   }
@@ -172,13 +308,20 @@ function toMarkdown(report) {
 
 async function main() {
   const production = JSON.parse(await readFile(inputFile, "utf8"));
+  const manifests = await readDatasetManifests();
+  const datasetSuites = await buildDatasetSuiteRollups(manifests);
   const blockers = asArray(production.failureTaxonomy?.blockers);
-  const items = buildCertificationItems(blockers);
+  const suiteBlockers = datasetSuites.flatMap((suite) => [
+    ...asArray(suite.blockers),
+    ...asArray(suite.providerStrictFailures),
+  ]);
+  const items = buildCertificationItems([...blockers, ...suiteBlockers]);
   const totals = productionTotals(production);
   const report = {
-    schemaVersion: "RealDataCertificationReport.v1",
+    schemaVersion: "RealDataCertificationReport.v2",
     generatedAt: new Date().toISOString(),
     inputFile,
+    manifestDir,
     production: {
       status: production.status ?? "unknown",
       total: totals.total,
@@ -193,7 +336,28 @@ async function main() {
       failureClasses: production.failureTaxonomy?.classes ?? {},
       failureSubtypes: production.failureTaxonomy?.subtypes ?? {},
     },
-    releaseGateDecision: decideReleaseGate(items, production),
+    datasets: manifests.map((manifest) => ({
+      id: manifest.id,
+      displayName: manifest.displayName,
+      status: manifest.status,
+      datasetType: manifest.datasetType,
+      privacyClass: manifest.privacyClass,
+      evalSuites: asArray(manifest.evalSuites).map((suite) => ({
+        id: suite.id,
+        status: suite.status,
+        modes: asArray(suite.modes),
+        path: suite.path,
+      })),
+    })),
+    datasetSuites: datasetSuites.map(({ blockers: _blockers, providerStrictFailures: _providerStrictFailures, ...suite }) => suite),
+    datasetSuiteCounts: {
+      active: datasetSuites.length,
+      blocker: datasetSuites.filter((suite) => suite.releaseSeverity === "blocker").length,
+      warning: datasetSuites.filter((suite) => suite.releaseSeverity === "warning").length,
+      pass: datasetSuites.filter((suite) => suite.releaseSeverity === "pass").length,
+      missingArtifact: datasetSuites.filter((suite) => !suite.artifactExists).length,
+    },
+    releaseGateDecision: decideReleaseGate(items, production, datasetSuites),
     certificationBacklogCount: items.length,
     blockerCount: items.filter((item) => item.releaseSeverity === "blocker").length,
     warningCount: items.filter((item) => item.releaseSeverity === "warning").length,
