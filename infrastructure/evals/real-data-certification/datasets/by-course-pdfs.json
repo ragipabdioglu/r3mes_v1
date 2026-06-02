@@ -10,7 +10,7 @@
   "domains": ["education", "technology"],
   "sourceTypes": ["pdf"],
   "documentCountExpected": 7,
-  "collectionIds": ["cmpmh50070002kll4mdk1mlnf"],
+  "collectionIds": ["cmpmh35vz0002kl1gxtqydf28"],
   "expectedArtifacts": ["definition", "list", "comparison", "procedure", "table", "visual_layout"],
   "certificationBuckets": [
     "definition_extraction",

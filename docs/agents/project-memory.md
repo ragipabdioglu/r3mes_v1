@@ -267,3 +267,10 @@ of truth; these files are the short working charter read before each task.
 - Added `eval:real-data-manifests` to validate dataset paths, document counts, certification buckets, and linked eval suites.
 - Manifest validation is warn-only: 4 datasets valid, 0 failures, 2 warnings for planned B.Y/G.P eval suite fixture paths.
 - Runtime behavior is unchanged; this slice only adds certification inventory and validation.
+
+## Latest Phase 10 Slice 3 Note
+
+- Added `gp-visual-programming-smoke` 15-case real-data eval suite with evidence and answer expectations.
+- Activated the G.P manifest suite and corrected G.P/B.Y V2 collection ids in certification manifests.
+- G.P strict smoke is red by design: 0/15 pass, runtime lineage coverage 1.0, reranker fallback ratio 0.733.
+- Main observed blockers: provider/reranker fallback, evidence-only failures for context/source gaps, and answer-quality/template failures.

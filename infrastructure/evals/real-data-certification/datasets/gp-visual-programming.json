@@ -10,7 +10,7 @@
   "domains": ["education", "programming"],
   "sourceTypes": ["pdf"],
   "documentCountExpected": 10,
-  "collectionIds": [],
+  "collectionIds": ["cmpmh50070002kll4mdk1mlnf"],
   "expectedArtifacts": ["definition", "list", "comparison", "code", "procedure", "visual_layout"],
   "certificationBuckets": [
     "source_resolution",
@@ -28,7 +28,7 @@
     {
       "id": "gp-visual-programming-smoke",
       "path": "infrastructure/evals/gp-visual-programming-smoke/golden.jsonl",
-      "status": "planned",
+      "status": "active",
       "modes": ["evidence", "answer", "ui_parity"]
     }
   ],
