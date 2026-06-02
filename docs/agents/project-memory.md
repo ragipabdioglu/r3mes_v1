@@ -232,3 +232,10 @@ of truth; these files are the short working charter read before each task.
 - Feedback shadow runtime impacts now carry regression coverage, production gate, rollback readiness, and gate timestamp diagnostics.
 - Chat debug trace `shadowRuntime.topImpacts` now exposes the same promotion blockers and readiness signals.
 - Public chat response shape remains unchanged; diagnostics stay in debug/admin trace paths.
+
+## Latest Phase 9 Closure Candidate Note
+
+- Feedback lifecycle smoke passed end to end: create, proposal, approve, plan, gate result, passive adjustment, promotion gate, rollback.
+- Feedback eval gate quick run failed on current live DB-derived regression cases: 4/4 feedback_good_source cases fell into no-source/suggest with wrong_source taxonomy.
+- Public/debug boundary focused tests passed: 37 backend tests.
+- Phase 9 implementation slices are complete, but full phase closure remains blocked until feedback regression failures are triaged or fixed in the correct source/retrieval/reingestion phase.
