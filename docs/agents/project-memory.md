@@ -246,3 +246,10 @@ of truth; these files are the short working charter read before each task.
 - New smoke feedback rows carry `metadata.regressionExcluded: true`; older smoke rows are detected by `metadata.smoke` or query shape.
 - Beta feedback fixture generation now uses golden expected suggestions as truth instead of observed runtime suggestions.
 - Quick feedback gate now passes; DB feedback regression generates 0 production cases and skips 5 smoke rows.
+
+## Latest Phase 9 Final Closure Verification Note
+
+- Phase 9 feedback mechanics are closure-ready: focused tests, typecheck, shared build, DB feedback regression, beta feedback regression, collection suggestion, and feedback coverage all passed.
+- Full non-quick `eval:feedback-gate` failed only because embedded production RAG gate is red: 185 total, 166 passed, 19 failed.
+- Production failures are cross-phase product blockers: safety/presentation, context coverage, retrieval/query, runtime fallback, KAP/table detail grounding.
+- Do not patch Phase 9 to force green; route remaining failures into Phase 10 Real Data Certification / Phase 11 Hardening backlog.
