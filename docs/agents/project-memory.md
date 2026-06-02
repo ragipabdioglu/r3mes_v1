@@ -253,3 +253,10 @@ of truth; these files are the short working charter read before each task.
 - Full non-quick `eval:feedback-gate` failed only because embedded production RAG gate is red: 185 total, 166 passed, 19 failed.
 - Production failures are cross-phase product blockers: safety/presentation, context coverage, retrieval/query, runtime fallback, KAP/table detail grounding.
 - Do not patch Phase 9 to force green; route remaining failures into Phase 10 Real Data Certification / Phase 11 Hardening backlog.
+
+## Latest Phase 10 Slice 1 Note
+
+- Added `eval:real-data-certification` and `RealDataCertificationReport.v1` output from the latest production aggregate artifact.
+- Current release decision is `fail`: 185 total cases, 166 passed, 19 failed.
+- Certification backlog has 16 items: 15 blockers and 1 warning.
+- Main owner phases are Phase 6 evidence/context coverage, Phase 7 safety/presentation, plus Phase 4 retrieval and Phase 3 provider-runtime.
