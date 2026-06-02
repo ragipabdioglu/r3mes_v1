@@ -125,6 +125,19 @@ function normalizeFeedbackBadAnswerPayload(metadata) {
   return payload;
 }
 
+function hasStrictBadAnswerQualityExpectations(qualityPayload, qualityExpectations) {
+  if (!qualityPayload || !qualityExpectations) return false;
+  if (Array.isArray(qualityExpectations.requiredAnswerTerms) && qualityExpectations.requiredAnswerTerms.length > 0) return true;
+  if (Array.isArray(qualityExpectations.forbiddenAnswerTerms) && qualityExpectations.forbiddenAnswerTerms.length > 0) return true;
+  if (Array.isArray(qualityExpectations.requiredFields) && qualityExpectations.requiredFields.length > 0) return true;
+  if (typeof qualityExpectations.format === "string" && qualityExpectations.format.length > 0) return true;
+  if (Number.isFinite(Number(qualityExpectations.maxWords)) && Number(qualityExpectations.maxWords) > 0) return true;
+  if (Number.isFinite(Number(qualityExpectations.maxSentences)) && Number(qualityExpectations.maxSentences) > 0) return true;
+  if (qualityExpectations.forbidCaution === true) return true;
+  if (qualityExpectations.noRawTableDump === true) return true;
+  return false;
+}
+
 function readBooleanValue(...values) {
   for (const value of values) {
     if (typeof value === "boolean") return value;
@@ -408,6 +421,7 @@ function caseFromFeedback(row) {
           ...(qualityPayload.qualityBucket === "raw_table_dump" ? { noRawTableDump: true } : {}),
         }
       : null;
+    const strictBadAnswerCase = hasStrictBadAnswerQualityExpectations(qualityPayload, qualityExpectations);
     return {
       ...base,
       ...(runtimeFailureBucket ? {
@@ -429,6 +443,8 @@ function caseFromFeedback(row) {
         feedbackQualityPayload: qualityPayload,
         qualityExpectations,
         expectedAnswerQualityBucketsAbsent: forbiddenBuckets,
+        strictBadAnswerCase,
+        ...(strictBadAnswerCase ? {} : { weakFeedbackCase: true }),
       } : {
         weakFeedbackCase: true,
       }),

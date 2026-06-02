@@ -199,12 +199,16 @@ async function summarizeFeedbackRegressionCases(file) {
       testCase?.bucket === "feedback_bad_answer" ||
       String(testCase?.id ?? "").startsWith("feedback-bad-answer-")
     ));
-    const weakBadAnswerCases = badAnswerCases.filter((testCase) => testCase?.weakFeedbackCase === true);
+    const strictBadAnswerCases = badAnswerCases.filter((testCase) => testCase?.strictBadAnswerCase === true);
+    const weakBadAnswerCases = badAnswerCases.filter((testCase) => (
+      testCase?.weakFeedbackCase === true ||
+      testCase?.strictBadAnswerCase !== true
+    ));
     return {
       total: cases.length,
       badAnswerCaseCount: badAnswerCases.length,
       weakBadAnswerCaseCount: weakBadAnswerCases.length,
-      strongBadAnswerCaseCount: badAnswerCases.length - weakBadAnswerCases.length,
+      strongBadAnswerCaseCount: strictBadAnswerCases.length,
     };
   } catch {
     return {

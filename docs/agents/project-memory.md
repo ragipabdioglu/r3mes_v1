@@ -211,3 +211,10 @@ of truth; these files are the short working charter read before each task.
 - Generated proposals persist repair track in evidence and derive it for older records.
 - Passive apply now creates router adjustments only for `routing` repair-track plans.
 - BAD_ANSWER / answer-quality plans stay eval/review-only even if malformed score steps appear.
+
+## Latest Phase 9 Slice 2 Note
+
+- BAD_ANSWER generated regression cases now distinguish strict vs weak cases.
+- A case is strict only when actionable quality expectations exist, not merely because `qualityBucket` is present.
+- Feedback eval gate strong BAD_ANSWER count now uses `strictBadAnswerCase === true`.
+- Added a small fixture proving one weak BAD_ANSWER and one strict BAD_ANSWER case.
