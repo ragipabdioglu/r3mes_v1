@@ -171,6 +171,14 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.contextText).toBe("");
     expect(result.sources).toEqual([]);
     expect(result.lowGroundingConfidence).toBe(true);
+    expect(result.compiledEvidence).toMatchObject({
+      confidence: "low",
+      sufficiency: {
+        status: "insufficient",
+        shouldAnswer: false,
+        confidence: "low",
+      },
+    });
     expect(result.diagnostics.budget).toMatchObject({
       budgetMode: "normal_rag",
       requestedSourceLimit: 3,

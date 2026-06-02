@@ -1329,6 +1329,7 @@ function promoteGroundingFromCompiledEvidence(opts: {
   compiledEvidence: CompiledEvidence;
 }): GroundingConfidence {
   if (opts.compiledEvidence.contradictionCount > 0) return "low";
+  if (!hasCompiledUsableGrounding(opts.compiledEvidence)) return "low";
   if (opts.base !== "low") return opts.base;
   if (opts.compiledEvidence.usableFactCount >= 2 && opts.compiledEvidence.sourceIds.length > 0) return "medium";
   return "low";
