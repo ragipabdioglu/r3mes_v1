@@ -10,6 +10,11 @@ export interface FeedbackShadowRuntimeImpact {
   totalScoreDelta: number;
   activeAdjustmentCount: number;
   gatePassedCount: number;
+  feedbackCaseCount: number | null;
+  feedbackCaseCoverageOk: boolean | null;
+  productionGateRan: boolean | null;
+  rollbackReady: boolean;
+  gateReportGeneratedAt: string | null;
   promotionStage: "eligible_shadow" | "blocked" | "review_only";
   rollbackRecommended: boolean;
   nextSafeAction:
@@ -52,17 +57,42 @@ function clampScore(value: number): number {
 }
 
 function gatePassed(value: unknown): boolean {
-  if (!value || typeof value !== "object") return false;
+  const summary = summarizeGateEvidence(value);
+  return summary.ok === true && summary.feedbackCaseCoverageOk === true && summary.productionGateRan === true;
+}
+
+function summarizeGateEvidence(value: unknown): {
+  ok: boolean | null;
+  feedbackCaseCount: number | null;
+  feedbackCaseCoverageOk: boolean | null;
+  productionGateRan: boolean | null;
+  generatedAt: string | null;
+} {
+  if (!value || typeof value !== "object") {
+    return {
+      ok: null,
+      feedbackCaseCount: null,
+      feedbackCaseCoverageOk: null,
+      productionGateRan: null,
+      generatedAt: null,
+    };
+  }
   const report = value as Record<string, unknown>;
   const checks = Array.isArray(report.checks) ? report.checks : [];
   const productionGate = checks
     .map((check) => (check && typeof check === "object" ? check as Record<string, unknown> : null))
     .find((check) => check?.name === "production_rag_gate");
-  return (
-    report.ok === true &&
-    report.feedbackCaseCoverageOk === true &&
-    Boolean(productionGate && productionGate.ok === true && productionGate.skipped !== true)
-  );
+  return {
+    ok: typeof report.ok === "boolean" ? report.ok : null,
+    feedbackCaseCount:
+      typeof report.feedbackCaseCount === "number" && Number.isFinite(report.feedbackCaseCount)
+        ? Math.max(0, Math.floor(report.feedbackCaseCount))
+        : null,
+    feedbackCaseCoverageOk:
+      typeof report.feedbackCaseCoverageOk === "boolean" ? report.feedbackCaseCoverageOk : null,
+    productionGateRan: productionGate ? productionGate.ok === true && productionGate.skipped !== true : null,
+    generatedAt: typeof report.generatedAt === "string" ? report.generatedAt : null,
+  };
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -131,6 +161,11 @@ export async function evaluateFeedbackShadowRuntime(opts: {
       totalScoreDelta: 0,
       activeAdjustmentCount: 0,
       gatePassedCount: 0,
+      feedbackCaseCount: null,
+      feedbackCaseCoverageOk: null,
+      productionGateRan: null,
+      rollbackReady: false,
+      gateReportGeneratedAt: null,
       promotionStage: "blocked" as const,
       rollbackRecommended: false,
       nextSafeAction: "keep_passive" as const,
@@ -138,9 +173,25 @@ export async function evaluateFeedbackShadowRuntime(opts: {
       blockedReasons: [],
       adjustmentIds: [],
     };
+    const gateEvidence = summarizeGateEvidence(row.applyRecord.gateReport);
     existing.totalScoreDelta = clampScore(existing.totalScoreDelta + row.scoreDelta);
     existing.activeAdjustmentCount += 1;
     existing.gatePassedCount += row.applyRecord.status === "APPLIED" && gatePassed(row.applyRecord.gateReport) ? 1 : 0;
+    existing.feedbackCaseCount = Math.max(existing.feedbackCaseCount ?? 0, gateEvidence.feedbackCaseCount ?? 0);
+    existing.feedbackCaseCoverageOk =
+      existing.feedbackCaseCoverageOk === false || gateEvidence.feedbackCaseCoverageOk === false
+        ? false
+        : existing.feedbackCaseCoverageOk === true || gateEvidence.feedbackCaseCoverageOk === true
+          ? true
+          : null;
+    existing.productionGateRan =
+      existing.productionGateRan === false || gateEvidence.productionGateRan === false
+        ? false
+        : existing.productionGateRan === true || gateEvidence.productionGateRan === true
+          ? true
+          : null;
+    existing.rollbackReady = existing.rollbackReady || Boolean(row.id);
+    existing.gateReportGeneratedAt = gateEvidence.generatedAt ?? existing.gateReportGeneratedAt;
     existing.adjustmentIds.push(row.id);
     grouped.set(row.collectionId, existing);
   }
@@ -149,6 +200,15 @@ export async function evaluateFeedbackShadowRuntime(opts: {
     const blockedReasons = new Set<string>();
     if (impact.gatePassedCount !== impact.activeAdjustmentCount) {
       blockedReasons.add("not all source apply records passed eval gate");
+    }
+    if (impact.feedbackCaseCoverageOk !== true) {
+      blockedReasons.add("feedback regression coverage missing or incomplete");
+    }
+    if (impact.productionGateRan !== true) {
+      blockedReasons.add("production gate evidence missing");
+    }
+    if (!impact.rollbackReady) {
+      blockedReasons.add("rollback path missing");
     }
     if (impact.totalScoreDelta === 0) {
       blockedReasons.add("review-only adjustment has no runtime score effect");

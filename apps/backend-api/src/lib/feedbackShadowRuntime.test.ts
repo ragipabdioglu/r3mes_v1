@@ -16,6 +16,7 @@ function strictGateReport() {
     ok: true,
     feedbackCaseCoverageOk: true,
     feedbackCaseCount: 2,
+    generatedAt: "2026-05-05T12:00:00.000Z",
     checks: [
       { name: "feedback_regression", ok: true },
       { name: "production_rag_gate", ok: true, skipped: false },
@@ -69,6 +70,11 @@ describe("feedback shadow runtime", () => {
       rollbackRecommended: false,
       nextSafeAction: "eligible_for_shadow_observation",
       totalScoreDelta: 0.2,
+      feedbackCaseCount: 2,
+      feedbackCaseCoverageOk: true,
+      productionGateRan: true,
+      rollbackReady: true,
+      gateReportGeneratedAt: "2026-05-05T12:00:00.000Z",
     });
   });
 
@@ -133,6 +139,8 @@ describe("feedback shadow runtime", () => {
       nextSafeAction: "rollback_or_review",
     });
     expect(report.impacts[0]?.blockedReasons.join(" ")).toContain("eval gate");
+    expect(report.impacts[0]?.blockedReasons.join(" ")).toContain("feedback regression coverage");
+    expect(report.impacts[0]?.blockedReasons.join(" ")).toContain("production gate evidence");
   });
 
   it("blocks oversized active adjustments before shadow promotion", async () => {

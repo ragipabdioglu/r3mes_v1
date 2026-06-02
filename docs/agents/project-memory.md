@@ -225,3 +225,10 @@ of truth; these files are the short working charter read before each task.
 - Promotion eligibility requires strict gate evidence, coverage, rollback readiness, target collection/query hash, and score delta cap.
 - Shadow runtime eligibility now uses the same strict gate evidence instead of accepting bare `{ ok: true }`.
 - Runtime router mutation remains disabled; promotion gate still reports candidates only.
+
+## Latest Phase 9 Slice 4 Note
+
+- Started the local system before work; backend, dApp, ai-engine, Qdrant, and ipfs gateway were OK.
+- Feedback shadow runtime impacts now carry regression coverage, production gate, rollback readiness, and gate timestamp diagnostics.
+- Chat debug trace `shadowRuntime.topImpacts` now exposes the same promotion blockers and readiness signals.
+- Public chat response shape remains unchanged; diagnostics stay in debug/admin trace paths.

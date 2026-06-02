@@ -765,6 +765,11 @@ export interface ChatRetrievalDebug {
         totalScoreDelta: number;
         activeAdjustmentCount: number;
         gatePassedCount: number;
+        feedbackCaseCount?: number | null;
+        feedbackCaseCoverageOk?: boolean | null;
+        productionGateRan?: boolean | null;
+        rollbackReady?: boolean;
+        gateReportGeneratedAt?: string | null;
         recommendation: "eligible_for_shadow_runtime" | "keep_passive" | "review_only";
         promotionStage: "eligible_shadow" | "blocked" | "review_only";
         rollbackRecommended: boolean;
