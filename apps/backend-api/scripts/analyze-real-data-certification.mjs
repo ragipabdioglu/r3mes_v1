@@ -311,6 +311,14 @@ function classifyOwnerPhase(blocker) {
   }
 
   if (diagnosisClasses.includes("retrieval_or_evidence_failure")) {
+    if (evidenceCandidateButNoUsableFact) {
+      const kapOrTable = /kap|table|cash|share|withholding|dividend/i.test(`${suite} ${id} ${bucket}`);
+      return {
+        ownerPhase: "Phase 6 - Full Evidence Intelligence",
+        layerFamily: kapOrTable ? "structured-evidence-table" : "context-evidence-coverage",
+        nextAction: "Evidence candidates were selected but no usable facts compiled; inspect artifact-to-evidence extraction and source_limit classification.",
+      };
+    }
     if (retrievalStoppedBeforeEvidence) {
       return {
         ownerPhase: routeSuggestMode ? "Phase 5 - Query / Source Intelligence" : "Phase 4 - Retrieval Quality",
@@ -324,9 +332,7 @@ function classifyOwnerPhase(blocker) {
     return {
       ownerPhase: "Phase 6 - Full Evidence Intelligence",
       layerFamily: kapOrTable ? "structured-evidence-table" : "context-evidence-coverage",
-      nextAction: evidenceCandidateButNoUsableFact
-        ? "Evidence candidates were selected but no usable facts compiled; inspect artifact-to-evidence extraction and source_limit classification."
-        : "Evidence-only failed; inspect source selection, artifact readiness, selected facts, and required context coverage.",
+      nextAction: "Evidence-only failed; inspect source selection, artifact readiness, selected facts, and required context coverage.",
     };
   }
 
@@ -342,6 +348,14 @@ function classifyOwnerPhase(blocker) {
   }
 
   if (subtypes.includes("context_coverage_failure") || failures.includes("missing_concepts")) {
+    if (evidenceCandidateButNoUsableFact) {
+      const kapOrTable = /kap|table|cash|share|withholding|dividend/i.test(`${suite} ${id} ${bucket}`);
+      return {
+        ownerPhase: "Phase 6 - Full Evidence Intelligence",
+        layerFamily: kapOrTable ? "structured-evidence-table" : "context-evidence-coverage",
+        nextAction: "Evidence candidates were selected but no usable facts compiled; inspect artifact-to-evidence extraction and source_limit classification.",
+      };
+    }
     if (retrievalStoppedBeforeEvidence) {
       return {
         ownerPhase: routeSuggestMode ? "Phase 5 - Query / Source Intelligence" : "Phase 4 - Retrieval Quality",
@@ -355,9 +369,7 @@ function classifyOwnerPhase(blocker) {
     return {
       ownerPhase: kapOrTable ? "Phase 6 - Full Evidence Intelligence" : "Phase 6 - Full Evidence Intelligence",
       layerFamily: kapOrTable ? "structured-evidence-table" : "context-evidence-coverage",
-      nextAction: evidenceCandidateButNoUsableFact
-        ? "Evidence candidates were selected but no usable facts compiled; inspect artifact-to-evidence extraction and source_limit classification."
-        : "Check evidence-only result, selected facts, required concept coverage, and whether V2 reingestion/profile refresh is needed.",
+      nextAction: "Check evidence-only result, selected facts, required concept coverage, and whether V2 reingestion/profile refresh is needed.",
     };
   }
 
