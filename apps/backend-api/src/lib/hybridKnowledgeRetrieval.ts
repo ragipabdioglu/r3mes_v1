@@ -1431,6 +1431,10 @@ function isRiskEvidenceSentence(sentence: string): boolean {
   return /\b(?:risk|dikkat|acil|şiddetli|siddetli|uyarı|uyari|kesin|çıkarım|cikarim|do not infer)\b/iu.test(sentence);
 }
 
+function isListEvidenceSentence(sentence: string): boolean {
+  return /^\s*(?:[-*•]|\d{1,2}[.)])\s+/u.test(sentence);
+}
+
 function pickRelevantSentences(query: string, text: string, maxChars: number, maxSentences = evidenceMaxFactSentences()): {
   text: string;
   candidateSentenceCount: number;
@@ -1439,6 +1443,19 @@ function pickRelevantSentences(query: string, text: string, maxChars: number, ma
 } {
   const queryTokens = new Set(buildExpandedQueryTokens(query, null, 48));
   const parts = sentenceParts(text);
+  const matchingHeadingIndexes = parts
+    .map((sentence, index) => ({ sentence, index }))
+    .filter(({ sentence }) => !isListEvidenceSentence(sentence))
+    .filter(({ sentence }) => {
+      const sentenceTokens = Array.from(new Set([
+        ...tokenize(sentence),
+        ...buildExpandedQueryTokens(sentence, null, 64),
+      ]));
+      return sentenceTokens.some((token) => queryTokens.has(token));
+    })
+    .map(({ index }) => index);
+  const closeToMatchingHeading = (index: number) =>
+    matchingHeadingIndexes.some((headingIndex) => Math.abs(index - headingIndex) <= 8);
   const scored = parts
     .map((sentence, index) => {
       const sentenceTokens = Array.from(new Set([
@@ -1449,17 +1466,19 @@ function pickRelevantSentences(query: string, text: string, maxChars: number, ma
       const structureBonus = isStructuredEvidenceSentence(sentence) ? 2 : 0;
       const riskBonus = isRiskEvidenceSentence(sentence) ? 1 : 0;
       const financeScore = financeLineItemScore(query, sentence);
+      const listNeighborBonus = isListEvidenceSentence(sentence) && closeToMatchingHeading(index) ? 6 : 0;
       const isEarlyMetadata = structureBonus > 0 && index <= 2;
       const keep =
         overlap > 0 ||
         financeScore > 0 ||
+        listNeighborBonus > 0 ||
         isEarlyMetadata ||
         (riskBonus > 0 && overlap > 0);
       return {
         sentence,
         index,
         overlap,
-        score: keep ? overlap * 4 + structureBonus + riskBonus + financeScore : 0,
+        score: keep ? overlap * 4 + structureBonus + riskBonus + financeScore + listNeighborBonus : 0,
       };
     })
     .filter((item) => item.score > 0)

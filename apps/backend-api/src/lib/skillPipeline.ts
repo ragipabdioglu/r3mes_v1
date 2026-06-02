@@ -392,6 +392,47 @@ function definitionQueryFragments(text: string, query: string, limit = 3): strin
   return unique(fragments).slice(0, limit);
 }
 
+function isListLikeLine(value: string): boolean {
+  return /^\s*(?:[-*•]|\d{1,2}[.)])\s+/u.test(value);
+}
+
+function stripListMarker(value: string): string {
+  return value.replace(/^\s*(?:[-*•]|\d{1,2}[.)])\s+/u, "").trim();
+}
+
+function listQueryFragments(text: string, query: string, limit = 6): string[] {
+  const task = detectAnswerTask(query);
+  if (task.taskType !== "list_items") return [];
+  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
+  if (queryTokens.size === 0) return [];
+  const lines = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\s+[•]\s+/gu, "\n• ")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const matchedHeadingIndexes = lines
+    .map((line, index) => ({ line: normalizeDocumentScaffoldFragment(stripListMarker(line)), index }))
+    .filter(({ line }) => line && !isListLikeLine(line) && queryCoreOverlapScore(queryTokens, line) > 0)
+    .map(({ index }) => index);
+  const closeToMatchedHeading = (index: number) =>
+    matchedHeadingIndexes.some((headingIndex) => Math.abs(index - headingIndex) <= 8);
+
+  return lines
+    .map((line, index) => ({ line, index, fragment: normalizeDocumentScaffoldFragment(stripListMarker(line)) }))
+    .filter(({ line, fragment, index }) => {
+      if (!fragment || !isListLikeLine(line)) return false;
+      if (hasSourceScopeExclusion(fragment) || hasContradictionMarker(fragment)) return false;
+      if (matchedHeadingIndexes.length > 0 && closeToMatchedHeading(index)) return true;
+      return queryCoreOverlapScore(queryTokens, fragment) > 0 || queryOverlapScore(queryTokens, fragment) >= 2;
+    })
+    .map(({ fragment, index }) => ({ fragment, index, score: fragmentQualityScore(fragment) }))
+    .filter(({ score }) => score > getDecisionConfig().evidenceScoring.fragmentMinScore)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map(({ fragment }) => fragment);
+}
+
 function splitNumberedTableRows(text: string): string[] {
   return text
     .replace(/\s+(\d{1,2})\.\s*(?=[\p{L}A-ZÇĞİÖŞÜ])/gu, "\n$1. ")
@@ -1286,6 +1327,14 @@ export function buildDeterministicEvidenceExtraction(
 
     for (const section of cardSections(card)) {
       if (section.kind === "direct" || section.kind === "supporting") {
+        for (const fragment of listQueryFragments(section.text, input.userQuery)) {
+          addUsableIfRelevant(sourceLabel, fragment, {
+            allowGenericGuidance: true,
+            kind: section.kind === "supporting" ? "supporting" : "direct",
+            force: true,
+            maxChars: 420,
+          });
+        }
         for (const fragment of definitionQueryFragments(section.text, input.userQuery)) {
           addUsableIfRelevant(sourceLabel, fragment, {
             allowGenericGuidance: true,

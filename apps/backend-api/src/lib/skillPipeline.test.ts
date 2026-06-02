@@ -175,6 +175,31 @@ describe("skill pipeline evidence extractor", () => {
     );
   });
 
+  it("keeps nearby list items when a matching heading carries the query terms", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Sistemin temel bileşenleri nelerdir?",
+      cards: [
+        {
+          sourceId: "generic-system-components",
+          title: "generic-system-components",
+          patientSummary: [
+            "• Algılama: Ortamdan veri toplar.",
+            "• Bağlantı: Veriyi merkeze iletir.",
+            "• İşleme: Gelen veriyi analiz eder.",
+            "Sistemin Temel Bileşenleri başlığı altında bu adımlar listelenir.",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(extraction.usableFacts).toEqual(expect.arrayContaining([
+      expect.stringContaining("Algılama"),
+      expect.stringContaining("Bağlantı"),
+    ]));
+    expect(extraction.evidenceBundle?.diagnostics.kindCounts.list_item).toBeGreaterThanOrEqual(2);
+    expect(extraction.missingInfo).toEqual([]);
+  });
+
   it("extracts actionable education guidance with inflected query terms", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Özel eğitim desteği için okulda ilk hangi adımları konuşmalıyım?",

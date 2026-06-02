@@ -803,6 +803,32 @@ describe("true hybrid retrieval helpers", () => {
     expect(result.text).toContain("B 3.272.500.000");
   });
 
+  it("keeps nearby list bullets when a matching heading carries the query terms", () => {
+    const result = buildPrunedEvidenceInputWithDiagnostics({
+      query: "Sistemin temel bileşenleri nelerdir?",
+      budgetMode: "normal_rag",
+      maxChars: 420,
+      maxSentences: 5,
+      candidate: candidate({
+        id: "generic-list",
+        title: "generic-list",
+        content: [
+          "• Algılama: Ortamdan veri toplar.",
+          "• Bağlantı: Veriyi merkeze iletir.",
+          "• İşleme: Gelen veriyi analiz eder.",
+          "Sistemin Temel Bileşenleri başlığı altında bu adımlar listelenir.",
+          "Alakasız kapanış notu burada yer alır.",
+        ].join("\n"),
+      }),
+    });
+
+    expect(result.text).toContain("Algılama");
+    expect(result.text).toContain("Bağlantı");
+    expect(result.text).toContain("İşleme");
+    expect(result.text).toContain("Sistemin Temel Bileşenleri");
+    expect(result.diagnostics.selectedSentenceCount).toBeGreaterThanOrEqual(4);
+  });
+
   it("diversifies multilingual disclosure sources by document language and dedupes citations", async () => {
     vi.stubEnv("R3MES_RERANKER_MODE", "deterministic");
     vi.stubEnv("R3MES_RAG_MIN_RERANK_SCORE", "0.1");
