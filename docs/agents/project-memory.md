@@ -218,3 +218,10 @@ of truth; these files are the short working charter read before each task.
 - A case is strict only when actionable quality expectations exist, not merely because `qualityBucket` is present.
 - Feedback eval gate strong BAD_ANSWER count now uses `strictBadAnswerCase === true`.
 - Added a small fixture proving one weak BAD_ANSWER and one strict BAD_ANSWER case.
+
+## Latest Phase 9 Slice 3 Note
+
+- Promotion gate now exposes feedback regression coverage, production gate evidence, rollback readiness, and gate report timestamp.
+- Promotion eligibility requires strict gate evidence, coverage, rollback readiness, target collection/query hash, and score delta cap.
+- Shadow runtime eligibility now uses the same strict gate evidence instead of accepting bare `{ ok: true }`.
+- Runtime router mutation remains disabled; promotion gate still reports candidates only.

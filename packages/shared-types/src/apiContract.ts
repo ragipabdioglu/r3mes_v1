@@ -659,6 +659,11 @@ export interface KnowledgeFeedbackPromotionGateItem {
   queryHash: string | null;
   activeAdjustmentCount: number;
   gatePassedCount: number;
+  feedbackCaseCount: number | null;
+  feedbackCaseCoverageOk: boolean | null;
+  productionGateRan: boolean | null;
+  rollbackReady: boolean;
+  gateReportGeneratedAt: string | null;
   totalScoreDelta: number;
   promotionCandidate: boolean;
   promotionStage: "eligible_shadow" | "blocked" | "review_only";

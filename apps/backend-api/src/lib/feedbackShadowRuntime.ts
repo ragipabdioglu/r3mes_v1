@@ -52,7 +52,17 @@ function clampScore(value: number): number {
 }
 
 function gatePassed(value: unknown): boolean {
-  return Boolean(value && typeof value === "object" && (value as Record<string, unknown>).ok === true);
+  if (!value || typeof value !== "object") return false;
+  const report = value as Record<string, unknown>;
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  const productionGate = checks
+    .map((check) => (check && typeof check === "object" ? check as Record<string, unknown> : null))
+    .find((check) => check?.name === "production_rag_gate");
+  return (
+    report.ok === true &&
+    report.feedbackCaseCoverageOk === true &&
+    Boolean(productionGate && productionGate.ok === true && productionGate.skipped !== true)
+  );
 }
 
 function uniqueStrings(values: string[]): string[] {

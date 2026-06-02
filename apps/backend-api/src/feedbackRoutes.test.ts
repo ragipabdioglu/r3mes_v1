@@ -1358,7 +1358,16 @@ describe("knowledge feedback routes", () => {
         updatedAt: new Date("2026-05-05T12:08:00.000Z"),
         applyRecord: {
           status: "APPLIED",
-          gateReport: { ok: true, checks: [{ name: "rag_quality_gates", ok: true }] },
+          gateReport: {
+            ok: true,
+            feedbackCaseCount: 3,
+            feedbackCaseCoverageOk: true,
+            generatedAt: "2026-05-05T12:08:00.000Z",
+            checks: [
+              { name: "feedback_regression", ok: true },
+              { name: "production_rag_gate", ok: true, skipped: false },
+            ],
+          },
         },
       },
       {
@@ -1381,7 +1390,16 @@ describe("knowledge feedback routes", () => {
         updatedAt: new Date("2026-05-05T12:10:00.000Z"),
         applyRecord: {
           status: "APPLIED",
-          gateReport: { ok: true, checks: [{ name: "rag_quality_gates", ok: true }] },
+          gateReport: {
+            ok: true,
+            feedbackCaseCount: 3,
+            feedbackCaseCoverageOk: true,
+            generatedAt: "2026-05-05T12:10:00.000Z",
+            checks: [
+              { name: "feedback_regression", ok: true },
+              { name: "production_rag_gate", ok: true, skipped: false },
+            ],
+          },
         },
       },
       {
@@ -1404,7 +1422,16 @@ describe("knowledge feedback routes", () => {
         updatedAt: new Date("2026-05-05T12:09:00.000Z"),
         applyRecord: {
           status: "APPLIED",
-          gateReport: { ok: true, checks: [{ name: "rag_quality_gates", ok: true }] },
+          gateReport: {
+            ok: true,
+            feedbackCaseCount: 3,
+            feedbackCaseCoverageOk: true,
+            generatedAt: "2026-05-05T12:09:00.000Z",
+            checks: [
+              { name: "feedback_regression", ok: true },
+              { name: "production_rag_gate", ok: true, skipped: false },
+            ],
+          },
         },
       },
     ] as never);
@@ -1439,6 +1466,10 @@ describe("knowledge feedback routes", () => {
       rollbackRecommended: false,
       nextSafeAction: "eligible_for_shadow_observation",
       recommendation: "eligible_for_shadow_runtime",
+      feedbackCaseCount: 3,
+      feedbackCaseCoverageOk: true,
+      productionGateRan: true,
+      rollbackReady: true,
     });
     expect(body.data?.[1]).toMatchObject({
       collectionId: "kc_risky",

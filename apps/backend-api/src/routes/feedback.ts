@@ -806,6 +806,11 @@ function buildPromotionGateReport(
       queryHash: adjustment.queryHash,
       activeAdjustmentCount: 0,
       gatePassedCount: 0,
+      feedbackCaseCount: null,
+      feedbackCaseCoverageOk: null,
+      productionGateRan: null,
+      rollbackReady: false,
+      gateReportGeneratedAt: null,
       totalScoreDelta: 0,
       promotionCandidate: false,
       promotionStage: "blocked",
@@ -815,8 +820,28 @@ function buildPromotionGateReport(
       recommendation: "keep_passive" as const,
       adjustmentIds: [] as string[],
     };
+    const strictGatePassed =
+      adjustment.applyRecord.status === "APPLIED" &&
+      gateSummary?.ok === true &&
+      gateSummary.feedbackCaseCoverageOk === true &&
+      gateSummary.productionGateRan === true;
     existing.activeAdjustmentCount += 1;
-    existing.gatePassedCount += adjustment.applyRecord.status === "APPLIED" && gateSummary?.ok === true ? 1 : 0;
+    existing.gatePassedCount += strictGatePassed ? 1 : 0;
+    existing.feedbackCaseCount = Math.max(existing.feedbackCaseCount ?? 0, gateSummary?.feedbackCaseCount ?? 0);
+    existing.feedbackCaseCoverageOk =
+      existing.feedbackCaseCoverageOk === false || gateSummary?.feedbackCaseCoverageOk === false
+        ? false
+        : existing.feedbackCaseCoverageOk === true || gateSummary?.feedbackCaseCoverageOk === true
+          ? true
+          : null;
+    existing.productionGateRan =
+      existing.productionGateRan === false || gateSummary?.productionGateRan === false
+        ? false
+        : existing.productionGateRan === true || gateSummary?.productionGateRan === true
+          ? true
+          : null;
+    existing.gateReportGeneratedAt = gateSummary?.generatedAt ?? existing.gateReportGeneratedAt;
+    existing.rollbackReady = existing.rollbackReady || Boolean(adjustment.id);
     existing.totalScoreDelta = clampPreviewScore(existing.totalScoreDelta + adjustment.scoreDelta);
     existing.adjustmentIds.push(adjustment.id);
     grouped.set(key, existing);
@@ -827,6 +852,9 @@ function buildPromotionGateReport(
     if (!item.collectionId) blockedReasons.add("missing target collection");
     if (!item.queryHash) blockedReasons.add("missing query hash");
     if (item.gatePassedCount !== item.activeAdjustmentCount) blockedReasons.add("not all source apply records passed eval gate");
+    if (item.feedbackCaseCoverageOk !== true) blockedReasons.add("feedback regression coverage missing or incomplete");
+    if (item.productionGateRan !== true) blockedReasons.add("production gate evidence missing");
+    if (!item.rollbackReady) blockedReasons.add("rollback path missing");
     if (item.totalScoreDelta === 0) blockedReasons.add("review-only adjustment has no runtime score effect");
     if (Math.abs(item.totalScoreDelta) > promotionMaxAbsDelta) {
       blockedReasons.add(`score delta exceeds promotion cap ${promotionMaxAbsDelta}`);

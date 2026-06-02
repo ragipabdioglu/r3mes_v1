@@ -11,6 +11,18 @@ vi.mock("./prisma.js", () => ({
   },
 }));
 
+function strictGateReport() {
+  return {
+    ok: true,
+    feedbackCaseCoverageOk: true,
+    feedbackCaseCount: 2,
+    checks: [
+      { name: "feedback_regression", ok: true },
+      { name: "production_rag_gate", ok: true, skipped: false },
+    ],
+  };
+}
+
 describe("feedback shadow runtime", () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -28,7 +40,7 @@ describe("feedback shadow runtime", () => {
         scoreDelta: 0.2,
         applyRecord: {
           status: "APPLIED",
-          gateReport: { ok: true },
+          gateReport: strictGateReport(),
         },
       },
     ] as never);
@@ -71,7 +83,7 @@ describe("feedback shadow runtime", () => {
         scoreDelta: 0.2,
         applyRecord: {
           status: "APPLIED",
-          gateReport: { ok: true },
+          gateReport: strictGateReport(),
         },
       },
     ] as never);
@@ -134,7 +146,7 @@ describe("feedback shadow runtime", () => {
         scoreDelta: 0.5,
         applyRecord: {
           status: "APPLIED",
-          gateReport: { ok: true },
+          gateReport: strictGateReport(),
         },
       },
     ] as never);
