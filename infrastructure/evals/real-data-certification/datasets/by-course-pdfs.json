@@ -24,7 +24,7 @@
     {
       "id": "by-course-smoke",
       "path": "infrastructure/evals/by-course-smoke/golden.jsonl",
-      "status": "planned",
+      "status": "active",
       "modes": ["evidence", "answer", "ui_parity"]
     }
   ],

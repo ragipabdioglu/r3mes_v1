@@ -57,6 +57,7 @@
     "eval:feedback-gate": "node --env-file=.env scripts/run-feedback-eval-gate.mjs",
     "eval:real-data-certification": "node scripts/analyze-real-data-certification.mjs",
     "eval:real-data-manifests": "node scripts/validate-real-data-manifests.mjs",
+    "eval:by-course-smoke": "node --env-file=.env scripts/run-grounded-response-eval.mjs --file infrastructure/evals/by-course-smoke/golden.jsonl --out artifacts/evals/by-course-smoke/latest.json",
     "eval:gp-visual-programming-smoke": "node --env-file=.env scripts/run-grounded-response-eval.mjs --file infrastructure/evals/gp-visual-programming-smoke/golden.jsonl --out artifacts/evals/gp-visual-programming-smoke/latest.json",
     "smoke:feedback-lifecycle": "node --env-file=.env scripts/run-feedback-lifecycle-smoke.mjs",
     "smoke:embedding-provider": "node --env-file=.env scripts/smoke-embedding-provider.mjs",

@@ -274,3 +274,10 @@ of truth; these files are the short working charter read before each task.
 - Activated the G.P manifest suite and corrected G.P/B.Y V2 collection ids in certification manifests.
 - G.P strict smoke is red by design: 0/15 pass, runtime lineage coverage 1.0, reranker fallback ratio 0.733.
 - Main observed blockers: provider/reranker fallback, evidence-only failures for context/source gaps, and answer-quality/template failures.
+
+## Latest Phase 10 Slice 4 Note
+
+- Added `by-course-smoke` 12-case real-data eval suite from the B.Y UI failure probes.
+- Manifest validation now passes fully: 4 datasets, 0 failures, 0 warnings.
+- B.Y strict smoke is red baseline: 1/12 pass, runtime lineage coverage 1.0, reranker fallback ratio 0.75.
+- Main observed blockers: provider fallback, composer/template output, incomplete answers, wrong output format, and two evidence-only failures.
