@@ -6,6 +6,7 @@ import { buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.
 import type { HybridCandidate } from "./hybridRetrieval.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { rerankKnowledgeCardsWithFallback } from "./modelRerank.js";
+import { ensureNoSourceEvidence } from "./noSourceEvidence.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
 import { runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
@@ -205,29 +206,34 @@ export async function retrieveKnowledgeContextQdrant(opts: {
       doNotInfer: card.doNotInfer,
     })),
   });
+  const evidenceOutput = ensureNoSourceEvidence({
+    userQuery: evidenceQuery,
+    evidence: evidenceRun.output,
+    attemptedSourceIds: sources.map((source) => source.documentId),
+  });
 
   const brief =
     getRagContextMode() === "detailed"
-      ? renderEvidenceBrief(evidenceRun.output, { groundingConfidence, lowGroundingConfidence })
-      : evidenceRun.output.usableFacts.length > 0 || evidenceRun.output.notSupported.length > 0
-        ? buildEvidenceGroundedBrief(evidenceRun.output, {
+      ? renderEvidenceBrief(evidenceOutput, { groundingConfidence, lowGroundingConfidence })
+      : evidenceOutput.usableFacts.length > 0 || evidenceOutput.notSupported.length > 0
+        ? buildEvidenceGroundedBrief(evidenceOutput, {
             groundingConfidence,
             lowGroundingConfidence,
-            answerIntent: evidenceRun.output.answerIntent,
+            answerIntent: evidenceOutput.answerIntent,
             sourceRefs: finalCandidates.map(({ chunk }) => ({
               id: chunk.documentId,
               title: chunk.document.title,
             })),
           })
         : buildGroundedBrief(
-            finalCandidates.map(({ card }) => card),
-            {
-              groundingConfidence,
-              lowGroundingConfidence,
-              answerIntent: evidenceRun.output.answerIntent,
-              sourceRefs: finalCandidates.map(({ chunk }) => ({
-                id: chunk.documentId,
-                title: chunk.document.title,
+          finalCandidates.map(({ card }) => card),
+          {
+            groundingConfidence,
+            lowGroundingConfidence,
+            answerIntent: evidenceOutput.answerIntent,
+            sourceRefs: finalCandidates.map(({ chunk }) => ({
+              id: chunk.documentId,
+              title: chunk.document.title,
               })),
             },
           );
@@ -240,6 +246,6 @@ export async function retrieveKnowledgeContextQdrant(opts: {
     sources,
     lowGroundingConfidence,
     groundingConfidence,
-    evidence: evidenceRun.output,
+    evidence: evidenceOutput,
   };
 }

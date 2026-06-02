@@ -6,6 +6,7 @@ import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { tokenizeKnowledgeText } from "./knowledgeEmbedding.js";
 import { parseKnowledgeCard } from "./knowledgeCard.js";
 import { rerankKnowledgeCardsWithFallback } from "./modelRerank.js";
+import { ensureNoSourceEvidence } from "./noSourceEvidence.js";
 import { prisma } from "./prisma.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
 import { runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
@@ -235,9 +236,14 @@ export async function retrieveKnowledgeContext(opts: {
       doNotInfer: card.doNotInfer,
     })),
   });
+  const evidenceOutput = ensureNoSourceEvidence({
+    userQuery: evidenceQuery,
+    evidence: evidenceRun.output,
+    attemptedSourceIds: sources.map((source) => source.documentId),
+  });
   const brief =
     getRagContextMode() === "detailed"
-      ? renderEvidenceBrief(evidenceRun.output, { lowGroundingConfidence, groundingConfidence })
+      ? renderEvidenceBrief(evidenceOutput, { lowGroundingConfidence, groundingConfidence })
       : buildGroundedBrief(
           finalCandidates.map(({ card }) => card),
           {
@@ -259,5 +265,5 @@ export async function retrieveKnowledgeContext(opts: {
     .join("\n\n");
 
   const contextText = [brief, sourceHints].filter(Boolean).join("\n\n");
-  return { contextText, sources, lowGroundingConfidence, groundingConfidence, evidence: evidenceRun.output };
+  return { contextText, sources, lowGroundingConfidence, groundingConfidence, evidence: evidenceOutput };
 }

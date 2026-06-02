@@ -14,6 +14,7 @@ import { buildCompiledEvidenceBrief, buildEvidenceGroundedBrief, buildGroundedBr
 import { rankHybridCandidates } from "./hybridRetrieval.js";
 import { parseKnowledgeCard, type KnowledgeCard } from "./knowledgeCard.js";
 import { normalizeConceptText } from "./conceptNormalizer.js";
+import { ensureNoSourceEvidence } from "./noSourceEvidence.js";
 import { rerankKnowledgeCardsWithDiagnostics, type RerankDiagnostics } from "./modelRerank.js";
 import { prisma } from "./prisma.js";
 import {
@@ -70,6 +71,46 @@ interface AlignableKnowledgeCandidate {
   vectorScore?: number;
   embeddingScore?: number;
   preRankScore?: number;
+}
+
+function buildNoSourceEvidenceDiagnostics(input: {
+  userQuery: string;
+  groundingConfidence?: GroundingConfidence;
+  attemptedSourceIds?: string[];
+}): { evidence: EvidenceExtractorOutput; compiledEvidence: CompiledEvidence } {
+  const evidence = ensureNoSourceEvidence({
+    userQuery: input.userQuery,
+    attemptedSourceIds: input.attemptedSourceIds,
+    evidence: {
+      answerIntent: "unknown",
+      intentResolution: {
+        intent: "unknown",
+        primarySignal: "no_source",
+        confidence: "high",
+        scores: { no_source: 1 },
+        weakIntent: "unknown",
+        reasons: ["no retrieval candidates reached evidence extraction"],
+      },
+      directAnswerFacts: [],
+      supportingContext: [],
+      riskFacts: [],
+      notSupported: [],
+      usableFacts: [],
+      uncertainOrUnusable: [],
+      redFlags: [],
+      sourceIds: [],
+      missingInfo: [],
+      structuredFacts: [],
+    },
+  });
+  return {
+    evidence,
+    compiledEvidence: compileEvidence({
+      evidence,
+      sourceRefs: [],
+      groundingConfidence: input.groundingConfidence ?? "low",
+    }),
+  };
 }
 
 export interface EvidencePruningDiagnostics {
@@ -1501,12 +1542,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   const budgetMode = opts.budgetMode ?? "normal_rag";
   const evidenceDemand = opts.retrievalPlan?.evidenceDemand;
   if (accessibleCollectionIds.length === 0) {
+    const noSource = buildNoSourceEvidenceDiagnostics({ userQuery: evidenceQuery });
     return {
       contextText: "",
       sources: [],
       lowGroundingConfidence: true,
       groundingConfidence: "low",
-      evidence: null,
+      evidence: noSource.evidence,
+      compiledEvidence: noSource.compiledEvidence,
       diagnostics: {
         qdrantCandidateCount: 0,
         prismaCandidateCount: 0,
@@ -1531,12 +1574,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
 
   const identifierPreflight = await explicitIdentifierPreflight(evidenceQuery, accessibleCollectionIds);
   if (identifierPreflight === "missing") {
+    const noSource = buildNoSourceEvidenceDiagnostics({ userQuery: evidenceQuery });
     return {
       contextText: "",
       sources: [],
       lowGroundingConfidence: true,
       groundingConfidence: "low",
-      evidence: null,
+      evidence: noSource.evidence,
+      compiledEvidence: noSource.compiledEvidence,
       diagnostics: {
         qdrantCandidateCount: 0,
         prismaCandidateCount: 0,
@@ -1611,12 +1656,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     evidenceDemand,
   );
   if (strictRouteScope && deduped.length === 0) {
+    const noSource = buildNoSourceEvidenceDiagnostics({ userQuery: evidenceQuery });
     return {
       contextText: "",
       sources: [],
       lowGroundingConfidence: true,
       groundingConfidence: "low",
-      evidence: null,
+      evidence: noSource.evidence,
+      compiledEvidence: noSource.compiledEvidence,
       diagnostics: {
         qdrantCandidateCount: qdrantCandidates.length,
         prismaCandidateCount: prismaCandidates.length,
@@ -1650,12 +1697,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   });
   const candidatesForRerank = prioritizeCriticalEvidenceCandidates(evidenceQuery, alignedPreRanked.candidates);
   if (alignedPreRanked.diagnostics.fastFailed) {
+    const noSource = buildNoSourceEvidenceDiagnostics({ userQuery: evidenceQuery });
     return {
       contextText: "",
       sources: [],
       lowGroundingConfidence: true,
       groundingConfidence: "low",
-      evidence: null,
+      evidence: noSource.evidence,
+      compiledEvidence: noSource.compiledEvidence,
       diagnostics: {
         qdrantCandidateCount: qdrantCandidates.length,
         prismaCandidateCount: prismaCandidates.length,
@@ -1687,12 +1736,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     deduped.some((candidate) => candidateHasExplicitIdentifierSignal(candidate)) &&
     preRanked.length === 0;
   if (identifierScopedNoMatch) {
+    const noSource = buildNoSourceEvidenceDiagnostics({ userQuery: evidenceQuery });
     return {
       contextText: "",
       sources: [],
       lowGroundingConfidence: true,
       groundingConfidence: "low",
-      evidence: null,
+      evidence: noSource.evidence,
+      compiledEvidence: noSource.compiledEvidence,
       diagnostics: {
         qdrantCandidateCount: qdrantCandidates.length,
         prismaCandidateCount: prismaCandidates.length,
@@ -1723,12 +1774,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     };
   }
   if (strictRouteScope && preRanked.length === 0) {
+    const noSource = buildNoSourceEvidenceDiagnostics({ userQuery: evidenceQuery });
     return {
       contextText: "",
       sources: [],
       lowGroundingConfidence: true,
       groundingConfidence: "low",
-      evidence: null,
+      evidence: noSource.evidence,
+      compiledEvidence: noSource.compiledEvidence,
       diagnostics: {
         qdrantCandidateCount: qdrantCandidates.length,
         prismaCandidateCount: prismaCandidates.length,
@@ -1825,12 +1878,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       (getAlignmentConfig().fastFailEnabled && accepted.length > 0 && finalCandidates.length === 0),
   };
   if (finalAlignmentDiagnostics.fastFailed && finalCandidates.length === 0) {
+    const noSource = buildNoSourceEvidenceDiagnostics({ userQuery: evidenceQuery });
     return {
       contextText: "",
       sources: [],
       lowGroundingConfidence: true,
       groundingConfidence: "low",
-      evidence: null,
+      evidence: noSource.evidence,
+      compiledEvidence: noSource.compiledEvidence,
       diagnostics: {
         qdrantCandidateCount: qdrantCandidates.length,
         prismaCandidateCount: prismaCandidates.length,
@@ -1914,10 +1969,15 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     userQuery: evidenceQuery,
     cards: evidenceCards,
   });
-  const filteredSources = filterSourcesByEvidence(sources, evidenceRun.output);
+  const evidenceOutput = ensureNoSourceEvidence({
+    userQuery: evidenceQuery,
+    evidence: evidenceRun.output,
+    attemptedSourceIds: sources.map((source) => source.documentId),
+  });
+  const filteredSources = filterSourcesByEvidence(sources, evidenceOutput);
   const sourceRefs = filteredSources.map((source) => ({ id: source.documentId, title: source.title }));
   const compiledEvidence = compileEvidence({
-    evidence: evidenceRun.output,
+    evidence: evidenceOutput,
     sourceRefs,
     groundingConfidence,
   });
@@ -1929,7 +1989,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     responseGroundingConfidence === compiledEvidence.confidence
       ? compiledEvidence
       : { ...compiledEvidence, confidence: responseGroundingConfidence };
-  if (evidenceHasOnlyScopeExclusion(evidenceRun.output) || !hasCompiledUsableGrounding(responseCompiledEvidence)) {
+  if (evidenceHasOnlyScopeExclusion(evidenceOutput) || !hasCompiledUsableGrounding(responseCompiledEvidence)) {
     const scopedOutAlignmentDiagnostics = {
       ...finalAlignmentDiagnostics,
       droppedCandidateCount: finalAlignmentDiagnostics.droppedCandidateCount + finalCandidates.length,
@@ -1940,7 +2000,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       sources: [],
       lowGroundingConfidence: true,
       groundingConfidence: "low",
-      evidence: evidenceRun.output,
+      evidence: evidenceOutput,
       compiledEvidence: responseCompiledEvidence,
       diagnostics: {
         qdrantCandidateCount: qdrantCandidates.length,
@@ -1961,7 +2021,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
           evidenceFactCandidateCount,
           evidenceFactSelectedCount,
           evidenceFactDroppedCount,
-          evidence: evidenceRun.output,
+          evidence: evidenceOutput,
         }),
         qdrantEmbedding: qdrantEmbeddingDiagnostics,
         deduplication: deduplicationResult.diagnostics,
@@ -1975,7 +2035,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   const responseLowGroundingConfidence = responseGroundingConfidence === "low";
   const brief =
     getRagContextMode() === "detailed"
-      ? renderDetailedEvidenceBrief(evidenceRun.output, {
+      ? renderDetailedEvidenceBrief(evidenceOutput, {
           groundingConfidence: responseGroundingConfidence,
           lowGroundingConfidence: responseLowGroundingConfidence,
         })
@@ -1983,14 +2043,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         ? buildCompiledEvidenceBrief(responseCompiledEvidence, {
             groundingConfidence: responseCompiledEvidence.confidence,
             lowGroundingConfidence: responseLowGroundingConfidence,
-            answerIntent: evidenceRun.output.answerIntent,
+            answerIntent: evidenceOutput.answerIntent,
             sourceRefs,
           })
-        : evidenceRun.output.usableFacts.length > 0 || evidenceRun.output.notSupported.length > 0
-        ? buildEvidenceGroundedBrief(evidenceRun.output, {
+        : evidenceOutput.usableFacts.length > 0 || evidenceOutput.notSupported.length > 0
+        ? buildEvidenceGroundedBrief(evidenceOutput, {
             groundingConfidence,
             lowGroundingConfidence,
-            answerIntent: evidenceRun.output.answerIntent,
+            answerIntent: evidenceOutput.answerIntent,
             sourceRefs,
           })
         : buildGroundedBrief(
@@ -1998,7 +2058,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
             {
               groundingConfidence,
               lowGroundingConfidence,
-              answerIntent: evidenceRun.output.answerIntent,
+              answerIntent: evidenceOutput.answerIntent,
               sourceRefs,
             },
           );
@@ -2009,7 +2069,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     sources: filteredSources,
     lowGroundingConfidence: responseLowGroundingConfidence,
     groundingConfidence: responseGroundingConfidence,
-    evidence: evidenceRun.output,
+    evidence: evidenceOutput,
     compiledEvidence: responseCompiledEvidence,
     diagnostics: {
       qdrantCandidateCount: qdrantCandidates.length,
@@ -2031,7 +2091,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         evidenceFactCandidateCount,
         evidenceFactSelectedCount,
         evidenceFactDroppedCount,
-        evidence: evidenceRun.output,
+        evidence: evidenceOutput,
       }),
       qdrantEmbedding: qdrantEmbeddingDiagnostics,
       deduplication: deduplicationResult.diagnostics,

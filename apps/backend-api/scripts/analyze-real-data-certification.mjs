@@ -149,6 +149,7 @@ function classifyOwnerPhase(blocker) {
   const failures = asArray(blocker.failures).join(" ").toLowerCase();
   const classes = asArray(blocker.classes);
   const subtypes = asArray(blocker.subtypes);
+  const diagnosisClasses = asArray(blocker.phaseDiagnosis?.classes);
   const suite = String(blocker.suite ?? "");
   const id = String(blocker.id ?? "");
   const bucket = String(blocker.bucket ?? "");
@@ -190,6 +191,23 @@ function classifyOwnerPhase(blocker) {
       ownerPhase: "Phase 7 - Full Answer Intelligence",
       layerFamily: "safety-presentation",
       nextAction: "Separate evidence-supported answer from deterministic safety/presentation rewrite; do not relax safety blindly.",
+    };
+  }
+
+  if (diagnosisClasses.includes("composer_or_model_generation_failure")) {
+    return {
+      ownerPhase: "Phase 7 - Full Answer Intelligence",
+      layerFamily: "answer-presentation",
+      nextAction: "Evidence-only passed; inspect AnswerPlan/composer/model presentation before changing retrieval or evidence extraction.",
+    };
+  }
+
+  if (diagnosisClasses.includes("retrieval_or_evidence_failure")) {
+    const kapOrTable = /kap|table|cash|share|withholding|dividend/i.test(`${suite} ${id} ${bucket}`);
+    return {
+      ownerPhase: "Phase 6 - Full Evidence Intelligence",
+      layerFamily: kapOrTable ? "structured-evidence-table" : "context-evidence-coverage",
+      nextAction: "Evidence-only failed; inspect source selection, artifact readiness, selected facts, and required context coverage.",
     };
   }
 
@@ -281,6 +299,18 @@ const WORK_PACKAGE_DEFINITIONS = {
       "answer-quality and UI reality should remain public/debug clean",
     ],
     scope: "Fix cases where evidence is sufficient but deterministic safety/presentation/composer output is poor.",
+  },
+  "answer-presentation": {
+    id: "wp-answer-presentation",
+    title: "Answer presentation/composer closure",
+    priority: 5,
+    ownerPhase: "Phase 7 - Full Answer Intelligence",
+    acceptanceGates: [
+      "evidence-only pass plus answer-quality fail cases must be separated from evidence backlog",
+      "AnswerPlan/composer diagnostics must explain missing concepts after sufficient evidence",
+      "real-data smoke answer-quality blockers should decrease without changing retrieval or evidence scoring",
+    ],
+    scope: "Fix cases where sufficient evidence reaches the answer layer but final answer format, completeness, or wording fails.",
   },
   "certification-triage": {
     id: "wp-certification-triage",
