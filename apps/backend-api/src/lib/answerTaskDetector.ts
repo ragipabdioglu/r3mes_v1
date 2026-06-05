@@ -120,7 +120,7 @@ function detectTask(normalizedQuery: string, requestedFields: RequestedField[]):
     reasons.push("compare_language");
     return { taskType: "compare_concepts", answerIntent: "compare", reasons };
   }
-  if (hasAny(normalizedQuery, [/\b(nelerdir|neler|ozellikleri|özellikleri|bilesenleri|bileşenleri|maddeleri|adimlari|adımları|sirala|sırala|5v)\b/u])) {
+  if (hasAny(normalizedQuery, [/\b(nelerdir|neler|cesitleri|çeşitleri|turleri|türleri|tipleri|ozellikleri|özellikleri|bilesenleri|bileşenleri|maddeleri|madde\s+madde|adimlari|adımları|sirala|sırala|5v)\b/u])) {
     reasons.push("list_language");
     return { taskType: "list_items", answerIntent: "explain", reasons };
   }

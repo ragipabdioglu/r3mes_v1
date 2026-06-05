@@ -201,6 +201,13 @@ describe("queryUnderstanding", () => {
       sourceOnly: true,
       requestedFields: [],
     });
+
+    const categoryList = buildQueryUnderstanding("Varsayılan seçenek çeşitlerini madde madde yaz.");
+    expect(categoryList.answerTask.taskType).toBe("list_items");
+    expect(categoryList.queryContract).toMatchObject({
+      operation: "list",
+      outputFormat: "bullets",
+    });
   });
 
   it("keeps conversation turns backward-compatible while emitting a no-evidence contract", () => {

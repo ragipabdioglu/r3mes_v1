@@ -13,6 +13,19 @@ describe("detectAnswerTask", () => {
     expect(task.outputConstraints.forbidCaution).toBe(true);
   });
 
+  it("detects generic type/category list wording without data-specific literals", () => {
+    const variants = [
+      "Varsayılan proje çeşitlerini madde madde yaz.",
+      "Kaynakta geçen dosya türleri nelerdir?",
+    ].map((query) => detectAnswerTask(query));
+
+    for (const task of variants) {
+      expect(task.taskType).toBe("list_items");
+      expect(task.answerIntent).toBe("explain");
+    }
+    expect(variants[0]?.outputConstraints.format).toBe("bullets");
+  });
+
   it("detects comparison tasks and source-grounded constraints", () => {
     const task = detectAnswerTask("IoT cihazı ile akıllı cihaz aynı şey mi? Kaynağa göre farkını açıkla.");
 
