@@ -618,6 +618,45 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("Dikkat");
   });
 
+  it("keeps multiple comparison subjects visible from comma and conjunction wording", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "general",
+      answerIntent: "compare",
+      groundingConfidence: "high",
+      userQuery: "Alpha, Beta ve Gamma arasındaki temel fark nedir?",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment: "Beta kullanıcı etkileşimini, Gamma ise dağıtık sahipliği öne çıkarır.",
+      action: "Karşılaştırma kaynakta verilen kontrol ve sahiplik ayrımıyla sınırlı tutulmalıdır.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Temel fark kontrolün kimde olduğu ve etkileşim biçimidir.",
+      unknowns: [],
+      sourceIds: ["generic-source"],
+      facts: ["Beta kullanıcı etkileşimini, Gamma ise dağıtık sahipliği öne çıkarır."],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Alpha");
+    expect(rendered).toContain("Beta");
+    expect(rendered).toContain("Gamma");
+    expect(rendered).not.toContain("Dikkat");
+  });
+
   it("composePlannedAnswer renders selected structured facts before generic safety prose", () => {
     const answerSpec: AnswerSpec = {
       answerDomain: "finance",

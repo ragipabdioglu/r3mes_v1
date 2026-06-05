@@ -142,8 +142,20 @@ function cleanComparisonSubject(value: string): string {
     .trim();
 }
 
+function splitComparisonSubjects(value: string): string[] {
+  return value
+    .split(/\s*(?:,|;|\s+ile\s+|\s+ve\s+)\s*/iu)
+    .map(cleanComparisonSubject)
+    .filter((part) => part.length >= 2 && part.split(/\s+/u).length <= 5)
+    .slice(0, 4);
+}
+
 function extractComparisonSubjectLabel(query: string): string | null {
   const normalized = query.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  const multiSubjectMatch = normalized.match(/^(.{2,160}?)\s+aras[ıi]ndaki\s+(?:temel\s+)?fark/iu);
+  const multiSubjects = splitComparisonSubjects(multiSubjectMatch?.[1] ?? "");
+  if (multiSubjects.length >= 2) return multiSubjects.join(", ");
+
   const patterns = [
     /^(.{2,80}?)\s+(?:ile|ve)\s+(.{2,80}?)\s+aras[ıi]ndaki\s+fark/iu,
     /^(.{2,80}?)\s+(?:ile|ve)\s+(.{2,80}?)\s+fark[ıi]/iu,
@@ -161,9 +173,9 @@ function extractComparisonSubjectLabel(query: string): string | null {
 function ensureComparisonSubjectsVisible(query: string, answer: string): string {
   const label = extractComparisonSubjectLabel(query);
   if (!label) return answer;
-  const [left, right] = label.split(/\s+ile\s+/u);
+  const subjects = splitComparisonSubjects(label);
   const normalizedAnswer = compactForCompare(answer);
-  if (left && right && normalizedAnswer.includes(compactForCompare(left)) && normalizedAnswer.includes(compactForCompare(right))) {
+  if (subjects.length >= 2 && subjects.every((subject) => normalizedAnswer.includes(compactForCompare(subject)))) {
     return answer;
   }
   return `${label}: ${answer}`;
