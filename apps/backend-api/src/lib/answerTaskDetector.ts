@@ -57,12 +57,14 @@ function hasAny(normalizedQuery: string, patterns: RegExp[]): boolean {
 function detectOutputFormat(normalizedQuery: string): AnswerOutputFormat {
   if (/\b(madde\w*|maddeli|bullet|liste\w*|sirala|sırala)\b/u.test(normalizedQuery)) return "bullets";
   if (/\b(tablo|table)\b/u.test(normalizedQuery)) return "table";
+  if (/\bne\s+zaman\b/u.test(normalizedQuery)) return "short";
   if (/\b(kisa|kısa|tek cumle|tek cümle|sadece|ozet|özet)\b/u.test(normalizedQuery)) return "short";
   return "freeform";
 }
 
 function detectMaxWords(normalizedQuery: string, format: AnswerOutputFormat): number | undefined {
   if (/\btek cumle|tek cümle\b/u.test(normalizedQuery)) return 32;
+  if (/\bne\s+zaman\b/u.test(normalizedQuery)) return 45;
   if (/\ben fazla\s+(\d+)\s+(?:kelime|word)\b/u.test(normalizedQuery)) {
     const match = normalizedQuery.match(/\ben fazla\s+(\d+)\s+(?:kelime|word)\b/u);
     const value = Number(match?.[1]);
@@ -131,6 +133,11 @@ function detectTask(normalizedQuery: string, requestedFields: RequestedField[]):
   if (hasAny(normalizedQuery, [/\b(gorusler|görüşler|genel gorus|genel görüş|ne yonde|ne yönde|yorumlari|yorumları)\b/u])) {
     reasons.push("opinion_summary_language");
     return { taskType: "summarize_opinions", answerIntent: "explain", reasons };
+  }
+  const asksSafetyTriageTiming = /\b(?:doktor|doktora|uzman|acil|başvur|basvur|başvurmalı|basvurmali)\b/u.test(normalizedQuery);
+  if (!asksSafetyTriageTiming && hasAny(normalizedQuery, [/\bne\s+zaman\b/u, /\b(?:calisir|çalışır|gerceklesir|gerçekleşir)\b/u])) {
+    reasons.push("timing_language");
+    return { taskType: "source_grounded_explain", answerIntent: "explain", reasons };
   }
   if (hasAny(normalizedQuery, [
     /\b(kod|code|metot|method|fonksiyon|function|event|olay|handler|click|selectedindexchanged)\b/u,

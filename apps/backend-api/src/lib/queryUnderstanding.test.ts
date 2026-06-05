@@ -208,6 +208,13 @@ describe("queryUnderstanding", () => {
       operation: "list",
       outputFormat: "bullets",
     });
+
+    const timing = buildQueryUnderstanding("Bir olay ne zaman çalışır?");
+    expect(timing.answerTask.taskType).toBe("source_grounded_explain");
+    expect(timing.queryContract).toMatchObject({
+      operation: "explain_with_sources",
+      outputFormat: "short",
+    });
   });
 
   it("keeps conversation turns backward-compatible while emitting a no-evidence contract", () => {

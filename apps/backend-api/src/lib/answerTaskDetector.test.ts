@@ -26,6 +26,22 @@ describe("detectAnswerTask", () => {
     expect(variants[0]?.outputConstraints.format).toBe("bullets");
   });
 
+  it("detects generic timing questions as concise source-grounded explanations", () => {
+    const task = detectAnswerTask("Bir olay ne zaman çalışır?");
+
+    expect(task.taskType).toBe("source_grounded_explain");
+    expect(task.answerIntent).toBe("explain");
+    expect(task.outputConstraints.maxWords).toBe(45);
+    expect(task.diagnostics.taskReasons).toContain("timing_language");
+  });
+
+  it("keeps safety-triage timing questions out of generic timing detection", () => {
+    const task = detectAnswerTask("Ne zaman doktora başvurmalı?");
+
+    expect(task.taskType).not.toBe("source_grounded_explain");
+    expect(task.diagnostics.taskReasons).not.toContain("timing_language");
+  });
+
   it("detects comparison tasks and source-grounded constraints", () => {
     const task = detectAnswerTask("IoT cihazı ile akıllı cihaz aynı şey mi? Kaynağa göre farkını açıkla.");
 
