@@ -77,6 +77,55 @@ describe("buildAnswerPlan", () => {
     expect(plan.requiresModelSynthesis).toBe(false);
   });
 
+  it("uses bullet output for list tasks even when the user does not explicitly say bullets", () => {
+    const plan = buildAnswerPlan(baseSpec({
+      userQuery: "Sistemin temel bileşenleri nelerdir?",
+      structuredFacts: [],
+      facts: ["Bir sistemin bileşenleri kaynakta listelenmiştir."],
+    }));
+
+    expect(plan.taskType).toBe("list_items");
+    expect(plan.outputFormat).toBe("bullets");
+    expect(plan.constraints.format).toBe("freeform");
+  });
+
+  it("treats query-contract freeform as unspecified for list tasks", () => {
+    const queryContract: QueryContract = {
+      operation: "list",
+      requiredEvidenceType: "list",
+      outputFormat: "freeform",
+      outputConstraints: {
+        forbidCaution: false,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+        format: "freeform",
+      },
+      sourceOnly: true,
+      requestedFields: [],
+      forbiddenAdditions: [],
+      queryQuality: {
+        shape: "normal",
+        confidence: "medium",
+        warnings: [],
+      },
+      diagnostics: {
+        detector: "query-contract-v1",
+        matchedTerms: ["nelerdir"],
+        missingSignals: [],
+      },
+    };
+
+    const plan = buildAnswerPlan(baseSpec({
+      userQuery: "Sistemin temel bileşenleri nelerdir?",
+      structuredFacts: [],
+      facts: ["Bir sistemin bileşenleri kaynakta listelenmiştir."],
+    }), { queryContract });
+
+    expect(plan.taskType).toBe("list_items");
+    expect(plan.outputFormat).toBe("bullets");
+    expect(plan.constraints.format).toBe("freeform");
+  });
+
   it("aligns with an explicit QueryContract without changing legacy callers", () => {
     const queryContract: QueryContract = {
       operation: "extract_fields",

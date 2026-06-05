@@ -418,6 +418,65 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("Dikkat");
   });
 
+  it("renders definition tasks as concise source-grounded definitions", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "technical",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Sistem bileşeni nedir? Kaynağa göre kısa açıkla.",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment:
+        "Sistem bileşeni; bir sistemin çalışması için veri toplama, işleme, saklama ve çıktı üretme gibi görevlerden birini üstlenen parçadır. Bu konu daha uzun örneklerle açıklanır.",
+      action:
+        "Bu tanımı kullanırken kaynakta belirtilmeyen ek risk, tavsiye veya uygulama adımı eklenmemelidir.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary:
+        "Sistem bileşenleri birlikte çalışarak sistem davranışını oluşturur ve farklı görevleri paylaşır.",
+      unknowns: [],
+      sourceIds: ["generic-source"],
+      facts: [
+        "Sistem bileşeni; bir sistemin çalışması için belirli bir görevi üstlenen parçadır.",
+      ],
+    });
+
+    expect(rendered).toContain("Sistem bileşeni");
+    expect(rendered).not.toContain("Dikkat");
+    expect(rendered).not.toContain("Bu konu daha uzun örneklerle");
+    expect(rendered.split(/\s+/u).filter(Boolean).length).toBeLessThanOrEqual(36);
+  });
+
+  it("renders typed list evidence as concise bullets without repeating long source prose", () => {
+    const rendered = composeAnswerSpec({
+      answerDomain: "general",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Sistemin temel bileşenleri nelerdir?",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment:
+        "Bir sistemin temel bileşenleri başlığı altında sensörlerden başlayan uzun bir açıklama, örnekler ve kapanış notlarıyla birlikte anlatılır.",
+      action: "Kaynakta listelenen maddeler kısa yazılmalıdır.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Bileşenler kaynakta madde madde verilmiştir.",
+      unknowns: [],
+      sourceIds: ["generic-list-source"],
+      facts: [
+        "Algılama: Ortamdan veri toplar ve bu açıklama örneklerle, notlarla, uzun kaynak bağlamıyla gereksiz şekilde devam eder.",
+        "Bağlantı: Veriyi merkeze iletir.",
+        "İşleme: Gelen veriyi analiz eder.",
+        "Arayüz: Sonucu kullanıcıya gösterir.",
+      ],
+    });
+
+    expect(rendered).toContain("- Algılama:");
+    expect(rendered).toContain("- Bağlantı:");
+    expect(rendered).toContain("- İşleme:");
+    expect(rendered).toContain("- Arayüz:");
+    expect(rendered).not.toContain("Dikkat");
+    expect(rendered.split(/\s+/u).length).toBeLessThanOrEqual(90);
+  });
+
   it("uses source-grounded compare composition without adding unrelated caution", () => {
     const rendered = composeAnswerSpec({
       answerDomain: "general",
@@ -506,6 +565,50 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).toContain("- Olağanüstü Yedekler: 3.352.908.083");
     expect(rendered).not.toContain("Dikkat");
     expect(rendered).not.toContain("risk koşulu");
+  });
+
+  it("composePlannedAnswer uses the provided answer plan for concise definition rendering", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "general",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Sistem bileşeni nedir? Kaynağa göre kısa açıkla.",
+      tone: "direct",
+      sections: ["assessment", "action", "summary"],
+      assessment:
+        "Sistem bileşeni; bir sistemin çalışması için veri toplama, işleme, saklama ve çıktı üretme gibi görevlerden birini üstlenen parçadır. Kaynak bunu uzun örneklerle sürdürüyor.",
+      action:
+        "Bu tanımı kullanırken kaynakta belirtilmeyen ek risk, tavsiye veya uygulama adımı eklenmemelidir.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary:
+        "Sistem bileşenleri birlikte çalışarak sistem davranışını oluşturur ve farklı görevleri paylaşır.",
+      unknowns: [],
+      sourceIds: ["generic-source"],
+      facts: [
+        "Sistem bileşeni; bir sistemin çalışması için belirli bir görevi üstlenen parçadır.",
+      ],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: 1,
+      }),
+      constraints: {
+        maxWords: 50,
+        forbidCaution: false,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Sistem bileşeni");
+    expect(rendered).not.toContain("Dikkat");
+    expect(rendered).not.toContain("Kaynak bunu uzun örneklerle");
+    expect(rendered.split(/\s+/u).filter(Boolean).length).toBeLessThanOrEqual(36);
   });
 
   it("composePlannedAnswer renders partial field extraction from text facts before missing-field fallback", () => {

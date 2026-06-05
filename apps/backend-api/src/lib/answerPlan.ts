@@ -143,12 +143,17 @@ function taskTypeFromContract(queryContract: QueryContract): AnswerTaskType | "g
   }
 }
 
+function outputFormatFromTask(taskType: AnswerPlan["taskType"], format: AnswerPlanFormat): AnswerPlanFormat {
+  if (format !== "freeform") return format;
+  if (taskType === "list_items") return "bullets";
+  return format;
+}
+
 export function buildAnswerPlan(spec: AnswerSpec, opts: BuildAnswerPlanOptions = {}): AnswerPlan {
   const taskDetection = detectAnswerTask(spec.userQuery);
   const detection = taskDetection.requestedFieldDetection;
   const requestedFields = opts.queryContract ? requestedFieldsFromContract(opts.queryContract) : detection.requestedFields;
   const outputConstraints = opts.queryContract?.outputConstraints ?? taskDetection.outputConstraints;
-  const outputFormat = opts.queryContract?.outputFormat ?? outputConstraints.format;
   const contractTaskType = opts.queryContract ? taskTypeFromContract(opts.queryContract) : null;
   const selectedFacts = selectFactsForFields(spec.structuredFacts ?? [], requestedFields);
   const missingFieldIds = requestedFields
@@ -158,6 +163,8 @@ export function buildAnswerPlan(spec: AnswerSpec, opts: BuildAnswerPlanOptions =
     contractTaskType ?? (requestedFields.length > 0 ? "field_extraction" :
       taskDetection.taskType === "unknown" ? "grounded_summary" :
         taskDetection.taskType);
+  const contractOutputFormat = opts.queryContract?.outputFormat;
+  const outputFormat = outputFormatFromTask(taskType, contractOutputFormat ?? outputConstraints.format);
   const coverage = coverageFor(requestedFields, selectedFacts, missingFieldIds);
 
   return {

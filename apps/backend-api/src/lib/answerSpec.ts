@@ -2,9 +2,10 @@ import type { AnswerDomain, AnswerIntent, GroundedMedicalAnswer, GroundingConfid
 import type { CompiledEvidence } from "./compiledEvidence.js";
 import { getDecisionConfig } from "./decisionConfig.js";
 import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
-import { detectAnswerTask } from "./answerTaskDetector.js";
+import { detectAnswerTask, type AnswerTaskType } from "./answerTaskDetector.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 import type { StructuredFact } from "./structuredFact.js";
+import type { EvidenceBundle, EvidenceItemKind } from "./evidenceBundle.js";
 
 export interface AnswerSpec {
   answerDomain: AnswerDomain;
@@ -23,8 +24,26 @@ export interface AnswerSpec {
   structuredFacts?: StructuredFact[];
 }
 
+function looksLikeSourcePrefix(prefix: string): boolean {
+  const trimmed = prefix.trim();
+  if (!trimmed) return false;
+  const normalized = trimmed.toLocaleLowerCase("tr-TR");
+  if (trimmed.length > 40) return true;
+  if (/^[a-z0-9_.-]{3,80}$/u.test(trimmed)) return true;
+  if (/(?:__|\.pdf|\.docx|\.pptx|\.md|\.txt)\b/iu.test(trimmed)) return true;
+  if (/\b(?:hafta|week)\s*\d{1,2}\b/u.test(normalized)) return true;
+  if (["rehber", "kart", "notu", "belge", "doküman", "dokuman", "document", "source", "doc"].some((token) => normalized.includes(token))) return true;
+  const letters = trimmed.match(/\p{L}/gu) ?? [];
+  const uppercaseLetters = trimmed.match(/\p{Lu}/gu) ?? [];
+  return letters.length >= 6 && uppercaseLetters.length / letters.length > 0.85;
+}
+
 function stripSourcePrefix(value: string): string {
-  return value.replace(/^[^:]{1,120}:\s*/, "").trim();
+  const match = value.match(/^\s*([^:]{1,120}):\s*(.+)$/u);
+  if (!match) return value.trim();
+  const prefix = match[1] ?? "";
+  const rest = match[2] ?? "";
+  return looksLikeSourcePrefix(prefix) ? rest.trim() : value.trim();
 }
 
 function stripDocumentScaffold(value: string): string {
@@ -62,6 +81,34 @@ function cleanValues(values: string[] | undefined): string[] {
     out.push(value);
   }
   return out;
+}
+
+function evidenceKindsForTask(taskType: AnswerTaskType | "grounded_summary"): EvidenceItemKind[] {
+  switch (taskType) {
+    case "definition":
+      return ["definition"];
+    case "list_items":
+      return ["list_item"];
+    case "compare_concepts":
+      return ["comparison_point"];
+    case "procedure":
+      return ["procedure_step"];
+    default:
+      return [];
+  }
+}
+
+function factsFromEvidenceBundle(
+  bundle: EvidenceBundle | undefined,
+  taskType: AnswerTaskType | "grounded_summary",
+): string[] {
+  const kinds = new Set(evidenceKindsForTask(taskType));
+  if (kinds.size === 0) return [];
+  return cleanValues(
+    bundle?.items
+      .filter((item) => kinds.has(item.kind))
+      .map((item) => item.quote),
+  );
 }
 
 function normalizeForFactMatch(value: string): string {
@@ -375,9 +422,15 @@ export function buildAnswerSpec(opts: {
   const compiledContradictions = cleanValues(opts.compiledEvidence?.contradictions);
   const evidenceDirectFacts = cleanValues(opts.evidence?.directAnswerFacts);
   const evidenceUsableFacts = cleanValues(opts.evidence?.usableFacts);
-  const directFacts = prioritizeFacts(evidenceDirectFacts.length > 0 ? evidenceDirectFacts : compiledFacts, opts.userQuery);
+  const taskDetection = detectAnswerTask(opts.userQuery);
+  const taskTypedFacts = factsFromEvidenceBundle(opts.evidence?.evidenceBundle, taskDetection.taskType);
+  const directFacts = taskTypedFacts.length > 0
+    ? taskTypedFacts
+    : prioritizeFacts(evidenceDirectFacts.length > 0 ? evidenceDirectFacts : compiledFacts, opts.userQuery);
   const supportingFacts = prioritizeFacts(cleanValues(opts.evidence?.supportingContext), opts.userQuery);
-  const usableFacts = prioritizeFacts(evidenceUsableFacts.length > 0 ? evidenceUsableFacts : compiledFacts, opts.userQuery);
+  const usableFacts = taskTypedFacts.length > 0
+    ? taskTypedFacts
+    : prioritizeFacts(evidenceUsableFacts.length > 0 ? evidenceUsableFacts : compiledFacts, opts.userQuery);
   const riskFacts = prioritizeFacts(
     compiledRisks.length > 0
       ? compiledRisks
@@ -427,7 +480,6 @@ export function buildAnswerSpec(opts: {
     ...(riskFacts.length > 0 ? riskFacts : [fallbackCaution(opts.answerDomain)]),
   ]).slice(0, 3);
   const summary = directFacts[0] ?? usableFacts[0] ?? assessment;
-  const taskDetection = detectAnswerTask(opts.userQuery);
   const hasUsableGroundingSignal =
     facts.length > 0 ||
     (opts.compiledEvidence?.structuredFacts?.length ?? opts.evidence?.structuredFacts?.length ?? 0) > 0;

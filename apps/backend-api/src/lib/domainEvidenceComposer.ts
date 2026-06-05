@@ -38,6 +38,30 @@ function uniqueSentences(values: string[], limit: number): string[] {
   return out;
 }
 
+function firstSentence(value: string): string {
+  const cleaned = clean(value, "");
+  const match = cleaned.match(/^(.{12,260}?[.!?])(?:\s|$)/u);
+  return (match?.[1] ?? cleaned).trim();
+}
+
+function conciseListItem(value: string): string {
+  const sentenceText = firstSentence(value)
+    .replace(/^\s*[-*•]\s*/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const words = sentenceText.split(/\s+/u).filter(Boolean);
+  if (words.length <= 24) return sentence(sentenceText);
+  return `${words.slice(0, 24).join(" ").replace(/[.,;:!?]*$/u, "")}.`;
+}
+
+function conciseDefinition(value: string): string {
+  const sentenceText = firstSentence(value)
+    .replace(/^\s*[-*•]\s*/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return enforceMaxWords(sentence(sentenceText), 36);
+}
+
 function normalizeForMatch(value: string): string {
   return value
     .normalize("NFKC")
@@ -652,10 +676,19 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
       6,
     );
     if (candidates.length === 0) return null;
-    return candidates.map((item) => `- ${item}`).join("\n");
+    return candidates.map((item) => `- ${conciseListItem(item)}`).join("\n");
   }
 
-  if (answerPlan.taskType === "definition" || answerPlan.taskType === "source_grounded_explain") {
+  if (answerPlan.taskType === "definition") {
+    const candidates = uniqueSentences(
+      [opts.assessment, ...spec.facts, opts.summary, opts.action]
+        .filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
+      3,
+    );
+    return candidates.length > 0 ? conciseDefinition(candidates[0]) : null;
+  }
+
+  if (answerPlan.taskType === "source_grounded_explain") {
     return composeNaturalBrief(spec, {
       answerPlan,
       assessment: opts.assessment,
@@ -807,6 +840,26 @@ export function composePlannedAnswer(input: ComposerInput, opts: ComposePlannedA
   const missingFieldAnswer = composeMissingFieldAnswer(input.answerPlan);
   if (missingFieldAnswer && (input.constraints.forbidCaution || input.answerPlan.taskType === "field_extraction")) {
     return enforceMaxWords(missingFieldAnswer, input.constraints.maxWords);
+  }
+
+  const sourceNote =
+    spec.groundingConfidence === "low"
+      ? "Eldeki kaynak dayanağı sınırlı."
+      : "Kaynaklarda bu soruya doğrudan dayanak var.";
+  const assessment = clean(spec.assessment, sourceNote);
+  const action = clean(spec.action, "Kaynak yetersizse karar vermeden önce ilgili uzman veya yetkili kurumdan destek alın.");
+  const caution = joinItems(spec.caution, "Kaynakta açık dayanak yoksa kesin sonuç veya garanti ifade edilmemelidir.");
+  const summary = clean(spec.summary || assessment, "Kaynaklara bağlı kalarak temkinli ilerlemek gerekir.");
+  const relevantFact = queryRelevantFact(spec, [assessment, action, caution, summary].join(" "));
+  const plannedKnowledgeAnswer = composePlannedKnowledgeAnswer(spec, input.answerPlan, {
+    assessment,
+    action,
+    caution,
+    summary,
+    relevantFact,
+  });
+  if (plannedKnowledgeAnswer) {
+    return enforceMaxWords(plannedKnowledgeAnswer, input.constraints.maxWords);
   }
 
   const rendered = composeAnswerSpec(spec, {

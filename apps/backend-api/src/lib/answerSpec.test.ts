@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildAnswerSpec } from "./answerSpec.js";
 import type { CompiledEvidence } from "./compiledEvidence.js";
+import { buildEvidenceBundle } from "./evidenceBundle.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 function evidence(overrides: Partial<EvidenceExtractorOutput> = {}): EvidenceExtractorOutput {
@@ -342,5 +343,48 @@ describe("buildAnswerSpec", () => {
 
     expect(spec.facts.join(" ")).toContain("lekelenme");
     expect(spec.action).toContain("lekelenme");
+  });
+
+  it("preserves typed list evidence even when individual items have weak query overlap", () => {
+    const evidenceBundle = buildEvidenceBundle({
+      userQuery: "Sistemin temel bileşenleri nelerdir?",
+      taskType: "list_items",
+      sourceIds: ["generic-source"],
+      textFacts: [
+        "Algılama: Ortamdan veri toplar.",
+        "Bağlantı: Veriyi merkeze iletir.",
+        "İşleme: Gelen veriyi analiz eder.",
+        "Arayüz: Sonucu kullanıcıya gösterir.",
+      ],
+    });
+
+    const spec = buildAnswerSpec({
+      answerDomain: "general",
+      groundingConfidence: "high",
+      userQuery: "Sistemin temel bileşenleri nelerdir?",
+      evidence: evidence({
+        answerIntent: "explain",
+        intentResolution: {
+          intent: "explain",
+          primarySignal: "explain",
+          confidence: "high",
+          scores: { explain: 1 },
+          weakIntent: "explain",
+          reasons: [],
+        },
+        directAnswerFacts: evidenceBundle.items.map((item) => item.quote),
+        usableFacts: evidenceBundle.items.map((item) => item.quote),
+        sourceIds: evidenceBundle.sourceIds,
+        evidenceBundle,
+      }),
+    });
+
+    expect(spec.facts).toEqual(expect.arrayContaining([
+      "Algılama: Ortamdan veri toplar.",
+      "Bağlantı: Veriyi merkeze iletir.",
+      "İşleme: Gelen veriyi analiz eder.",
+      "Arayüz: Sonucu kullanıcıya gösterir.",
+    ]));
+    expect(spec.assessment).toBe("Algılama: Ortamdan veri toplar.");
   });
 });
