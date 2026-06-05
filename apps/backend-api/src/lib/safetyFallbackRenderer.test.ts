@@ -213,4 +213,48 @@ describe("renderSafetyFallback", () => {
     expect(rendered).toContain("Bulunamayan alanlar: Second Metric");
     expect(rendered).not.toContain("Ne zaman doktora");
   });
+
+  it("repairs too-long source-grounded fallbacks with concise planned evidence", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "legal",
+      answerIntent: "explain",
+      groundingConfidence: "medium",
+      userQuery: "Bozuk ürün iadesinde fatura ve fotoğraf açısından sadece işe yarayan adımları kısa anlat.",
+      tone: "direct",
+      sections: ["assessment", "action", "summary"],
+      assessment: "Fatura ve fotoğraf belgeleri iade başvurusunda dayanak olarak saklanmalıdır.",
+      action: "Satıcıya yazılı başvuru yapılmalı ve belge kopyaları korunmalıdır.",
+      caution: ["Süre kaçırma riski varsa yetkili kurum bilgisi kontrol edilmelidir."],
+      summary: "Kısa ve kaynaklı yanıt belge saklama ve yazılı başvuru adımlarına odaklanır.",
+      unknowns: [],
+      sourceIds: ["legal-source"],
+      facts: [
+        "Fatura, fotoğraf ve yazışma kayıtları başvuru için saklanmalıdır.",
+        "Satıcıya yazılı başvuru yapılmalı ve belge kopyaları korunmalıdır.",
+      ],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const compactPlan: AnswerPlan = {
+      ...answerPlan,
+      constraints: {
+        ...answerPlan.constraints,
+        maxWords: 30,
+      },
+    };
+    const rendered = renderSafetyFallback({
+      answerSpec,
+      answerPlan: compactPlan,
+      sources: [source],
+      fallbackMode: "domain_safe",
+      qualityFindings: [
+        { bucket: "answer_too_long", severity: "fail", message: "answer exceeded max word budget" },
+      ],
+    });
+
+    expect(rendered).toContain("Fatura");
+    expect(rendered).toContain("fotoğraf");
+    expect(rendered).not.toContain("net ve kesin");
+    expect(rendered.split(/\s+/u).filter(Boolean).length).toBeLessThanOrEqual(30);
+  });
 });

@@ -328,3 +328,11 @@ of truth; these files are the short working charter read before each task.
 - Gates passed: safety/boundary tests 39/39, backend typecheck, backend build/restart health.
 - KAP `kap-froto-withholding-specific` now passes; KAP is 15/18, context-pruning 4/5, G.P smoke 10/15.
 - Latest certification improved to backlog 32, blockers 31; remaining blockers are answer presentation, structured table/evidence, retrieval, and query/source intelligence.
+
+## Latest Phase 10 Too-long Safety Fallback Repair Note
+
+- Added a generic too-long safety fallback repair that retries planned source-grounded evidence with a tighter word budget instead of emitting long domain-safe templates.
+- No retrieval, parser, safety policy, UI, provider, or data-specific core logic was changed.
+- Gates passed: safety fallback/boundary tests 15/15, backend typecheck, backend build/restart health, context-pruning eval 5/5.
+- G.P smoke remains 10/15 with the same expected red-gate failures.
+- Latest certification improved to backlog 31, blockers 30; remaining work is mostly Phase 7 answer presentation plus Phase 4/5 owner issues.

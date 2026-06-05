@@ -67,6 +67,10 @@ function conciseMissingFieldFallback(plan: AnswerPlan): string {
   return "Kaynakta sorulan alan için doğrulanmış değer bulunamadı.";
 }
 
+function hasTooLongFinding(findings: AnswerQualityFinding[] | undefined): boolean {
+  return findings?.some((finding) => finding.bucket === "answer_too_long" && finding.severity === "fail") ?? false;
+}
+
 export function renderSafetyFallback(input: SafetyFallbackRenderInput): string {
   if (input.fallbackMode === "source_suggestion") return sourceSuggestionFallback();
   if (input.fallbackMode === "privacy_safe") return privacySafeFallback();
@@ -95,6 +99,22 @@ export function renderSafetyFallback(input: SafetyFallbackRenderInput): string {
     }).trim();
 
     return rendered && rendered !== fallback ? rendered : fallback;
+  }
+
+  if (hasTooLongFinding(input.qualityFindings)) {
+    const compactConstraints = {
+      ...constraints,
+      maxWords: typeof constraints.maxWords === "number" && constraints.maxWords > 5
+        ? constraints.maxWords - 5
+        : constraints.maxWords,
+    };
+    const rendered = composePlannedAnswer({
+      answerSpec: input.answerSpec,
+      answerPlan,
+      evidenceBundle: input.evidenceBundle,
+      constraints: compactConstraints,
+    }).trim();
+    if (rendered) return rendered;
   }
 
   const spec =
