@@ -170,6 +170,35 @@ function extractComparisonSubjectLabel(query: string): string | null {
   return null;
 }
 
+function cleanListSubject(value: string): string {
+  return value
+    .replace(/\b(kaynaga gore|kaynağa göre|kaynaklara gore|kaynaklara göre|sadece|madde madde)\b/giu, "")
+    .replace(/\b(?:temel|baz[ıi]|ana)\s*$/iu, "")
+    .replace(/[?.!,;:]+$/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function extractListSubjectLabel(query: string): string | null {
+  const normalized = query.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  const match = normalized.match(
+    /^(.{2,120}?)\s+(?:(?:temel|baz[ıi]|ana)\s+)?(?:bile[şs]enleri|[oö]zellikleri|[cç]e[şs]itleri|t[üu]rleri|tipleri|maddeleri)\b/iu,
+  );
+  const label = cleanListSubject(match?.[1] ?? "");
+  if (!label || label.split(/\s+/u).length > 8) return null;
+  if (/^(bu|hangi|neler|nelerdir|kaynak)\b/iu.test(label)) return null;
+  return label;
+}
+
+function ensureListSubjectVisible(query: string, answer: string): string {
+  const label = extractListSubjectLabel(query);
+  if (!label) return answer;
+  const normalizedAnswer = compactForCompare(answer);
+  const importantTokens = compactForCompare(label).split(/\s+/u).filter((token) => token.length >= 3).slice(0, 3);
+  if (importantTokens.length > 0 && importantTokens.every((token) => normalizedAnswer.includes(token))) return answer;
+  return `${label}:\n${answer}`;
+}
+
 function ensureComparisonSubjectsVisible(query: string, answer: string): string {
   const label = extractComparisonSubjectLabel(query);
   if (!label) return answer;
@@ -719,9 +748,10 @@ function composeBulletAnswer(spec: AnswerSpec, answerPlan: AnswerPlan, opts: {
     ...(shouldIncludeOptionalCaution(spec, answerPlan) ? [opts.caution] : []),
     opts.summary,
   ];
-  return uniqueSentences(candidates, 4)
+  const bullets = uniqueSentences(candidates, 4)
     .map((item) => `- ${item}`)
     .join("\n");
+  return ensureListSubjectVisible(spec.userQuery, bullets);
 }
 
 function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan, opts: {
@@ -745,7 +775,7 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
       6,
     );
     if (candidates.length === 0) return null;
-    return candidates.map((item) => `- ${conciseListItem(item)}`).join("\n");
+    return ensureListSubjectVisible(spec.userQuery, candidates.map((item) => `- ${conciseListItem(item)}`).join("\n"));
   }
 
   if (answerPlan.taskType === "definition") {

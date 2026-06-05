@@ -477,6 +477,43 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered.split(/\s+/u).length).toBeLessThanOrEqual(90);
   });
 
+  it("keeps the list subject visible when evidence items omit the queried topic name", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "technical",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Akıllı sistemin temel bileşenleri nelerdir?",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment: "Toplama katmanı çevreden veri alır.",
+      action: "İşleme katmanı veriyi değerlendirir.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Sunum katmanı sonucu kullanıcıya gösterir.",
+      unknowns: [],
+      sourceIds: ["generic-source"],
+      facts: [
+        "Toplama katmanı çevreden veri alır.",
+        "İşleme katmanı veriyi değerlendirir.",
+        "Sunum katmanı sonucu kullanıcıya gösterir.",
+      ],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: answerSpec.facts.length,
+      }),
+      constraints: answerPlan.constraints,
+    });
+
+    expect(rendered).toContain("Akıllı sistemin");
+    expect(rendered).toContain("- Toplama katmanı");
+    expect(rendered).not.toContain("Dikkat");
+  });
+
   it("composePlannedAnswer renders procedure tasks as concise numbered evidence steps without generic caution", () => {
     const answerSpec: AnswerSpec = {
       answerDomain: "technical",
