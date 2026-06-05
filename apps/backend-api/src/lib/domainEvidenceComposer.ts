@@ -72,6 +72,16 @@ function conciseProcedureStep(value: string): string {
   return `${words.slice(0, 28).join(" ").replace(/[.,;:!?]*$/u, "")}.`;
 }
 
+function conciseCodeExplanation(value: string): string {
+  const sentenceText = firstSentence(value)
+    .replace(/^\s*(?:\d+[.)]|[-*•])\s*/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const words = sentenceText.split(/\s+/u).filter(Boolean);
+  if (words.length <= 32) return sentence(sentenceText);
+  return `${words.slice(0, 32).join(" ").replace(/[.,;:!?]*$/u, "")}.`;
+}
+
 function normalizeForMatch(value: string): string {
   return value
     .normalize("NFKC")
@@ -725,6 +735,21 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
     return candidates
       .map((item, index) => `${index + 1}. ${conciseProcedureStep(item)}`)
       .join("\n");
+  }
+
+  if (answerPlan.taskType === "code_explanation") {
+    const candidates = uniqueSentences(
+      [
+        ...spec.facts,
+        opts.assessment,
+        opts.action,
+        opts.summary,
+        ...(opts.relevantFact ? [opts.relevantFact] : []),
+      ].filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
+      4,
+    );
+    if (candidates.length === 0) return null;
+    return candidates.map((item) => conciseCodeExplanation(item)).join("\n");
   }
 
   if (answerPlan.taskType === "compare_concepts") {

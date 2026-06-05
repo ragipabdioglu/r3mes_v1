@@ -6,6 +6,7 @@ export type QueryContractOperation =
   | "compare"
   | "summarize"
   | "procedure"
+  | "code_explanation"
   | "extract_fields"
   | "explain_with_sources"
   | "unknown";

@@ -185,6 +185,22 @@ describe("queryUnderstanding", () => {
       sourceOnly: true,
       forbiddenAdditions: expect.arrayContaining(["source_external_inference"]),
     });
+
+    const code = buildQueryUnderstanding("submitHandler içinde ne yapılıyor? Kaynağa göre açıkla.");
+    expect(code.answerTask.taskType).toBe("code_explanation");
+    expect(code.queryContract).toMatchObject({
+      operation: "code_explanation",
+      requiredEvidenceType: "source",
+      outputFormat: "freeform",
+      outputConstraints: {
+        forbidCaution: false,
+        noRawTableDump: false,
+        format: "freeform",
+        sourceGroundedOnly: true,
+      },
+      sourceOnly: true,
+      requestedFields: [],
+    });
   });
 
   it("keeps conversation turns backward-compatible while emitting a no-evidence contract", () => {

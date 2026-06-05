@@ -363,6 +363,7 @@ const ARTIFACT_KINDS_FOR_EVIDENCE_KIND: Record<
   RetrievalArtifactCapabilityKind[]
 > = {
   definition: ["definition"],
+  code: ["code_block"],
   numeric: ["table", "table_row", "table_cell", "key_value"],
   procedure: ["procedure"],
   table: ["table", "table_row", "table_cell"],

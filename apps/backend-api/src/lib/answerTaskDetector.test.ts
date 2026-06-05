@@ -33,13 +33,21 @@ describe("detectAnswerTask", () => {
     );
   });
 
+  it("detects generic code explanation questions without data-specific literals", () => {
+    const task = detectAnswerTask("submitHandler içinde ne yapılıyor? Kaynağa göre açıkla.");
+
+    expect(task.taskType).toBe("code_explanation");
+    expect(task.answerIntent).toBe("explain");
+    expect(task.outputConstraints.sourceGroundedOnly).toBe(true);
+  });
+
   it("keeps finance field extraction as one provider under the generic task detector", () => {
     const task = detectAnswerTask(
       "EREGL kar payında dağıtılması öngörülen diğer kaynaklar nedir? Sadece rakamı yaz, risk yorumu ekleme.",
     );
 
     expect(task.taskType).toBe("field_extraction");
-    expect(task.requestedFields.map((field) => field.id)).toContain("diger_kaynaklar");
+    expect(task.requestedFields.map((field) => field.id)).toContain("dagitilmasi_ongorulen_diger_kaynaklar");
     expect(task.outputConstraints.noRawTableDump).toBe(true);
     expect(task.outputConstraints.forbidCaution).toBe(true);
   });

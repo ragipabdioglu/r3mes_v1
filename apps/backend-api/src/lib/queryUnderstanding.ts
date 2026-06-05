@@ -289,6 +289,8 @@ function inferContractOperation(opts: {
       return "summarize";
     case "procedure":
       return "procedure";
+    case "code_explanation":
+      return "code_explanation";
     case "field_extraction":
       return "extract_fields";
     case "source_grounded_explain":

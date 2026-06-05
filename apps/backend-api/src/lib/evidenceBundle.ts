@@ -135,6 +135,8 @@ function evidenceKindForTaskType(taskType: BuildEvidenceBundleInput["taskType"])
       return "comparison_point";
     case "procedure":
       return "procedure_step";
+    case "code_explanation":
+      return "code_fact";
     default:
       return "text_fact";
   }

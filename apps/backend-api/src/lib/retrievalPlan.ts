@@ -35,7 +35,7 @@ export interface SourceResolutionPlanLike {
   [key: string]: unknown;
 }
 
-export type ExpectedEvidenceKind = "paragraph" | "table" | "numeric" | "procedure" | "definition";
+export type ExpectedEvidenceKind = "paragraph" | "table" | "numeric" | "procedure" | "definition" | "code";
 
 export interface RetrievalPlanEvidenceDemandBasis {
   operation: QueryContract["operation"];
@@ -87,6 +87,7 @@ function inferEvidenceKinds(input: BuildRetrievalPlanInput): ExpectedEvidenceKin
   if (/\btablo|table|satır|sütun|sutun\b/u.test(joined)) kinds.push("table");
   if (/\b\d+|oran|yüzde|yuzde|tutar|adet|miktar|numeric|sayısal|sayisal\b/u.test(joined)) kinds.push("numeric");
   if (/\bprosedür|prosedur|süreç|surec|adım|adim|procedure\b/u.test(joined)) kinds.push("procedure");
+  if (/\bkod|code|metot|method|fonksiyon|function|event|olay|handler|click\b/u.test(joined)) kinds.push("code");
   if (/\bnedir|tanım|tanim|definition|ne demek\b/u.test(joined)) kinds.push("definition");
   return [...new Set(kinds)];
 }
@@ -98,6 +99,7 @@ export function buildRetrievalPlanInputsFromQueryContract(
 
   const expectedEvidenceKinds: ExpectedEvidenceKind[] = ["paragraph"];
   if (queryContract.operation === "procedure") expectedEvidenceKinds.push("procedure");
+  if (queryContract.operation === "code_explanation") expectedEvidenceKinds.push("code");
   if (queryContract.operation === "define") expectedEvidenceKinds.push("definition");
   if (
     queryContract.outputFormat === "table" ||

@@ -93,6 +93,8 @@ function evidenceKindsForTask(taskType: AnswerTaskType | "grounded_summary"): Ev
       return ["comparison_point"];
     case "procedure":
       return ["procedure_step"];
+    case "code_explanation":
+      return ["code_fact", "procedure_step"];
     default:
       return [];
   }

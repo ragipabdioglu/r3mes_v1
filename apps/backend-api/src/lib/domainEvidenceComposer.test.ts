@@ -516,6 +516,44 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("Yedeksiz işlem");
   });
 
+  it("composePlannedAnswer renders code explanation evidence without generic plan or caution", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "technical",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "submitHandler içinde ne yapılıyor? Kaynağa göre açıkla.",
+      tone: "direct",
+      sections: ["assessment", "action", "summary"],
+      assessment: "submitHandler kaynakta girdi kontrolü ve liste güncelleme akışıyla anlatılır.",
+      action: "submitHandler önce girdiyi kontrol eder, geçerliyse değeri listeye ekler ve sonra giriş alanını temizler.",
+      caution: ["Yedeksiz işlem, belirsiz rollback veya veri silen komutlar yüksek risklidir."],
+      summary: "Kod parçası kullanıcı girdisini işleyip arayüz durumunu günceller.",
+      unknowns: [],
+      sourceIds: ["generic-code-source"],
+      facts: [
+        "submitHandler önce girdinin boş olup olmadığını kontrol eder.",
+        "Girdi geçerliyse değer listeye eklenir.",
+        "İşlemden sonra giriş alanı temizlenir.",
+      ],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: answerSpec.facts.length,
+      }),
+      constraints: answerPlan.constraints,
+    });
+
+    expect(answerPlan.taskType).toBe("code_explanation");
+    expect(rendered).toContain("submitHandler");
+    expect(rendered).toContain("listeye eklenir");
+    expect(rendered).not.toContain("Kısa plan:");
+    expect(rendered).not.toContain("Yedeksiz işlem");
+  });
+
   it("uses source-grounded compare composition without adding unrelated caution", () => {
     const rendered = composeAnswerSpec({
       answerDomain: "general",

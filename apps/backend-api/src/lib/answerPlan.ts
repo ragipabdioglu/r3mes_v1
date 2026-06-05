@@ -130,6 +130,8 @@ function taskTypeFromContract(queryContract: QueryContract): AnswerTaskType | "g
       return "summarize_opinions";
     case "procedure":
       return "procedure";
+    case "code_explanation":
+      return "code_explanation";
     case "extract_fields":
       return "field_extraction";
     case "explain_with_sources":

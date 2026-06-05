@@ -8,6 +8,7 @@ export type AnswerTaskType =
   | "compare_concepts"
   | "summarize_opinions"
   | "procedure"
+  | "code_explanation"
   | "field_extraction"
   | "source_grounded_explain"
   | "unknown";
@@ -130,6 +131,13 @@ function detectTask(normalizedQuery: string, requestedFields: RequestedField[]):
   if (hasAny(normalizedQuery, [/\b(gorusler|görüşler|genel gorus|genel görüş|ne yonde|ne yönde|yorumlari|yorumları)\b/u])) {
     reasons.push("opinion_summary_language");
     return { taskType: "summarize_opinions", answerIntent: "explain", reasons };
+  }
+  if (hasAny(normalizedQuery, [
+    /\b(kod|code|metot|method|fonksiyon|function|event|olay|handler|click|selectedindexchanged)\b/u,
+    /\b[a-z_][a-z0-9_]{2,}\s*(?:\(|içinde|icinde)\b/u,
+  ])) {
+    reasons.push("code_explanation_language");
+    return { taskType: "code_explanation", answerIntent: "explain", reasons };
   }
   if (hasAny(normalizedQuery, [/\b(ne yap|nasil|nasıl|hangi adim|hangi adım|basvuru sart|başvuru şart|hazirla|hazırla)\b/u])) {
     reasons.push("procedure_language");

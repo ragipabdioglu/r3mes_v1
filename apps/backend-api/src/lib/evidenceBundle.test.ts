@@ -42,19 +42,28 @@ describe("buildEvidenceBundle", () => {
       textFacts: ["doc-1: Kaynakta işlem sırayla uygulanır."],
       sourceIds: ["doc-1"],
     });
+    const code = buildEvidenceBundle({
+      userQuery: "handler içinde ne yapılıyor?",
+      taskType: "code_explanation",
+      textFacts: ["doc-1: Handler kaynakta girdiyi kontrol eder."],
+      sourceIds: ["doc-1"],
+    });
 
     expect(definition.items[0]?.kind).toBe("definition");
     expect(list.items[0]?.kind).toBe("list_item");
     expect(comparison.items[0]?.kind).toBe("comparison_point");
     expect(procedure.items[0]?.kind).toBe("procedure_step");
+    expect(code.items[0]?.kind).toBe("code_fact");
     expect(definition.diagnostics.kindCounts.definition).toBe(1);
     expect(list.diagnostics.kindCounts.list_item).toBe(1);
     expect(comparison.diagnostics.kindCounts.comparison_point).toBe(1);
     expect(procedure.diagnostics.kindCounts.procedure_step).toBe(1);
+    expect(code.diagnostics.kindCounts.code_fact).toBe(1);
     expect(countUsableEvidenceItems(definition)).toBe(1);
     expect(countUsableEvidenceItems(list)).toBe(1);
     expect(countUsableEvidenceItems(comparison)).toBe(1);
     expect(countUsableEvidenceItems(procedure)).toBe(1);
+    expect(countUsableEvidenceItems(code)).toBe(1);
   });
 
   it("allows explicit evidence type to override task type for text facts only", () => {
