@@ -320,3 +320,11 @@ of truth; these files are the short working charter read before each task.
 - Gates passed: domainEvidenceComposer tests 34/34, backend typecheck, backend build/restart health.
 - G.P smoke improved from 9/15 to 10/15; list extraction improved from 0/2 to 1/2 with provider fallback ratios 0.
 - Latest certification improved to backlog 33, blockers 32, Phase 7 owner count 27, answer-presentation 19.
+
+## Latest Phase 10 Finance Fact Safety Scope Note
+
+- Refined finance safety red-flag scope so supported source-grounded finance facts are not rewritten as investment-advice fallbacks.
+- Advisory finance prompts still require safety guidance; deterministic safety remains active.
+- Gates passed: safety/boundary tests 39/39, backend typecheck, backend build/restart health.
+- KAP `kap-froto-withholding-specific` now passes; KAP is 15/18, context-pruning 4/5, G.P smoke 10/15.
+- Latest certification improved to backlog 32, blockers 31; remaining blockers are answer presentation, structured table/evidence, retrieval, and query/source intelligence.

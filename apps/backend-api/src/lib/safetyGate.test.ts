@@ -381,6 +381,134 @@ describe("deterministic safety gate", () => {
     expect(result.pass).toBe(true);
   });
 
+  it("does not require investment guidance for supported source-grounded finance facts", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "Kaynağa göre hisse grubu için nakit kâr payı oranı %12,3 olarak verilmiştir; yanıt yalnızca kaynaklı tablo alanıyla sınırlıdır.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "finance",
+        grounding_confidence: "medium",
+        user_query: "Kaynağa göre hisse grubu nakit kâr payı oranı kaç?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      answerPlan: {
+        domain: "finance",
+        intent: "explain",
+        taskType: "field_extraction",
+        outputFormat: "short",
+        requestedFields: [{
+          id: "cash_dividend_rate",
+          label: "Nakit kâr payı oranı",
+          aliases: ["nakit kar payi orani"],
+          required: true,
+          outputHint: "number",
+          confidence: "high",
+          matchedAliases: ["nakit kâr payı oranı"],
+        }],
+        selectedFacts: [{
+          id: "fact_1",
+          kind: "numeric_value",
+          sourceId: "doc_1",
+          field: "Nakit kâr payı oranı",
+          value: "%12,3",
+          confidence: "high",
+          provenance: { quote: "Nakit kâr payı oranı: %12,3", extractor: "test" },
+        }],
+        constraints: {
+          forbidCaution: true,
+          noRawTableDump: true,
+          sourceGroundedOnly: true,
+          format: "short",
+        },
+        coverage: "complete",
+        forbiddenAdditions: [],
+        requiresModelSynthesis: false,
+        diagnostics: {
+          requestedFieldCount: 1,
+          selectedFactCount: 1,
+          missingFieldIds: [],
+        },
+      },
+      evidenceSignals: {
+        legacyUsableFactCount: 0,
+        usableEvidenceBundleItemCount: 1,
+        selectedStructuredFactCount: 1,
+        requestedFieldCount: 1,
+        coveredRequestedFieldCount: 1,
+        answerPlanCoverage: "complete",
+        sourceCount: 1,
+        retrievalWasUsed: true,
+      },
+      evidence: {
+        answerIntent: "triage",
+        directAnswerFacts: ["doc_1: Nakit kâr payı oranı %12,3 olarak verilmiştir."],
+        supportingContext: [],
+        riskFacts: ["doc_1: Finansal tablo kaynağında risk kelimesi geçmektedir."],
+        notSupported: [],
+        usableFacts: ["doc_1: Nakit kâr payı oranı %12,3 olarak verilmiştir."],
+        uncertainOrUnusable: [],
+        redFlags: ["doc_1: Finansal tablo kaynağında risk kelimesi geçmektedir."],
+        sourceIds: ["doc_1"],
+        missingInfo: [],
+      },
+    });
+
+    expect(result.blockedReasons).not.toContain("RED_FLAG_WITHOUT_URGENT_GUIDANCE");
+    expect(result.pass).toBe(true);
+  });
+
+  it("still requires finance guidance for advisory investment questions", () => {
+    const result = evaluateSafetyGate({
+      answerText:
+        "Bu hisse için kaynak olumlu görünüyor ve yatırım yapılabilir sonucuna varılabilir.",
+      answer: {
+        ...EMPTY_GROUNDED_MEDICAL_ANSWER,
+        answer_domain: "finance",
+        grounding_confidence: "medium",
+        user_query: "Bu hisseyi almalı mıyım, risksiz getiri sağlar mı?",
+      },
+      sources: [source],
+      retrievalWasUsed: true,
+      answerPlan: {
+        domain: "finance",
+        intent: "explain",
+        taskType: "source_grounded_explain",
+        outputFormat: "freeform",
+        requestedFields: [],
+        selectedFacts: [],
+        constraints: {
+          forbidCaution: false,
+          noRawTableDump: true,
+          sourceGroundedOnly: true,
+          format: "freeform",
+        },
+        coverage: "partial",
+        forbiddenAdditions: [],
+        requiresModelSynthesis: true,
+        diagnostics: {
+          requestedFieldCount: 0,
+          selectedFactCount: 0,
+          missingFieldIds: [],
+        },
+      },
+      evidenceSignals: {
+        legacyUsableFactCount: 1,
+        usableEvidenceBundleItemCount: 1,
+        selectedStructuredFactCount: 0,
+        requestedFieldCount: 0,
+        coveredRequestedFieldCount: 0,
+        answerPlanCoverage: "partial",
+        sourceCount: 1,
+        retrievalWasUsed: true,
+      },
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockedReasons).toContain("RED_FLAG_WITHOUT_URGENT_GUIDANCE");
+  });
+
   it("blocks sources outside accessible collection scope", () => {
     const result = evaluateSafetyGate({
       answerText:

@@ -111,6 +111,41 @@ function isFinanceFieldExtractionQuery(query: string, domain: GroundedMedicalAns
   return detectAnswerTask(query).requestedFields.some((field) => field.outputHint === "number");
 }
 
+function isFinanceAdvisorySafetyQuestion(query: string): boolean {
+  const normalized = normalize(query).replace(/\s+/g, " ").trim();
+  return (
+    /\b(?:al|sat|tut|yat[ıi]r[ıi]m\s+yap|kredi\s+çek|kredi\s+cek|borçlan|borclan)(?:ay[ıi]m|mal[ıi]\s*m[ıi]y[ıi]m|mal[ıi]\s*miyim|mak\s+mant[ıi]kl[ıi]\s*m[ıi])?\b/iu.test(normalized) ||
+    /\b(?:önerir\s+misin|onerir\s+misin|tavsiye\s+eder\s+misin|ne\s+yapmal[ıi]y[ıi]m)\b/iu.test(normalized) ||
+    /\b(?:risksiz|getiri\s+sa[ğg]lar|garantili|getiri\s+garantisi|zarar\s+etmez)\b/iu.test(normalized)
+  );
+}
+
+function isSupportedFinanceFactAnswer(opts: {
+  query: string;
+  domain: GroundedMedicalAnswer["answer_domain"];
+  answerPlan?: AnswerPlan | null;
+  evidenceSignals?: SafetyEvidenceSignals;
+  sourceCount: number;
+  retrievalWasUsed: boolean;
+  legacyUsableFactCount: number;
+}): boolean {
+  if (opts.domain !== "finance" || !opts.retrievalWasUsed || opts.sourceCount === 0) return false;
+  if (isFinanceAdvisorySafetyQuestion(opts.query)) return false;
+  const taskType = opts.answerPlan?.taskType;
+  const sourceGrounded = opts.answerPlan?.constraints.sourceGroundedOnly === true;
+  const sourceGroundedTask =
+    taskType === "field_extraction" ||
+    taskType === "source_grounded_explain" ||
+    taskType === "definition" ||
+    taskType === "list_items";
+  const supported =
+    (opts.evidenceSignals?.answerPlanCoverage && opts.evidenceSignals.answerPlanCoverage !== "none") ||
+    (opts.evidenceSignals?.usableEvidenceBundleItemCount ?? 0) > 0 ||
+    (opts.evidenceSignals?.selectedStructuredFactCount ?? 0) > 0 ||
+    opts.legacyUsableFactCount > 0;
+  return Boolean(supported && (sourceGrounded || sourceGroundedTask));
+}
+
 function hasCompleteShortSupportedAnswer(opts: {
   answerText: string;
   answerPlan?: AnswerPlan | null;
@@ -316,6 +351,15 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   }
 
   const policy = getDomainSafetyPolicy(opts.answer.answer_domain);
+  const supportedFinanceFactAnswer = isSupportedFinanceFactAnswer({
+    query,
+    domain: opts.answer.answer_domain,
+    answerPlan: opts.answerPlan,
+    evidenceSignals,
+    sourceCount: opts.sources.length,
+    retrievalWasUsed: opts.retrievalWasUsed,
+    legacyUsableFactCount,
+  });
 
   // Judge risky certainty from the final user-visible answer. Intermediate
   // draft fields can contain rejected model text and should not force a safe
@@ -351,10 +395,13 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   if (
     !sourceSuggestionWithoutGrounding &&
     (
-      (includesAny(query, policy.redFlagTerms) && !queryExplicitlySuppressesRiskComment(query)) ||
+      (includesAny(query, policy.redFlagTerms) &&
+        !queryExplicitlySuppressesRiskComment(query) &&
+        !supportedFinanceFactAnswer) ||
       (evidenceRedFlagCount > 0 &&
         evidence?.answerIntent === "triage" &&
-        !isFinanceFieldExtractionQuery(query, opts.answer.answer_domain))
+        !isFinanceFieldExtractionQuery(query, opts.answer.answer_domain) &&
+        !supportedFinanceFactAnswer)
     ) &&
     !includesAny(answerText, policy.requiredGuidanceTerms)
   ) {
