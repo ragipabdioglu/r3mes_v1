@@ -400,6 +400,10 @@ function stripListMarker(value: string): string {
   return value.replace(/^\s*(?:[-*•]|\d{1,2}[.)])\s+/u, "").trim();
 }
 
+function hasLabeledListShape(value: string): boolean {
+  return /^[^:]{1,80}:\s+\S/u.test(value.trim());
+}
+
 function listQueryFragments(text: string, query: string, limit = 6): string[] {
   const task = detectAnswerTask(query);
   if (task.taskType !== "list_items") return [];
@@ -426,7 +430,11 @@ function listQueryFragments(text: string, query: string, limit = 6): string[] {
       if (matchedHeadingIndexes.length > 0 && closeToMatchedHeading(index)) return true;
       return queryCoreOverlapScore(queryTokens, fragment) > 0 || queryOverlapScore(queryTokens, fragment) >= 2;
     })
-    .map(({ fragment, index }) => ({ fragment, index, score: fragmentQualityScore(fragment) }))
+    .map(({ fragment, index }) => ({
+      fragment,
+      index,
+      score: fragmentQualityScore(fragment) + (hasLabeledListShape(fragment) ? 100 : 0),
+    }))
     .filter(({ score }) => score > getDecisionConfig().evidenceScoring.fragmentMinScore)
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, limit)
@@ -771,7 +779,20 @@ function addQueryLanguageAlias(query: string, fragment: string): string {
 }
 
 function rankEvidenceFacts(query: string, facts: string[]): string[] {
-  return unique(facts)
+  const task = detectAnswerTask(query);
+  const uniqueFacts = unique(facts);
+  if (task.taskType === "list_items") {
+    const isLabeledListFact = (fact: string) => {
+      const body = fact.includes(":") ? fact.slice(fact.indexOf(":") + 1).trim() : fact.trim();
+      return hasLabeledListShape(body);
+    };
+    const labeledFacts = uniqueFacts.filter(isLabeledListFact);
+    if (labeledFacts.length >= 3) {
+      const unlabeledFacts = uniqueFacts.filter((fact) => !isLabeledListFact(fact));
+      return [...labeledFacts, ...unlabeledFacts];
+    }
+  }
+  return uniqueFacts
     .map((fact, index) => ({ fact, index, score: evidenceRelevanceScore(query, fact) }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map(({ fact }) => fact);

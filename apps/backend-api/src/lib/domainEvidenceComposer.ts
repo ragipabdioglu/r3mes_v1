@@ -54,6 +54,30 @@ function conciseListItem(value: string): string {
   return `${words.slice(0, 24).join(" ").replace(/[.,;:!?]*$/u, "")}.`;
 }
 
+function stripListMarker(value: string): string {
+  return value
+    .replace(/^\s*(?:[-*•]|\d+[.)])\s*/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function expandListEvidenceItems(values: string[]): string[] {
+  const expanded: string[] = [];
+  for (const value of values) {
+    const lines = value
+      .split(/\r?\n/u)
+      .map(stripListMarker)
+      .filter((line) => line.length >= 4 && !isGenericSourceLimitGuidance(line) && !isDocumentScaffoldFact(line));
+    const structuredLines = lines.filter((line) => /^[^:]{1,80}:\s+\S/u.test(line));
+    if (structuredLines.length >= 2) {
+      expanded.push(...structuredLines);
+      continue;
+    }
+    expanded.push(...(lines.length > 1 ? lines : [value]));
+  }
+  return expanded;
+}
+
 function conciseDefinition(value: string): string {
   const sentenceText = firstSentence(value)
     .replace(/^\s*[-*•]\s*/u, "")
@@ -182,7 +206,7 @@ function cleanListSubject(value: string): string {
 function extractListSubjectLabel(query: string): string | null {
   const normalized = query.normalize("NFKC").replace(/\s+/gu, " ").trim();
   const match = normalized.match(
-    /^(.{2,120}?)\s+(?:(?:temel|baz[ıi]|ana)\s+)?(?:bile[şs]enleri|[oö]zellikleri|[cç]e[şs]itleri|t[üu]rleri|tipleri|maddeleri)\b/iu,
+    /^(.{2,120}?)\s+(?:(?:temel|baz[ıi]|ana)\s+)?(?:bile[şs]en(?:leri|i|ini)|[oö]zellikleri|[oö]zelli[ğg](?:i|ini)|[cç]e[şs]itleri|t[üu]rleri|tipleri|maddeleri)\b/iu,
   );
   const label = cleanListSubject(match?.[1] ?? "");
   if (!label || label.split(/\s+/u).length > 8) return null;
@@ -196,6 +220,15 @@ function ensureListSubjectVisible(query: string, answer: string): string {
   const normalizedAnswer = compactForCompare(answer);
   const importantTokens = compactForCompare(label).split(/\s+/u).filter((token) => token.length >= 3).slice(0, 3);
   if (importantTokens.length > 0 && importantTokens.every((token) => normalizedAnswer.includes(token))) return answer;
+  const lines = answer.split(/\r?\n/u);
+  const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+  if (nonEmptyLines.length > 0 && nonEmptyLines.every((line) => /^\s*[-*•]\s+/u.test(line))) {
+    const firstIndex = lines.findIndex((line) => line.trim().length > 0);
+    if (firstIndex >= 0) {
+      lines[firstIndex] = lines[firstIndex].replace(/^(\s*[-*•]\s+)/u, `$1${label}: `);
+      return lines.join("\n");
+    }
+  }
   return `${label}:\n${answer}`;
 }
 
@@ -765,13 +798,13 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
   if (lowGroundingLead(spec)) return null;
   if (answerPlan.taskType === "list_items") {
     const candidates = uniqueSentences(
-      [
+      expandListEvidenceItems([
         ...spec.facts,
         opts.assessment,
         opts.action,
         opts.summary,
         ...(opts.relevantFact ? [opts.relevantFact] : []),
-      ].filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
+      ]).filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
       6,
     );
     if (candidates.length === 0) return null;

@@ -510,8 +510,82 @@ describe("composeDomainEvidenceAnswer", () => {
     });
 
     expect(rendered).toContain("Akıllı sistemin");
-    expect(rendered).toContain("- Toplama katmanı");
+    expect(rendered).toContain("- Akıllı sistemin: Toplama katmanı");
+    expect(rendered).toContain("- İşleme katmanı");
     expect(rendered).not.toContain("Dikkat");
+  });
+
+  it("keeps singular possessive list subject wording visible in bullet output", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "technical",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Sistemin ayırt edici özelliğini sadece madde madde yaz.",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment: "Algılama: Çevreden sinyal alır.",
+      action: "Tepki: Sonuca göre çıktı üretir.",
+      caution: [],
+      summary: "İşleme: Gelen bilgiyi değerlendirir.",
+      unknowns: [],
+      sourceIds: ["generic-source"],
+      facts: [
+        "Algılama: Çevreden sinyal alır.",
+        "Tepki: Sonuca göre çıktı üretir.",
+        "İşleme: Gelen bilgiyi değerlendirir.",
+      ],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: answerSpec.facts.length,
+      }),
+      constraints: answerPlan.constraints,
+    });
+
+    expect(rendered).toContain("- Sistemin ayırt edici: Algılama");
+    expect(rendered).not.toContain("Sistemin ayırt edici:\n-");
+  });
+
+  it("expands multi-line list evidence before shortening list answers", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "technical",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Akıllı sistemin temel özellikleri nelerdir?",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment: "Akıllı sistemi tanımlayan temel özellikler şunlardır:\n• Algılama: Çevreden veri toplar.\n• İşleme: Veriyi değerlendirir.\n• Tepki: Sonuca göre çıktı üretir.",
+      action: "Kaynağa göre bu özellikler birlikte değerlendirilmelidir.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Akıllı sistem bu özelliklerle çalışır.",
+      unknowns: [],
+      sourceIds: ["generic-source"],
+      facts: [
+        "Akıllı sistemi tanımlayan temel özellikler şunlardır:\n• Algılama: Çevreden veri toplar.\n• İşleme: Veriyi değerlendirir.\n• Tepki: Sonuca göre çıktı üretir.",
+      ],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: answerSpec.facts.length,
+      }),
+      constraints: answerPlan.constraints,
+    });
+
+    expect(rendered).toContain("- Akıllı sistemin");
+    expect(rendered).toContain("Algılama:");
+    expect(rendered).toContain("İşleme:");
+    expect(rendered).toContain("Tepki:");
+    expect(rendered).not.toContain("Akıllı sistemin:\n-");
   });
 
   it("composePlannedAnswer renders procedure tasks as concise numbered evidence steps without generic caution", () => {

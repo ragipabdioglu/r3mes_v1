@@ -200,6 +200,35 @@ describe("skill pipeline evidence extractor", () => {
     expect(extraction.missingInfo).toEqual([]);
   });
 
+  it("prioritizes labeled list items over nearby explanatory prose for list questions", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Sistemin temel özellikleri nelerdir?",
+      cards: [
+        {
+          sourceId: "generic-list-source",
+          title: "generic-list-source",
+          patientSummary: [
+            "• Sistem sadece tek bir özellikten oluşmaz; onu tanımlayan temel özellikler vardır:",
+            "• Algılama: Çevreden veri toplar.",
+            "• Bağlantı: Veriyi merkeze iletir.",
+            "• İşleme: Gelen veriyi analiz eder.",
+            "• Tepki: Sonuca göre çıktı üretir.",
+            "• Değer: Elde edilen sonucu kullanılabilir hale getirir.",
+            "• İşleme özelliği bazı sistemlerde daha ayrıntılı açıklanabilir.",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    const joined = extraction.usableFacts.join(" ");
+    expect(joined).toContain("Algılama");
+    expect(joined).toContain("Bağlantı");
+    expect(joined).toContain("İşleme");
+    expect(joined).toContain("Tepki");
+    expect(joined).toContain("Değer");
+    expect(extraction.evidenceBundle?.diagnostics.kindCounts.list_item).toBeGreaterThanOrEqual(5);
+  });
+
   it("extracts actionable education guidance with inflected query terms", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Özel eğitim desteği için okulda ilk hangi adımları konuşmalıyım?",
