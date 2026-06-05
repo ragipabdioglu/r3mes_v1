@@ -304,3 +304,11 @@ of truth; these files are the short working charter read before each task.
 - Eval taxonomy no longer treats `reranker_fallback:missing` as provider/runtime fallback; actual fallback still maps to provider failure.
 - Latest certification still fails release gate, but provider-runtime is gone from owner phases/layer families.
 - Remaining blockers are now real product-quality work: Phase 6 evidence coverage, Phase 7 safety/presentation, Phase 4 retrieval, Phase 5 query/source, and certification triage.
+
+## Latest Phase 10 Provider Runtime Reboot Follow-up Note
+
+- After a machine reboot, ai-engine BGE-M3 embeddings failed with a transformers meta-tensor CPU fallback error.
+- `hf_embeddings.py` now loads embeddings with `low_cpu_mem_usage=False` and `device_map=None`, and reloads a clean CPU model if CUDA placement fails.
+- Gates passed: ai-engine tests 31/31, BGE-M3 smoke fallback false, reranker smoke fallback false, backend typecheck.
+- Refreshed G.P smoke: 9/15 pass with embedding/reranker fallback ratios 0.
+- Latest certification: backlog 34, blockers 33, provider-runtime blockers 0; continue Phase 10 on Phase 7 answer presentation/composer or evidence-owned failures.

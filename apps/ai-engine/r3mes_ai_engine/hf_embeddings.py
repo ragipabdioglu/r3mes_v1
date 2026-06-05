@@ -50,6 +50,15 @@ def _provider_from_loaded_model(model_name_or_path: str) -> str:
     return "bge-m3" if "bge-m3" in model_name_or_path.lower() else "external"
 
 
+def _load_auto_model(AutoModel: Any, model_name_or_path: str, local_files_only: bool) -> Any:
+    return AutoModel.from_pretrained(
+        model_name_or_path,
+        local_files_only=local_files_only,
+        low_cpu_mem_usage=False,
+        device_map=None,
+    )
+
+
 async def _load_embedding(settings: Settings, state: AppState) -> EmbeddingRuntime:
     if state.embedding_runtime is not None:
         return state.embedding_runtime
@@ -62,10 +71,7 @@ async def _load_embedding(settings: Settings, state: AppState) -> EmbeddingRunti
             model_name_or_path,
             local_files_only=settings.embedding_local_files_only,
         )
-        model = AutoModel.from_pretrained(
-            model_name_or_path,
-            local_files_only=settings.embedding_local_files_only,
-        )
+        model = _load_auto_model(AutoModel, model_name_or_path, settings.embedding_local_files_only)
         device = "cpu"
         if settings.embedding_device == "cuda" and torch.cuda.is_available():
             try:
@@ -81,7 +87,7 @@ async def _load_embedding(settings: Settings, state: AppState) -> EmbeddingRunti
                     torch.cuda.empty_cache()
                 except Exception:
                     pass
-                model = model.to("cpu")
+                model = _load_auto_model(AutoModel, model_name_or_path, settings.embedding_local_files_only)
         model.eval()
         return EmbeddingRuntime(
             model_name_or_path=model_name_or_path,
