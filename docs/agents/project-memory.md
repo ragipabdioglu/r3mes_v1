@@ -312,3 +312,11 @@ of truth; these files are the short working charter read before each task.
 - Gates passed: ai-engine tests 31/31, BGE-M3 smoke fallback false, reranker smoke fallback false, backend typecheck.
 - Refreshed G.P smoke: 9/15 pass with embedding/reranker fallback ratios 0.
 - Latest certification: backlog 34, blockers 33, provider-runtime blockers 0; continue Phase 10 on Phase 7 answer presentation/composer or evidence-owned failures.
+
+## Latest Phase 10 Inline PDF List Presentation Note
+
+- Added generic inline PDF/PPT bullet splitting in the planned list renderer; no data-specific literals were added.
+- Generic list intro lines are skipped when expanded evidence items are available.
+- Gates passed: domainEvidenceComposer tests 34/34, backend typecheck, backend build/restart health.
+- G.P smoke improved from 9/15 to 10/15; list extraction improved from 0/2 to 1/2 with provider fallback ratios 0.
+- Latest certification improved to backlog 33, blockers 32, Phase 7 owner count 27, answer-presentation 19.

@@ -588,6 +588,44 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("Akıllı sistemin:\n-");
   });
 
+  it("expands inline PDF bullet glyphs and drops generic list intro lines", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "technical",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "Kaynakta verilen proje türlerini madde madde yaz.",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment:
+        "Kaynakta verilen proje türleri aşağıdaki gibidir: • Masaüstü Uygulaması • Web Uygulaması • Konsol Uygulaması • Sınıf Kütüphanesi",
+      action: "Kaynakta listelenen maddeler kısa yazılmalıdır.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Proje türleri kaynakta liste olarak verilmiştir.",
+      unknowns: [],
+      sourceIds: ["generic-list-source"],
+      facts: [
+        "Kaynakta verilen proje türleri aşağıdaki gibidir: • Masaüstü Uygulaması • Web Uygulaması • Konsol Uygulaması • Sınıf Kütüphanesi",
+      ],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: 1,
+      }),
+      constraints: answerPlan.constraints,
+    });
+
+    expect(rendered).toContain("- Masaüstü Uygulaması");
+    expect(rendered).toContain("- Web Uygulaması");
+    expect(rendered).toContain("- Konsol Uygulaması");
+    expect(rendered).toContain("- Sınıf Kütüphanesi");
+    expect(rendered).not.toContain("- Kaynakta verilen proje türleri aşağıdaki gibidir");
+  });
+
   it("composePlannedAnswer renders procedure tasks as concise numbered evidence steps without generic caution", () => {
     const answerSpec: AnswerSpec = {
       answerDomain: "technical",

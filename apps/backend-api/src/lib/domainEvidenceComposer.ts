@@ -61,13 +61,32 @@ function stripListMarker(value: string): string {
     .trim();
 }
 
+function normalizeInlineListBreaks(value: string): string {
+  return value
+    .replace(/\s*[•]\s*/gu, "\n")
+    .replace(/\s+(?=\d+[.)]\s+\p{L})/gu, "\n");
+}
+
+function isListIntroLine(value: string): boolean {
+  const normalized = compactForCompare(value);
+  if (normalized.length > 180) return false;
+  return (
+    /\b(aşağıdaki|asagidaki|şunlardır|sunlardir|listelenir|verilmiştir|verilmistir|çeşitleri|cesitleri|türleri|turleri)\b/u
+      .test(normalized) ||
+    /:\s*$/u.test(value.trim())
+  );
+}
+
 function expandListEvidenceItems(values: string[]): string[] {
   const expanded: string[] = [];
   for (const value of values) {
-    const lines = value
+    let lines = normalizeInlineListBreaks(value)
       .split(/\r?\n/u)
       .map(stripListMarker)
       .filter((line) => line.length >= 4 && !isGenericSourceLimitGuidance(line) && !isDocumentScaffoldFact(line));
+    if (lines.length >= 3 && isListIntroLine(lines[0])) {
+      lines = lines.slice(1);
+    }
     const structuredLines = lines.filter((line) => /^[^:]{1,80}:\s+\S/u.test(line));
     if (structuredLines.length >= 2) {
       expanded.push(...structuredLines);
@@ -797,14 +816,19 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
 }): string | null {
   if (lowGroundingLead(spec)) return null;
   if (answerPlan.taskType === "list_items") {
-    const candidates = uniqueSentences(
-      expandListEvidenceItems([
+    const expandedFactItems = expandListEvidenceItems(spec.facts)
+      .filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item));
+    const listInputs = expandedFactItems.length >= 2 && expandedFactItems.length > spec.facts.length
+      ? expandedFactItems
+      : expandListEvidenceItems([
         ...spec.facts,
         opts.assessment,
         opts.action,
         opts.summary,
         ...(opts.relevantFact ? [opts.relevantFact] : []),
-      ]).filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
+      ]).filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item));
+    const candidates = uniqueSentences(
+      listInputs,
       6,
     );
     if (candidates.length === 0) return null;
