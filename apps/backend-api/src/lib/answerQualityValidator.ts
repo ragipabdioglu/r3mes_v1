@@ -61,6 +61,8 @@ function normalize(value: string | undefined): string {
   return String(value ?? "")
     .normalize("NFKC")
     .toLocaleLowerCase("tr-TR")
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 }

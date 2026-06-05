@@ -28,6 +28,19 @@ describe("validateAnswerQuality", () => {
     expect(findings.some((finding) => finding.bucket === "source_found_but_bad_answer" && finding.severity === "fail")).toBe(true);
   });
 
+  it("matches required answer terms with accent-insensitive normalization", () => {
+    const findings = validateAnswerQuality({
+      answer: "Kaynağa göre buna Yapay Zeka denir.",
+      sourceCount: 1,
+      evidenceFactCount: 1,
+      expectations: {
+        requiredAnswerTerms: ["Yapay Zekâ"],
+      },
+    });
+
+    expect(findings.map((finding) => finding.bucket)).not.toContain("incomplete_answer");
+  });
+
   it("flags over_aggressive_no_source when an answer denies available evidence", () => {
     const findings = validateAnswerQuality({
       answer: "No source was found for this request.",

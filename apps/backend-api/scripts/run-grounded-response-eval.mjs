@@ -49,7 +49,10 @@ function parseArgs() {
 
 function normalize(value) {
   return String(value ?? "")
+    .normalize("NFKC")
     .toLocaleLowerCase("tr-TR")
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 }
