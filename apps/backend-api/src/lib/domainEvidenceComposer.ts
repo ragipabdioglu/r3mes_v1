@@ -133,6 +133,42 @@ function asksForDefinitionAnswer(query: string): boolean {
   return /\b(nedir|ne demek|tanim|tanım)\b/u.test(normalized);
 }
 
+function cleanComparisonSubject(value: string): string {
+  return value
+    .replace(/\b(kaynaga gore|kaynağa göre|kaynaklara gore|kaynaklara göre)\b/giu, "")
+    .replace(/\b(nedir|ne demek|farki|farkı)\b/giu, "")
+    .replace(/[?.!,;:]+$/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function extractComparisonSubjectLabel(query: string): string | null {
+  const normalized = query.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  const patterns = [
+    /^(.{2,80}?)\s+(?:ile|ve)\s+(.{2,80}?)\s+aras[ıi]ndaki\s+fark/iu,
+    /^(.{2,80}?)\s+(?:ile|ve)\s+(.{2,80}?)\s+fark[ıi]/iu,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    const left = cleanComparisonSubject(match?.[1] ?? "");
+    const right = cleanComparisonSubject(match?.[2] ?? "");
+    if (left.split(/\s+/u).length > 5 || right.split(/\s+/u).length > 5) continue;
+    if (left.length >= 2 && right.length >= 2) return `${left} ile ${right}`;
+  }
+  return null;
+}
+
+function ensureComparisonSubjectsVisible(query: string, answer: string): string {
+  const label = extractComparisonSubjectLabel(query);
+  if (!label) return answer;
+  const [left, right] = label.split(/\s+ile\s+/u);
+  const normalizedAnswer = compactForCompare(answer);
+  if (left && right && normalizedAnswer.includes(compactForCompare(left)) && normalizedAnswer.includes(compactForCompare(right))) {
+    return answer;
+  }
+  return `${label}: ${answer}`;
+}
+
 function isGenericSourceLimitGuidance(value: string): boolean {
   return /\bkaynak\s+s[ıi]n[ıi]rl[ıi]ysa\b|\bilgili\s+uzman\s+veya\s+yetkili\s+kurum\b/iu.test(value);
 }
@@ -758,7 +794,7 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
         .filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
       4,
     );
-    return lines.length > 0 ? lines.join("\n") : null;
+    return lines.length > 0 ? ensureComparisonSubjectsVisible(spec.userQuery, lines.join("\n")) : null;
   }
 
   if (answerPlan.taskType === "summarize_opinions") {

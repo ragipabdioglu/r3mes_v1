@@ -580,6 +580,44 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("risk koşulu");
   });
 
+  it("keeps both comparison subjects visible when evidence wording only names one side", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "technical",
+      answerIntent: "compare",
+      groundingConfidence: "high",
+      userQuery: "Alpha ile Beta arasındaki fark nedir?",
+      tone: "direct",
+      sections: ["assessment", "summary"],
+      assessment: "Alpha'ya göre daha gelişmiş içeriklerle çalışma gibi farkları vardır.",
+      action: "Alpha düz metin girişi sağlar; gelişmiş içerik gerektiğinde diğer seçenek değerlendirilir.",
+      caution: ["Kaynakta özel alarm veya risk koşulu açıkça belirtilmemiş."],
+      summary: "Alpha temel girişe, gelişmiş seçenek biçimlendirilmiş içeriğe odaklanır.",
+      unknowns: [],
+      sourceIds: ["generic-source"],
+      facts: ["Alpha'ya göre daha gelişmiş içeriklerle çalışma gibi farkları vardır."],
+      structuredFacts: [],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: 1,
+      }),
+      constraints: {
+        forbidCaution: true,
+        noRawTableDump: true,
+        sourceGroundedOnly: true,
+      },
+    });
+
+    expect(rendered).toContain("Alpha");
+    expect(rendered).toContain("Beta");
+    expect(rendered).not.toContain("Dikkat");
+  });
+
   it("composePlannedAnswer renders selected structured facts before generic safety prose", () => {
     const answerSpec: AnswerSpec = {
       answerDomain: "finance",
