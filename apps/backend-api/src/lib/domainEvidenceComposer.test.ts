@@ -477,6 +477,45 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered.split(/\s+/u).length).toBeLessThanOrEqual(90);
   });
 
+  it("composePlannedAnswer renders procedure tasks as concise numbered evidence steps without generic caution", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "technical",
+      answerIntent: "steps",
+      groundingConfidence: "high",
+      userQuery: "Kaynağa göre kayıt ekleme işlemi nasıl yapılıyor?",
+      tone: "direct",
+      sections: ["assessment", "action", "summary"],
+      assessment: "Kayıt ekleme işlemi kaynakta kontrol, ekleme ve temizleme adımlarıyla anlatılır.",
+      action: "Girdi uzunluğu kontrol edilir; geçerliyse değer listeye eklenir; giriş alanı temizlenir; odak tekrar giriş alanına verilir.",
+      caution: ["Yedeksiz işlem, belirsiz rollback veya veri silen komutlar yüksek risklidir."],
+      summary: "İşlem kaynakta kısa bir kullanıcı etkileşimi akışı olarak gösterilir.",
+      unknowns: [],
+      sourceIds: ["generic-procedure-source"],
+      facts: [
+        "Girdi uzunluğu kontrol edilir.",
+        "Geçerliyse değer listeye eklenir.",
+        "Giriş alanı temizlenir.",
+        "Odak tekrar giriş alanına verilir.",
+      ],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: answerSpec.facts.length,
+      }),
+      constraints: answerPlan.constraints,
+    });
+
+    expect(rendered).toContain("1. Girdi uzunluğu");
+    expect(rendered).toContain("2. Geçerliyse değer");
+    expect(rendered).toContain("4. Odak tekrar");
+    expect(rendered).not.toContain("Kısa plan:");
+    expect(rendered).not.toContain("Yedeksiz işlem");
+  });
+
   it("uses source-grounded compare composition without adding unrelated caution", () => {
     const rendered = composeAnswerSpec({
       answerDomain: "general",

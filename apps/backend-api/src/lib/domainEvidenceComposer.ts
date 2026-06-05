@@ -62,6 +62,16 @@ function conciseDefinition(value: string): string {
   return enforceMaxWords(sentence(sentenceText), 36);
 }
 
+function conciseProcedureStep(value: string): string {
+  const sentenceText = firstSentence(value)
+    .replace(/^\s*(?:\d+[.)]|[-*•])\s*/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const words = sentenceText.split(/\s+/u).filter(Boolean);
+  if (words.length <= 28) return sentence(sentenceText);
+  return `${words.slice(0, 28).join(" ").replace(/[.,;:!?]*$/u, "")}.`;
+}
+
 function normalizeForMatch(value: string): string {
   return value
     .normalize("NFKC")
@@ -662,6 +672,7 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
   caution: string;
   summary: string;
   relevantFact: string | null;
+  enableProcedureRenderer?: boolean;
 }): string | null {
   if (lowGroundingLead(spec)) return null;
   if (answerPlan.taskType === "list_items") {
@@ -697,6 +708,23 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
       summary: opts.summary,
       relevantFact: opts.relevantFact,
     });
+  }
+
+  if (answerPlan.taskType === "procedure" && opts.enableProcedureRenderer === true) {
+    const candidates = uniqueSentences(
+      [
+        ...spec.facts,
+        opts.action,
+        opts.assessment,
+        opts.summary,
+        ...(opts.relevantFact ? [opts.relevantFact] : []),
+      ].filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item)),
+      5,
+    );
+    if (candidates.length === 0) return null;
+    return candidates
+      .map((item, index) => `${index + 1}. ${conciseProcedureStep(item)}`)
+      .join("\n");
   }
 
   if (answerPlan.taskType === "compare_concepts") {
@@ -857,6 +885,7 @@ export function composePlannedAnswer(input: ComposerInput, opts: ComposePlannedA
     caution,
     summary,
     relevantFact,
+    enableProcedureRenderer: true,
   });
   if (plannedKnowledgeAnswer) {
     return enforceMaxWords(plannedKnowledgeAnswer, input.constraints.maxWords);
