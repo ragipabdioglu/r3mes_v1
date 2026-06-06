@@ -32,6 +32,43 @@ Date: 2026-06-06 15:43:08 +03:00
 | pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke | 1 | expected fail | 7/15 pass; gp_vs_project_types_list improved from all 5 missing terms to 2 missing terms |
 | pnpm --filter @r3mes/backend-api run eval:real-data-certification | 0 | fail gate report generated | certificationBacklogCount 31, blockerCount 30 |
 
+## Incremental Closure - Concise List Evidence Ranking
+
+Date: 2026-06-06 16:16:00 +03:00
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Backlog owner touched: Phase 6 - Full Evidence Intelligence / context-evidence-coverage.
+- Goal: finish the remaining list-evidence coverage gap where concise list items existed in evidence but long heading/prose facts consumed the answer/eval budget first.
+
+### Changes
+- Added generic list-task ranking that prioritizes concise list-item facts ahead of long explanatory prose when enough concise facts are available.
+- Kept the logic evidence-shape based; no document-specific or fixture-specific literal was added.
+- Preserved retrieval, source selection, reranker, composer, safety, parser, and UI behavior.
+
+### Additional Verification
+| Command | Exit code | Result | Note |
+| --- | ---: | --- | --- |
+| pnpm --filter @r3mes/backend-api exec vitest run src/lib/skillPipeline.test.ts src/lib/hybridKnowledgeRetrieval.test.ts | 0 | pass | 55 tests passed |
+| pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit | 0 | pass | Typecheck clean |
+| pnpm --filter @r3mes/backend-api run build | 0 | pass | Prisma generate + tsc succeeded |
+| pnpm local:status | 0 | pass | backend/dApp/ai-engine/Qdrant/Postgres healthy; llama false, LoRA unavailable |
+| pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke | 1 | expected fail | 8/15 pass; gp_vs_project_types_list now passes; list_extraction bucket 2/2 |
+| pnpm --filter @r3mes/backend-api run eval:real-data-certification | 0 | fail gate report generated | certificationBacklogCount 30, blockerCount 29 |
+
+### Measured Impact
+- G.P smoke improved from 7/15 to 8/15.
+- `gp_vs_project_types_list` now passes.
+- `list_extraction` bucket is now 2/2 for the G.P smoke suite.
+- Certification backlog improved from 31/30 to 30/29.
+- Remaining certification owners: Phase 7 answer presentation 22, Phase 4 retrieval 3, Phase 5 query/source 2, Phase 6 context-evidence 2, Phase 10 triage 1.
+
+### Remaining Risks / Backlog
+- G.P smoke remains red with 7 failed cases.
+- Remaining Phase 6 context-evidence failures now appear outside the closed list-extraction target.
+- Definition, code, comparison, and visual/layout failures remain for their proper phase owners.
+- Overall release gate remains fail and should not be treated as product-ready.
+
 ## Measured Impact
 - G.P smoke remains 7/15 and release gate remains fail.
 - Target case gp_vs_project_types_list now produces 5 facts and captures more list evidence.

@@ -220,6 +220,35 @@ describe("skill pipeline evidence extractor", () => {
     expect(extraction.evidenceBundle?.diagnostics.kindCounts.list_item).toBeGreaterThanOrEqual(3);
   });
 
+  it("prioritizes concise list items over heading prose inside list evidence budget", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Desteklenen çıktı türlerini madde madde yaz.",
+      cards: [
+        {
+          sourceId: "generic-output-types",
+          title: "generic-output-types",
+          rawContent: [
+            "Platform uzun bir açıklama cümlesiyle farklı geliştirme araçlarının ne işe yaradığını anlatır.",
+            "Desteklenen çıktı türleri: çıktı türleri aşağıdaki seçeneklerden oluşur.",
+            "• Desktop output",
+            "• Web output",
+            "• Console output",
+            "• Library output",
+            "• Service output",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    const joined = extraction.usableFacts.join(" ");
+    expect(joined).toContain("Desktop output");
+    expect(joined).toContain("Web output");
+    expect(joined).toContain("Console output");
+    expect(joined).toContain("Library output");
+    expect(joined).toContain("Service output");
+    expect(joined).not.toContain("uzun bir açıklama");
+  });
+
   it("prioritizes labeled list items over nearby explanatory prose for list questions", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Sistemin temel özellikleri nelerdir?",

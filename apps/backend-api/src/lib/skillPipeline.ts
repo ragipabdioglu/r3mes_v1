@@ -793,10 +793,27 @@ function rankEvidenceFacts(query: string, facts: string[]): string[] {
   const task = detectAnswerTask(query);
   const uniqueFacts = unique(facts);
   if (task.taskType === "list_items") {
+    const factBody = (fact: string) => {
+      const separator = fact.indexOf(":");
+      return (separator >= 0 ? fact.slice(separator + 1) : fact).trim();
+    };
+    const isConciseListFact = (fact: string) => {
+      const body = factBody(fact);
+      if (body.length < 2 || body.length > 120) return false;
+      if (/[:;]\s*$/u.test(body) || body.includes(";")) return false;
+      if (/[.!?]\s+\p{L}/u.test(body)) return false;
+      if (/\b(?:aşağıdaki|asagidaki|başlığı|basligi|listelenir|üretil|uretil|geliştir|gelistir)\b/iu.test(body)) return false;
+      return true;
+    };
     const isLabeledListFact = (fact: string) => {
-      const body = fact.includes(":") ? fact.slice(fact.indexOf(":") + 1).trim() : fact.trim();
+      const body = factBody(fact);
       return hasLabeledListShape(body);
     };
+    const conciseFacts = uniqueFacts.filter(isConciseListFact);
+    if (conciseFacts.length >= 3) {
+      const nonConciseFacts = uniqueFacts.filter((fact) => !isConciseListFact(fact));
+      return [...conciseFacts, ...nonConciseFacts];
+    }
     const labeledFacts = uniqueFacts.filter(isLabeledListFact);
     if (labeledFacts.length >= 3) {
       const unlabeledFacts = uniqueFacts.filter((fact) => !isLabeledListFact(fact));

@@ -346,3 +346,4 @@ of truth; these files are the short working charter read before each task.
 - Latest certification remains backlog 31/blockers 30, but owner map shifted Phase 7 25 -> 22 and Phase 6 0 -> 3.
 
 - 2026-06-06 Phase 10/Faz 6 handoff: added same-artifact continuation evidence context, inline bullet/list extraction improvements, and rawContent structure-specific evidence extraction. G.P smoke still 7/15; gp_vs_project_types_list improved from 5 missing expected terms to 2 missing terms. Certification remains fail: 31 backlog / 30 blockers.
+- 2026-06-06 Phase 10/Faz 6 closure slice: added generic concise list fact prioritization for list_items tasks. G.P smoke improved to 8/15; gp_vs_project_types_list now passes and list_extraction is 2/2. Certification remains fail but improved to 30 backlog / 29 blockers.
