@@ -157,6 +157,36 @@ export function normalizeEvidenceExpectations(input = {}) {
   );
   assignIfPresent(
     output,
+    "expectedSourceTerms",
+    optionalStringList(input.expectedSourceTerms, "evidenceExpectations.expectedSourceTerms"),
+  );
+  assignIfPresent(
+    output,
+    "requiredSourceTerms",
+    optionalStringList(input.requiredSourceTerms, "evidenceExpectations.requiredSourceTerms"),
+  );
+  assignIfPresent(
+    output,
+    "expectedTitleTerms",
+    optionalStringList(input.expectedTitleTerms, "evidenceExpectations.expectedTitleTerms"),
+  );
+  assignIfPresent(
+    output,
+    "requiredTitleTerms",
+    optionalStringList(input.requiredTitleTerms, "evidenceExpectations.requiredTitleTerms"),
+  );
+  assignIfPresent(
+    output,
+    "requiredContextTerms",
+    optionalStringList(input.requiredContextTerms, "evidenceExpectations.requiredContextTerms"),
+  );
+  assignIfPresent(
+    output,
+    "forbiddenContextTerms",
+    optionalStringList(input.forbiddenContextTerms, "evidenceExpectations.forbiddenContextTerms"),
+  );
+  assignIfPresent(
+    output,
     "requiredEvidenceTerms",
     optionalStringList(input.requiredEvidenceTerms ?? input.requiredTerms, "evidenceExpectations.requiredEvidenceTerms"),
   );
@@ -169,6 +199,21 @@ export function normalizeEvidenceExpectations(input = {}) {
     output,
     "requiredNotSupportedTerms",
     optionalStringList(input.requiredNotSupportedTerms, "evidenceExpectations.requiredNotSupportedTerms"),
+  );
+  assignIfPresent(
+    output,
+    "expectedEvidenceType",
+    optionalString(input.expectedEvidenceType, "evidenceExpectations.expectedEvidenceType"),
+  );
+  assignIfPresent(
+    output,
+    "requiredEvidenceType",
+    optionalString(input.requiredEvidenceType, "evidenceExpectations.requiredEvidenceType"),
+  );
+  assignIfPresent(
+    output,
+    "allowedEvidenceTypes",
+    optionalStringList(input.allowedEvidenceTypes, "evidenceExpectations.allowedEvidenceTypes"),
   );
   assignIfPresent(
     output,

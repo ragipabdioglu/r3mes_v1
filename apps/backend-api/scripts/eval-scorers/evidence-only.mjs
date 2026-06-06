@@ -34,6 +34,26 @@ function presentTerms(text, terms) {
   return compactStrings(terms).filter((term) => includesTerm(text, term));
 }
 
+const EVIDENCE_TYPE_ALIASES = new Map([
+  ["definition", ["definition"]],
+  ["define", ["definition"]],
+  ["list", ["list", "list_item", "list_items"]],
+  ["list_items", ["list", "list_item", "list_items"]],
+  ["comparison", ["comparison", "comparison_point", "compare", "compare_concepts"]],
+  ["compare", ["comparison", "comparison_point", "compare", "compare_concepts"]],
+  ["procedure", ["procedure", "procedure_step", "how_to", "steps"]],
+  ["how_to", ["procedure", "procedure_step", "how_to", "steps"]],
+  ["code", ["code", "code_fact", "code_explanation", "procedure_step"]],
+  ["code_explanation", ["code", "code_fact", "code_explanation", "procedure_step"]],
+  ["visual_layout", ["visual_layout", "layout", "image_layout", "figure", "visual"]],
+  ["summary", ["summary", "text_fact", "grounded_summary"]],
+]);
+
+function evidenceTypeAlternatives(value) {
+  const normalized = normalize(value);
+  return EVIDENCE_TYPE_ALIASES.get(normalized) ?? [normalized];
+}
+
 function joinTextParts(parts) {
   return compactStrings(parts).join(" ");
 }
@@ -405,7 +425,9 @@ export function scoreEvidenceOnly(testCase, response) {
   ]);
   if (expectedEvidenceTypes.length > 0) {
     const normalizedActualTypes = new Set(evidenceTypes.map(normalize));
-    const matched = expectedEvidenceTypes.some((type) => normalizedActualTypes.has(normalize(type)));
+    const matched = expectedEvidenceTypes.some((type) =>
+      evidenceTypeAlternatives(type).some((candidate) => normalizedActualTypes.has(candidate)),
+    );
     if (!matched) {
       pushFinding(findings, "evidence_type_mismatch", "expected_evidence_type_missing", {
         expected: expectedEvidenceTypes,

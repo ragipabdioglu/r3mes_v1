@@ -336,3 +336,11 @@ of truth; these files are the short working charter read before each task.
 - Gates passed: safety fallback/boundary tests 15/15, backend typecheck, backend build/restart health, context-pruning eval 5/5.
 - G.P smoke remains 10/15 with the same expected red-gate failures.
 - Latest certification improved to backlog 31, blockers 30; remaining work is mostly Phase 7 answer presentation plus Phase 4/5 owner issues.
+
+## Latest Phase 10 Evidence Contract Classification Repair Note
+
+- Fixed Eval Contract V2 normalization so evidence-only required context/source/title/type fields are not dropped before scoring.
+- Added generic evidence type aliases, e.g. `list` -> `list_item`, `comparison` -> `comparison_point`, `procedure` -> `procedure_step`, `code` -> `code_fact`/`procedure_step`.
+- No product runtime path changed; this is Control Tower/certification accuracy work only.
+- G.P smoke is now 7/15 with stricter, more honest evidence-only failures.
+- Latest certification remains backlog 31/blockers 30, but owner map shifted Phase 7 25 -> 22 and Phase 6 0 -> 3.
