@@ -215,6 +215,15 @@ describe("queryUnderstanding", () => {
       operation: "explain_with_sources",
       outputFormat: "short",
     });
+
+    const purpose = buildQueryUnderstanding("Bir nesne ne işe yarar?");
+    expect(purpose.mode).toBe("knowledge");
+    expect(purpose.retrievalIntent).toBe("knowledge_lookup");
+    expect(purpose.answerTask.taskType).toBe("definition");
+    expect(purpose.queryContract).toMatchObject({
+      operation: "define",
+      requiredEvidenceType: "source",
+    });
   });
 
   it("keeps conversation turns backward-compatible while emitting a no-evidence contract", () => {

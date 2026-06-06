@@ -126,7 +126,7 @@ function detectTask(normalizedQuery: string, requestedFields: RequestedField[]):
     reasons.push("list_language");
     return { taskType: "list_items", answerIntent: "explain", reasons };
   }
-  if (hasAny(normalizedQuery, [/\b(nedir|ne demek|tanim|tanım|tanima gore|tanıma göre)\b/u])) {
+  if (hasAny(normalizedQuery, [/\b(nedir|ne demek|ne ise yarar|tanim|tanım|tanima gore|tanıma göre)\b/u])) {
     reasons.push("definition_language");
     return { taskType: "definition", answerIntent: "explain", reasons };
   }

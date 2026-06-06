@@ -218,6 +218,42 @@ Date: 2026-06-06 20:50:00 +03:00
 - Continue Phase 10 using V2-reingested data only.
 - Do not solve the remaining four cases with fixture hacks or document-specific literals; keep them assigned to Phase 4/5/6/7 owner work according to diagnostics.
 
+## 2026-06-07 - Generic Purpose Query Intent Closure
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Backlog owner touched: Phase 5 - Query / Source Intelligence.
+- Goal: prevent concept/object purpose questions from being misrouted to conversational usage-help mode.
+
+### Change
+- Narrowed platform usage-help detection so `ne ise yarar` only routes to conversation when the query is about the platform/system itself.
+- Added generic answer-task detection for `X ne ise yarar?` as a definition/explain task.
+- Preserved platform help behavior for `R3MES`, `bu sistem`, and `bu platform` usage questions.
+- No data-specific or fixture-specific literal was added to core logic.
+- Retrieval scoring, parser, Qdrant, embedding, reranker, evidence extraction, composer, safety, UI, and provider behavior were not changed.
+
+### Verification
+| Command | Exit | Result | Note |
+| --- | ---: | --- | --- |
+| `pnpm --filter @r3mes/backend-api exec vitest run src/lib/conversationalIntent.test.ts src/lib/queryUnderstanding.test.ts src/lib/answerTaskDetector.test.ts` | 0 | pass | 25 tests passed |
+| `pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit` | 0 | pass | Typecheck clean |
+| `pnpm --filter @r3mes/backend-api run build` | 0 | pass | Build succeeded after controlled backend restart |
+| `pnpm local:status` | 0 | pass | backend/dApp/ai-engine/Qdrant/Postgres healthy; llama false, LoRA unavailable |
+| `pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke` | 1 | expected fail | 12/15 pass; `gp_combobox_definition` now passes |
+| `pnpm --filter @r3mes/backend-api run eval:real-data-certification` | 0 | fail gate | certificationBacklogCount 29, blockerCount 28 |
+
+### Measured Impact
+- G.P smoke improved from 11/15 to 12/15.
+- `gp_combobox_definition` no longer uses `conversational_intent`; it now goes through RAG and passes.
+- G.P definition bucket improved from 3/5 to 4/5.
+- Certification improved from backlog 30 / blockers 29 to backlog 29 / blockers 28.
+- Provider fallback ratios stayed 0.
+
+### Decision
+- Keep this as a generic Phase 5 intent boundary correction.
+- Do not add object names or document-specific phrases to conversational or query logic.
+- Remaining G.P failures are now `.NET Framework`, `button3_Click`, and visual/layout controls.
+
 ## Measured Impact
 - G.P smoke remains 7/15 and release gate remains fail.
 - Target case gp_vs_project_types_list now produces 5 facts and captures more list evidence.

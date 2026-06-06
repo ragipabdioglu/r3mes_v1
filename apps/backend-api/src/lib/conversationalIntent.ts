@@ -55,12 +55,20 @@ function isOnlyShortSocialText(normalized: string): boolean {
   return parts.length > 0 && parts.length <= 5 && !looksKnowledgeSeeking(normalized);
 }
 
+function asksPlatformUsageHelp(normalized: string): boolean {
+  const platformSubject = /\b(r3mes|bu sistem|bu platform|platform|sistem)\b/u.test(normalized);
+  return (
+    /\b(bu sistemi nasil kullanirim|nasil kullanilir|nasil kullanacagim|yardim|ne yapabiliyorsun|neler yapabiliyorsun|r3mes nedir|bu platform nedir)\b/u.test(normalized) ||
+    (platformSubject && /\bne ise yarar\b/u.test(normalized))
+  );
+}
+
 export function detectConversationalIntent(query: string): ConversationalIntentDecision | null {
   const normalized = normalize(query);
   if (!normalized) return null;
 
   if (
-    /\b(bu sistemi nasil kullanirim|nasil kullanilir|nasil kullanacagim|yardim|ne yapabiliyorsun|neler yapabiliyorsun|ne ise yarar|r3mes nedir|bu platform nedir)\b/u.test(normalized) ||
+    asksPlatformUsageHelp(normalized) ||
     /\b(kaynak|collection)\b.*\b(nasil\s+secerim|nasil\s+secilir|secerim|secilir|kullanirim)\b/u.test(normalized) ||
     /\b(belge|dokuman|doküman|pdf|docx)\b.*\b(nasil\s+yukle|nasil\s+yuklerim|nereye\s+yukle|nereden\s+yukle|yuklerim|yuklenir|yukleyecegim)\b/u.test(normalized)
   ) {

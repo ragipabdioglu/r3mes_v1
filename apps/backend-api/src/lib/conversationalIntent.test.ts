@@ -31,10 +31,13 @@ describe("detectConversationalIntent", () => {
     expect(detectConversationalIntent("PDF nasıl yüklerim?")).toMatchObject({ kind: "usage_help" });
     expect(detectConversationalIntent("Kaynak nasıl seçerim?")).toMatchObject({ kind: "usage_help" });
     expect(detectConversationalIntent("R3MES nedir ve ne işe yarar?")).toMatchObject({ kind: "usage_help" });
+    expect(detectConversationalIntent("Bu platform ne işe yarar?")).toMatchObject({ kind: "usage_help" });
   });
 
   it("keeps document knowledge requests in RAG when they ask for document content", () => {
     expect(detectConversationalIntent("Bu belgeyi kontrol eder misin?")).toBeNull();
     expect(detectConversationalIntent("PDF raporundaki LDL değeri nasıl?")).toBeNull();
+    expect(detectConversationalIntent("Bir nesne ne işe yarar?")).toBeNull();
+    expect(detectConversationalIntent("Kavram ne işe yarar?")).toBeNull();
   });
 });
