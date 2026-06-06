@@ -84,4 +84,11 @@ describe("detectRequestedFields", () => {
     expect(result.requestedFields.map((field) => field.id)).toContain("dagitilmasi_ongorulen_diger_kaynaklar");
     expect(result.requestedFields.map((field) => field.id)).not.toContain("sonucu");
   });
+
+  it("does not convert inflected comparison subjects into requested fields", () => {
+    const result = detectRequestedFields("İki yaklaşımın farklarını tablo olarak ver.");
+
+    expect(result.requestedFields).toEqual([]);
+    expect(result.constraints.format).toBe("table");
+  });
 });

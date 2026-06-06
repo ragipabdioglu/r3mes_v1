@@ -118,7 +118,7 @@ function detectTask(normalizedQuery: string, requestedFields: RequestedField[]):
     reasons.push("requested_field_match");
     return { taskType: "field_extraction", answerIntent: "explain", reasons };
   }
-  if (hasAny(normalizedQuery, [/\b(fark|farki|farkı|karsilastir|karşılaştır|ayni sey mi|aynı şey mi|arasindaki|arasındaki)\b/u])) {
+  if (hasAny(normalizedQuery, [/\b(fark(?:lar)?(?:i|ı|ini|ını)?|karsilastir|karşılaştır|ayni sey mi|aynı şey mi|arasindaki|arasındaki)\b/u])) {
     reasons.push("compare_language");
     return { taskType: "compare_concepts", answerIntent: "compare", reasons };
   }

@@ -136,6 +136,44 @@ Date: 2026-06-06 17:05:00 +03:00
 - Keep this as a Phase 6 evidence coverage closure discovered during Phase 10 certification.
 - Remaining G.P failures are still routed to definition retrieval/source, code evidence, table/comparison evidence, and visual/layout evidence owner work.
 
+## Incremental Closure - Inflected Turkish Comparison Intent
+
+Date: 2026-06-06 17:35:00 +03:00
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Backlog owner touched: Phase 5 - Query / Source Intelligence and Phase 6 - Full Evidence Intelligence handoff.
+- Goal: prevent inflected Turkish comparison wording from being misclassified as field extraction, which caused comparison evidence to be emitted as generic text facts.
+
+### Changes
+- Expanded generic Turkish comparison intent detection for inflected forms such as `farklarını`.
+- Aligned requested-field suppression so comparison subjects are not converted into requested fields.
+- Preserved table output constraint detection for comparison queries that ask for a table.
+- No data-specific or fixture-specific literal was added.
+- Preserved parser, retrieval scoring, reranker, composer, safety, provider, and UI behavior.
+
+### Verification
+| Command | Exit code | Result | Note |
+| --- | ---: | --- | --- |
+| pnpm --filter @r3mes/backend-api exec vitest run src/lib/answerTaskDetector.test.ts src/lib/requestedFieldDetector.test.ts src/lib/skillPipeline.test.ts | 0 | pass | 47 tests passed |
+| pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit | 0 | pass | Typecheck clean |
+| pnpm --filter @r3mes/backend-api run build | 0 | pass | Build succeeded after controlled backend restart |
+| pnpm local:status | 0 | pass | backend/dApp/ai-engine/Qdrant/Postgres healthy; llama false, LoRA unavailable |
+| pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke | 1 | expected fail | 11/15 pass; `gp_arrays_collections_table_compare` now passes |
+| pnpm --filter @r3mes/backend-api run eval:real-data-certification | 0 | fail gate | certificationBacklogCount 30, blockerCount 29 |
+
+### Measured Impact
+- G.P smoke improved from 10/15 to 11/15.
+- G.P `comparison_extraction` bucket is now 3/3.
+- `gp_arrays_collections_table_compare` now routes as `compare_concepts` and emits `comparison_point` evidence.
+- Provider fallback ratios stayed 0.
+- Global certification remains fail at 30 backlog / 29 blockers; remaining failures are definition retrieval/source, code evidence, and visual/layout evidence.
+
+### Decision
+- Keep this as a generic Turkish query/task detection correction.
+- Do not add domain-specific field rules for comparison subjects.
+- Remaining G.P failures should continue through their owner phases instead of composer or fixture hacks.
+
 ## Measured Impact
 - G.P smoke remains 7/15 and release gate remains fail.
 - Target case gp_vs_project_types_list now produces 5 facts and captures more list evidence.

@@ -241,7 +241,7 @@ function detectsCautionSuppression(normalizedQuery: string): boolean {
 
 export function detectRequestedFields(query: string): RequestedFieldDetection {
   const normalizedQuery = normalize(query);
-  const isComparisonQuery = /\b(fark|farki|farkı|karsilastir|karşılaştır|ayni sey mi|aynı şey mi|arasindaki|arasındaki)\b/u.test(normalizedQuery);
+  const isComparisonQuery = /\b(fark(?:lar)?(?:i|ı|ini|ını)?|karsilastir|karşılaştır|ayni sey mi|aynı şey mi|arasindaki|arasındaki)\b/u.test(normalizedQuery);
   const requestedFields = toRequestedFields([
     ...(isComparisonQuery ? [] : extractQuotedCandidates(query, normalizedQuery)),
     ...(isComparisonQuery ? [] : extractCueBasedCandidates(normalizedQuery)),

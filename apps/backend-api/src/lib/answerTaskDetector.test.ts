@@ -51,6 +51,14 @@ describe("detectAnswerTask", () => {
     expect(task.forbiddenAdditions).toContain("source_external_inference");
   });
 
+  it("detects inflected Turkish comparison wording without data-specific terms", () => {
+    const task = detectAnswerTask("İki yaklaşımın farklarını tablo olarak ver.");
+
+    expect(task.taskType).toBe("compare_concepts");
+    expect(task.answerIntent).toBe("compare");
+    expect(task.outputConstraints.format).toBe("table");
+  });
+
   it("detects document hints independently from hardcoded collection names", () => {
     const task = detectAnswerTask("4. hafta dosyasındaki öğrencilerin telif hakkı sorusuna verdiği genel görüşler ne yönde?");
 
