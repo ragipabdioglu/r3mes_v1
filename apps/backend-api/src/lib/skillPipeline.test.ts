@@ -249,6 +249,27 @@ describe("skill pipeline evidence extractor", () => {
     expect(joined).not.toContain("uzun bir açıklama");
   });
 
+  it("keeps method body details as code evidence for handler explanation questions", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "saveButton_Click içinde ne yapılıyor?",
+      cards: [
+        {
+          sourceId: "generic-handler-source",
+          title: "generic-handler-source",
+          rawContent:
+            "private void saveButton_Click(object sender, EventArgs e) { // The handler validates the input. if (nameTextBox.Text.Length > 0) { itemList.Items.Add(nameTextBox.Text); } nameTextBox.Clear(); nameTextBox.Focus(); }",
+        },
+      ],
+    });
+
+    const joined = extraction.usableFacts.join(" ");
+    expect(joined).toContain("saveButton_Click");
+    expect(joined).toContain("nameTextBox.Text.Length");
+    expect(joined).toContain("itemList.Items.Add");
+    expect(joined).toContain("nameTextBox.Focus");
+    expect(extraction.evidenceBundle?.diagnostics.kindCounts.code_fact).toBeGreaterThanOrEqual(1);
+  });
+
   it("keeps adjacent subject context for comparison evidence", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Alpha ile Beta arasındaki fark nedir?",

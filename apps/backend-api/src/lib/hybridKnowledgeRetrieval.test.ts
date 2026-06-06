@@ -678,6 +678,74 @@ describe("true hybrid retrieval helpers", () => {
     expect(ranked.map((item) => item.chunk.id)).not.toContain("legal-1");
   });
 
+  it("pre-ranks method body chunks over same-document intro chunks for code explanation queries", () => {
+    const ranked = preRankHybridKnowledgeCandidates({
+      query: "saveButton_Click içinde ne yapılıyor?",
+      limit: 2,
+      candidates: [
+        candidate({
+          id: "intro",
+          documentId: "doc-code",
+          title: "Generic UI handler lesson",
+          content: "This lesson introduces event handlers and shows how interface controls are used in an example.",
+        }),
+        candidate({
+          id: "method-body",
+          documentId: "doc-code",
+          title: "Generic UI handler lesson",
+          content:
+            "private void saveButton_Click(object sender, EventArgs e) { if (nameTextBox.Text.Length > 0) { itemList.Items.Add(nameTextBox.Text); } nameTextBox.Clear(); }",
+        }),
+        candidate({
+          id: "other-method",
+          documentId: "doc-code",
+          title: "Generic UI handler lesson",
+          content: "private void resetButton_Click(object sender, EventArgs e) { itemList.Items.Clear(); }",
+        }),
+      ],
+    });
+
+    expect(ranked[0]?.chunk.id).toBe("method-body");
+    expect(ranked.map((item) => item.chunk.id)).toContain("method-body");
+  });
+
+  it("preserves method body context while pruning code explanation evidence", () => {
+    const text = buildPrunedEvidenceInput({
+      query: "saveButton_Click içinde ne yapılıyor?",
+      budgetMode: "deep_rag",
+      candidate: {
+        chunk: {
+          id: "method-body",
+          documentId: "doc-code",
+          chunkIndex: 5,
+          content:
+            "private void saveButton_Click(object sender, EventArgs e) { // The handler validates the input. if (nameTextBox.Text.Length > 0) { itemList.Items.Add(nameTextBox.Text); } nameTextBox.Clear(); nameTextBox.Focus(); }",
+          document: {
+            title: "Generic UI handler lesson",
+            collectionId: "kc-1",
+          },
+          embedding: null,
+        },
+        card: {
+          topic: "generic code",
+          tags: [],
+          patientSummary: "",
+          clinicalTakeaway: "",
+          safeGuidance: "",
+          redFlags: "",
+          doNotInfer: "",
+        },
+      },
+      maxChars: 420,
+      maxSentences: 2,
+    });
+
+    expect(text).toContain("saveButton_Click");
+    expect(text).toContain("nameTextBox.Text.Length");
+    expect(text).toContain("itemList.Items.Add");
+    expect(text).toContain("nameTextBox.Focus");
+  });
+
   it("records caller-provided retrieval budget mode in diagnostics", async () => {
     const result = await retrieveKnowledgeContextTrueHybrid({
       query: "test",

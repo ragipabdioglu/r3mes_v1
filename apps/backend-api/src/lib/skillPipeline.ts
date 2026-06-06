@@ -430,6 +430,55 @@ function comparisonQueryFragments(text: string, query: string, limit = 4): strin
   return unique(fragments).slice(0, limit);
 }
 
+function hasCodeLikeFragmentShape(value: string): boolean {
+  return (
+    /```[\s\S]*?```/u.test(value) ||
+    /\b(?:class|function|def|private|public|protected|static|async|void|return|if|else|for|foreach|while|switch|try|catch)\b[\s\S]{0,160}[({;]/iu.test(value) ||
+    /\b[a-zA-Z_][a-zA-Z0-9_]{2,}\s*\([^)]*\)\s*\{/u.test(value) ||
+    /\b[a-zA-Z_][a-zA-Z0-9_]{1,}\.[a-zA-Z_][a-zA-Z0-9_]{1,}\s*(?:=|\()/u.test(value)
+  );
+}
+
+function codeQueryFragments(text: string, query: string, limit = 3): string[] {
+  const task = detectAnswerTask(query);
+  if (task.taskType !== "code_explanation" && task.taskType !== "procedure") return [];
+  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
+  if (queryTokens.size === 0) return [];
+  const normalizedText = text
+    .replace(/#{1,6}\s*page\s+\d+/giu, "\n")
+    .replace(/#{1,6}\s+/g, "\n")
+    .replace(/^\s*(?:Source Summary|Key Takeaway|Temel Bilgi|Özet|Ozet)\s*:\s*/gimu, "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+  const lines = normalizedText
+    .split(/\n+/u)
+    .map((line) => normalizeDocumentScaffoldFragment(line.trim()))
+    .filter(Boolean);
+  const windows: Array<{ fragment: string; index: number }> = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const parts = lines.slice(index, index + 5);
+    const fragment = parts.join(" ").trim();
+    if (fragment) windows.push({ fragment, index });
+  }
+  if (lines.length === 1) windows.push({ fragment: lines[0] ?? "", index: 0 });
+  const fragments = windows
+    .map(({ fragment, index }) => {
+      const coreOverlap = queryCoreOverlapScore(queryTokens, fragment);
+      const codeShapeBonus = hasCodeLikeFragmentShape(fragment) ? 18 : 0;
+      const memberAccessBonus = /\b[a-zA-Z_][a-zA-Z0-9_]{1,}\.[a-zA-Z_][a-zA-Z0-9_]{1,}/u.test(fragment) ? 8 : 0;
+      const lengthBonus = fragment.length >= 80 && fragment.length <= 900 ? 4 : 0;
+      return {
+        fragment: fragment.slice(0, 900),
+        index,
+        score: coreOverlap * 12 + codeShapeBonus + memberAccessBonus + lengthBonus,
+      };
+    })
+    .filter((item) => item.score >= 18)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => item.fragment);
+  return unique(fragments).slice(0, limit);
+}
+
 function isListLikeLine(value: string): boolean {
   return /^\s*(?:[-*•]|\d{1,2}[.)])\s+/u.test(value);
 }
@@ -1414,6 +1463,14 @@ export function buildDeterministicEvidenceExtraction(
 
     const rawContent = card.rawContent?.trim() ?? "";
     if (rawContent) {
+      for (const fragment of codeQueryFragments(rawContent, input.userQuery)) {
+        addUsableIfRelevant(sourceLabel, fragment, {
+          allowGenericGuidance: true,
+          kind: "direct",
+          force: true,
+          maxChars: 900,
+        });
+      }
       for (const fragment of listQueryFragments(rawContent, input.userQuery)) {
         addUsableIfRelevant(sourceLabel, fragment, {
           allowGenericGuidance: true,
@@ -1477,6 +1534,14 @@ export function buildDeterministicEvidenceExtraction(
             kind: section.kind === "supporting" ? "supporting" : "direct",
             force: true,
             maxChars: 620,
+          });
+        }
+        for (const fragment of codeQueryFragments(section.text, input.userQuery)) {
+          addUsableIfRelevant(sourceLabel, fragment, {
+            allowGenericGuidance: true,
+            kind: section.kind === "supporting" ? "supporting" : "direct",
+            force: true,
+            maxChars: 900,
           });
         }
         for (const fragment of financeTargetedFragments(section.text, input.userQuery)) {

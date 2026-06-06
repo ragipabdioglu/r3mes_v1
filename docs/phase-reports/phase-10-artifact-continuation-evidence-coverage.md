@@ -272,3 +272,48 @@ Date: 2026-06-06 20:50:00 +03:00
 - No data-specific literal was added to core logic.
 - Tests use generic project/list examples, not G.P fixture literals.
 - Public/debug response boundary was not changed.
+
+## 2026-06-07 - Generic Code Evidence Coverage Slice
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Backlog owners touched: Phase 4 Retrieval Quality and Phase 6 Evidence Intelligence.
+- Goal: make code/procedure questions reach method-body evidence instead of stopping at same-document intro text.
+
+### Change
+- Added generic code-like evidence scoring in true hybrid retrieval.
+- Code/procedure queries now boost method-body/code-shaped chunks during pre-rank.
+- Post-rerank diversification can include a code-like candidate when accepted candidates lack code evidence.
+- Code/procedure evidence pruning now preserves raw method-body context inside the evidence budget instead of sentence-pruning away member access lines.
+- Added generic code fragment extraction in the deterministic evidence extractor so method signatures, member access, and body details are available as `code_fact` evidence.
+- No dataset-specific literal was added to core logic. G.P identifiers remain only in eval/report artifacts.
+- Parser, Qdrant indexing, embedding provider, reranker provider, composer, safety behavior, UI layout, and public response shape were not changed.
+
+### Verification
+| Command | Exit | Result | Note |
+| --- | ---: | --- | --- |
+| `pnpm --filter @r3mes/backend-api exec vitest run src/lib/hybridKnowledgeRetrieval.test.ts src/lib/skillPipeline.test.ts` | 0 | pass | 59 tests passed |
+| `pnpm --filter @r3mes/backend-api exec tsc --noEmit` | 0 | pass | Typecheck clean |
+| `pnpm --filter @r3mes/backend-api run build` | 1 | local warning | Prisma generate hit Windows DLL lock while backend was running |
+| `pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json` | 0 | pass | Dist updated without Prisma generate |
+| `pnpm local:status` | 0 | pass | backend/dApp/ai-engine/Qdrant/Postgres healthy; llama false, LoRA unavailable |
+| `pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke` | 1 | expected fail | 12/15 pass; code case evidence-only now passes |
+| `pnpm --filter @r3mes/backend-api run eval:real-data-certification` | 0 | fail gate | certificationBacklogCount 29, blockerCount 28 |
+
+### Measured Impact
+- `gp_button3_click_code` moved from `retrieval_or_evidence_failure` to `composer_or_model_generation_failure`.
+- Evidence-only for the code case is now `ok: true`.
+- Code evidence observations increased from 2 to 5 and procedure-step observations from 3 to 5 in the G.P smoke summary.
+- Retrieval now selects method-body chunks first for the code case instead of only intro/heading chunks.
+- Overall G.P smoke remains 12/15 because final answer still omits one required surface term; this is answer/composer presentation, not context retrieval.
+
+### Remaining Risks / Backlog
+- `gp_button3_click_code`: evidence is sufficient, but deterministic composer does not faithfully carry all code identifiers into final answer. Owner: Phase 7 - Full Answer Intelligence.
+- `gp_dotnet_framework_definition`: still no-source / retrieval-or-evidence failure. Owner: Phase 4/5 diagnosis.
+- `gp_ders8_visual_layout_controls`: still visual/layout evidence failure. Owner: Document Intelligence / visual-layout backlog.
+- Retrieval evidence-demand diagnostics still report code missing because G.P code chunks are metadata-labeled as paragraph; runtime code-like inference helped behavior, but ingestion artifact classification still needs product cleanup.
+
+### Decision
+- Accept this slice as a generic code evidence coverage improvement.
+- Do not patch final answer text for the G.P case in retrieval/evidence.
+- Continue Phase 10 certification with V2 data and keep the remaining code answer issue assigned to Phase 7.

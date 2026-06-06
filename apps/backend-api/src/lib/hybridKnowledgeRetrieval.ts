@@ -429,6 +429,10 @@ function normalize(text: string): string {
   return normalizeConceptText(text);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function tokenize(text: string): string[] {
   return normalize(text)
     .split(/[^\p{L}\p{N}-]+/u)
@@ -744,6 +748,61 @@ function candidateMatchesTermGroup(candidate: { chunk: HybridKnowledgeChunk }, t
   return terms.some((term) => haystack.includes(normalize(term)));
 }
 
+function isCodeEvidenceQuery(query: string): boolean {
+  const task = detectAnswerTask(query).taskType;
+  return task === "code_explanation" || task === "procedure";
+}
+
+function rawCodeIdentifierTerms(value: string): string[] {
+  return [...new Set(
+    [...value.matchAll(/\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b/gu)]
+      .map((match) => match[0])
+      .filter((token) =>
+        token.includes("_") ||
+        /\d/u.test(token) ||
+        /[a-z][A-Z]/u.test(token) ||
+        new RegExp(`\\b${escapeRegExp(token)}\\s*\\(`, "u").test(value)
+      )
+      .map((token) => normalize(token)),
+  )].slice(0, 8);
+}
+
+function hasCodeLikeEvidenceShape(value: string): boolean {
+  const text = value.trim();
+  if (!text) return false;
+  return (
+    /```[\s\S]*?```/u.test(text) ||
+    /\b(?:class|function|def|private|public|protected|static|async|void|return|if|else|for|foreach|while|switch|try|catch)\b[\s\S]{0,120}[({;]/iu.test(text) ||
+    /\b[a-zA-Z_][a-zA-Z0-9_]{2,}\s*\([^)]*\)\s*\{/u.test(text) ||
+    /\b[a-zA-Z_][a-zA-Z0-9_]{1,}\.[a-zA-Z_][a-zA-Z0-9_]{1,}\s*(?:=|\()/u.test(text) ||
+    (/[{};]/u.test(text) && /\b(?:if|return|new|this|await|const|let|var)\b/iu.test(text))
+  );
+}
+
+function codeEvidenceRelevanceScore(query: string, candidate: { chunk: HybridKnowledgeChunk }): number {
+  if (!isCodeEvidenceQuery(query)) return 0;
+  const content = candidate.chunk.content;
+  const artifactKind = normalize(candidate.chunk.artifactKind ?? "");
+  const haystack = normalize([
+    candidate.chunk.document.title,
+    content,
+    metadataText(candidate.chunk.autoMetadata),
+  ].join(" "));
+  const identifiers = rawCodeIdentifierTerms(query);
+  let score = 0;
+  if (artifactKind === "code" || artifactKind === "code_block") score += 12;
+  if (artifactKind === "procedure") score += 6;
+  if (hasCodeLikeEvidenceShape(content)) score += 10;
+  for (const identifier of identifiers) {
+    if (haystack.includes(identifier)) score += 7;
+  }
+  const queryTokens = new Set(buildExpandedQueryTokens(query, null, 32));
+  for (const token of tokenize(content)) {
+    if (queryTokens.has(token)) score += 1;
+  }
+  return Math.min(40, score);
+}
+
 function criticalEvidenceCoverageScore(candidate: { chunk: HybridKnowledgeChunk }, terms: string[]): number {
   const haystack = normalize([
     candidate.chunk.document.title,
@@ -817,6 +876,40 @@ function diversifyCriticalEvidenceCandidates<T extends { chunk: HybridKnowledgeC
   const deduped = new Map<string, T>();
   for (const candidate of selected) deduped.set(key(candidate), candidate);
   return [...deduped.values()].slice(0, limit);
+}
+
+function diversifyCodeEvidenceCandidates<T extends { chunk: HybridKnowledgeChunk }>(
+  query: string,
+  accepted: T[],
+  candidates: T[],
+  limit: number,
+): T[] {
+  if (!isCodeEvidenceQuery(query) || candidates.length === 0) return accepted.slice(0, limit);
+  const selected = accepted.slice(0, limit);
+  const key = (candidate: T) => candidate.chunk.id || `${candidate.chunk.documentId}:${candidate.chunk.chunkIndex}`;
+  const selectedKeys = () => new Set(selected.map(key));
+  const selectedHasCodeEvidence = selected.some((candidate) => codeEvidenceRelevanceScore(query, candidate) >= 10);
+  if (selectedHasCodeEvidence) return selected;
+
+  const match = candidates
+    .filter((candidate) => !selectedKeys().has(key(candidate)))
+    .map((candidate) => ({ candidate, score: codeEvidenceRelevanceScore(query, candidate) }))
+    .filter((item) => item.score >= 10)
+    .sort((a, b) => b.score - a.score || a.candidate.chunk.chunkIndex - b.candidate.chunk.chunkIndex)[0]?.candidate;
+  if (!match) return selected;
+  if (selected.length < limit) return [...selected, match].slice(0, limit);
+
+  let replaceIndex = selected.length - 1;
+  let lowestCodeScore = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < selected.length; index += 1) {
+    const score = codeEvidenceRelevanceScore(query, selected[index]);
+    if (score < lowestCodeScore) {
+      lowestCodeScore = score;
+      replaceIndex = index;
+    }
+  }
+  selected[replaceIndex] = match;
+  return selected.slice(0, limit);
 }
 
 function prioritizeCriticalEvidenceCandidates<T extends { chunk: HybridKnowledgeChunk }>(
@@ -1234,12 +1327,13 @@ function scoreLightweightCandidate(query: string, candidate: HybridKnowledgeCand
     36,
     Math.max(0, ...criticalEvidenceTermGroups(query).map((group) => criticalEvidenceCoverageScore(candidate, group) * 3)),
   );
+  const codeEvidenceBonus = codeEvidenceRelevanceScore(query, candidate);
   const identifierBonus = targetIndexes.some((index) => title.includes(index) || candidate.chunk.content.includes(index))
     ? 10
     : 0;
   const symbolBonus = primarySymbol && candidateTitleSymbol(title) === primarySymbol ? 8 : 0;
   const lengthPenalty = candidate.chunk.content.trim().length < 80 ? 1 : 0;
-  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus + criticalEvidenceBonus + identifierBonus + symbolBonus - lengthPenalty;
+  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus + criticalEvidenceBonus + codeEvidenceBonus + identifierBonus + symbolBonus - lengthPenalty;
 }
 
 export function preRankHybridKnowledgeCandidates(opts: {
@@ -1552,6 +1646,20 @@ export function buildPrunedEvidenceInputWithDiagnostics(opts: {
   ].filter(Boolean).join("\n");
   const sourceText = rawContent || structured.trim();
   const task = detectAnswerTask(opts.query);
+  if ((task.taskType === "code_explanation" || task.taskType === "procedure") && hasCodeLikeEvidenceShape(sourceText)) {
+    const text = sourceText.slice(0, maxChars).trim();
+    return {
+      text,
+      diagnostics: {
+        mode: text.length < sourceText.length ? "pruned" : "raw",
+        rawChars: sourceText.length,
+        prunedChars: text.length,
+        candidateSentenceCount: 1,
+        selectedSentenceCount: text ? 1 : 0,
+        droppedSentenceCount: text.length < sourceText.length ? 1 : 0,
+      },
+    };
+  }
   const requestedMaxSentences = opts.maxSentences ?? evidenceMaxFactSentences();
   const effectiveMaxSentences =
     task.taskType === "list_items" && hasListEvidenceShape(sourceText)
@@ -2010,17 +2118,22 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   ];
   const accepted = diversifyCriticalEvidenceCandidates(
     evidenceQuery,
-    diversifyQueryCoverageCandidates(
+    diversifyCodeEvidenceCandidates(
       evidenceQuery,
-      diversifyContradictionReviewCandidates(
+      diversifyQueryCoverageCandidates(
         evidenceQuery,
-        diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit),
+        diversifyContradictionReviewCandidates(
+          evidenceQuery,
+          diversifyMultilingualDisclosureCandidates(evidenceQuery, scoreAccepted, reranked, limit),
+          reranked,
+          limit,
+        ),
         reranked,
         limit,
+        routePlan,
       ),
-      reranked,
+      criticalRerankPool,
       limit,
-      routePlan,
     ),
     criticalRerankPool,
     limit,
