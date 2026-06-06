@@ -424,19 +424,30 @@ function listQueryFragments(text: string, query: string, limit = 6): string[] {
 
   return lines
     .map((line, index) => ({ line, index, fragment: normalizeDocumentScaffoldFragment(stripListMarker(line)) }))
-    .filter(({ line, fragment, index }) => {
-      if (!fragment || !isListLikeLine(line)) return false;
-      if (hasSourceScopeExclusion(fragment) || hasContradictionMarker(fragment)) return false;
-      if (matchedHeadingIndexes.length > 0 && closeToMatchedHeading(index)) return true;
-      return queryCoreOverlapScore(queryTokens, fragment) > 0 || queryOverlapScore(queryTokens, fragment) >= 2;
-    })
-    .map(({ fragment, index }) => ({
+    .map(({ line, fragment, index }) => ({
+      line,
       fragment,
       index,
-      score: fragmentQualityScore(fragment) + (hasLabeledListShape(fragment) ? 100 : 0),
+      nearMatchedHeading: closeToMatchedHeading(index),
     }))
-    .filter(({ score }) => score > getDecisionConfig().evidenceScoring.fragmentMinScore)
-    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .filter(({ line, fragment, nearMatchedHeading }) => {
+      if (!fragment || !isListLikeLine(line)) return false;
+      if (hasSourceScopeExclusion(fragment) || hasContradictionMarker(fragment)) return false;
+      if (matchedHeadingIndexes.length > 0 && nearMatchedHeading) return true;
+      return queryCoreOverlapScore(queryTokens, fragment) > 0 || queryOverlapScore(queryTokens, fragment) >= 2;
+    })
+    .map(({ fragment, index, nearMatchedHeading }) => ({
+      fragment,
+      index,
+      score: fragmentQualityScore(fragment) + (hasLabeledListShape(fragment) ? 100 : 0) + (nearMatchedHeading ? 40 : 0),
+      nearMatchedHeading,
+    }))
+    .filter(({ score, nearMatchedHeading }) => nearMatchedHeading || score > getDecisionConfig().evidenceScoring.fragmentMinScore)
+    .sort((a, b) => {
+      if (a.nearMatchedHeading && b.nearMatchedHeading) return a.index - b.index;
+      if (a.nearMatchedHeading !== b.nearMatchedHeading) return a.nearMatchedHeading ? -1 : 1;
+      return b.score - a.score || a.index - b.index;
+    })
     .slice(0, limit)
     .map(({ fragment }) => fragment);
 }
@@ -1343,6 +1354,39 @@ export function buildDeterministicEvidenceExtraction(
         const line = compactEvidenceLine(evidenceLine(sourceLabel, titleEvidence), 520);
         usableFacts.push(line);
         directAnswerFacts.push(line);
+      }
+    }
+
+    const rawContent = card.rawContent?.trim() ?? "";
+    if (rawContent) {
+      for (const fragment of listQueryFragments(rawContent, input.userQuery)) {
+        addUsableIfRelevant(sourceLabel, fragment, {
+          allowGenericGuidance: true,
+          kind: "direct",
+          force: true,
+          maxChars: 420,
+        });
+      }
+      for (const fragment of definitionQueryFragments(rawContent, input.userQuery)) {
+        addUsableIfRelevant(sourceLabel, fragment, {
+          allowGenericGuidance: true,
+          kind: "direct",
+          force: true,
+          maxChars: 560,
+        });
+      }
+      for (const fragment of financeTargetedFragments(rawContent, input.userQuery)) {
+        addUsableIfRelevant(sourceLabel, fragment, {
+          allowGenericGuidance: true,
+          kind: "direct",
+          force: true,
+        });
+      }
+      for (const fragment of numericTableFragments(rawContent, input.userQuery, 4)) {
+        addUsableIfRelevant(sourceLabel, fragment, {
+          allowGenericGuidance: true,
+          kind: "direct",
+        });
       }
     }
 

@@ -200,6 +200,26 @@ describe("skill pipeline evidence extractor", () => {
     expect(extraction.missingInfo).toEqual([]);
   });
 
+  it("materializes inline bullets near a matching heading as list evidence", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Desteklenen proje türlerini madde madde yaz.",
+      cards: [
+        {
+          sourceId: "generic-project-types",
+          title: "generic-project-types",
+          rawContent:
+            "Desteklenen proje türleri: • Desktop application • Web application • Console application • Shared library",
+        },
+      ],
+    });
+
+    const joined = extraction.usableFacts.join(" ");
+    expect(joined).toContain("Desktop application");
+    expect(joined).toContain("Web application");
+    expect(joined).toContain("Console application");
+    expect(extraction.evidenceBundle?.diagnostics.kindCounts.list_item).toBeGreaterThanOrEqual(3);
+  });
+
   it("prioritizes labeled list items over nearby explanatory prose for list questions", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Sistemin temel özellikleri nelerdir?",

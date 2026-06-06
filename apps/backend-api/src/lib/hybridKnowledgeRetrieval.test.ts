@@ -6,6 +6,7 @@ import {
   buildPrunedEvidenceInputWithDiagnostics,
   candidateMatchesRouteScope,
   dedupeHybridKnowledgeCandidates,
+  mergeArtifactContinuationText,
   preRankHybridKnowledgeCandidates,
   retrieveKnowledgeContextTrueHybrid,
   type HybridKnowledgeCandidate,
@@ -83,6 +84,66 @@ function candidate(overrides: Partial<HybridKnowledgeCandidate> & {
 }
 
 describe("true hybrid retrieval helpers", () => {
+  it("merges same-artifact continuation chunks for evidence coverage", () => {
+    const merged = mergeArtifactContinuationText(
+      {
+        id: "intro",
+        chunkIndex: 3,
+        content: "The supported project types are listed below.",
+      },
+      [
+        {
+          id: "items",
+          chunkIndex: 4,
+          content: "- Desktop application\n- Web application\n- Console application",
+        },
+      ],
+      4,
+      500,
+    );
+
+    expect(merged.text).toContain("supported project types");
+    expect(merged.text).toContain("Desktop application");
+    expect(merged.text).toContain("Console application");
+    expect(merged.appendedChunkCount).toBe(1);
+  });
+
+  it("keeps inline bullet-list continuation items during evidence pruning", () => {
+    const text = buildPrunedEvidenceInput({
+      query: "supported project types list",
+      budgetMode: "normal_rag",
+      candidate: {
+        chunk: {
+          id: "chunk-inline-list",
+          documentId: "doc-inline-list",
+          chunkIndex: 0,
+          content:
+            "Supported project types:  Desktop application  Web application  Console application  Shared library",
+          document: {
+            title: "Generic technical note",
+            collectionId: "kc-1",
+          },
+          embedding: null,
+        },
+        card: {
+          topic: "project types",
+          tags: [],
+          patientSummary: "",
+          clinicalTakeaway: "",
+          safeGuidance: "",
+          redFlags: "",
+          doNotInfer: "",
+        },
+      },
+      maxChars: 500,
+      maxSentences: 6,
+    });
+
+    expect(text).toContain("Desktop application");
+    expect(text).toContain("Web application");
+    expect(text).toContain("Console application");
+  });
+
   it("dedupes matching chunks while preserving producer provenance", () => {
     const deduped = dedupeHybridKnowledgeCandidates([
       candidate({

@@ -2,6 +2,7 @@ import type { ChatSourceCitation, EmbeddingResult } from "@r3mes/shared-types";
 import type { KnowledgeIngestionStepStatus, Prisma } from "@prisma/client";
 
 import { getAlignmentConfig } from "./alignmentConfig.js";
+import { detectAnswerTask } from "./answerTaskDetector.js";
 import type { GroundingConfidence } from "./answerSchema.js";
 import {
   dedupeCandidatesIdentitySafe,
@@ -44,6 +45,7 @@ export interface HybridKnowledgeChunk {
   documentId: string;
   chunkIndex: number;
   content: string;
+  artifactId?: string;
   artifactKind?: string;
   autoMetadata?: unknown;
   document: {
@@ -165,12 +167,29 @@ export interface HybridRetrievedKnowledgeContext {
     deduplication?: CandidateDeduplicationDiagnostics;
     candidatePool?: HybridCandidatePoolTelemetry;
     evidenceDemand?: RetrievalEvidenceDemandSummary;
+    artifactContinuation?: ArtifactContinuationDiagnostics;
     providerFailures?: Array<{ provider: "qdrant" | "prisma" | "critical_evidence"; reason: string }>;
     qdrantProviderFailed?: boolean;
     qdrantFallbackUsed?: boolean;
     retrievalMode: "true_hybrid";
   };
 }
+
+export interface ArtifactContinuationDiagnostics {
+  mode: "disabled" | "not_applicable" | "expanded";
+  candidateCount: number;
+  expandedCandidateCount: number;
+  appendedChunkCount: number;
+  appendedChars: number;
+}
+
+type ArtifactContinuationRow = {
+  id: string;
+  documentId: string;
+  artifactId: string | null;
+  chunkIndex: number;
+  content: string;
+};
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -825,11 +844,15 @@ function prioritizeCriticalEvidenceCandidates<T extends { chunk: HybridKnowledge
 }
 
 function payloadToChunk(payload: QdrantKnowledgePayload): HybridKnowledgeChunk {
+  const payloadMetadata = payload.metadata && typeof payload.metadata === "object"
+    ? payload.metadata as Record<string, unknown>
+    : null;
   return {
     id: payload.chunkId,
     documentId: payload.documentId,
     chunkIndex: payload.chunkIndex,
     content: payload.content,
+    artifactId: typeof payloadMetadata?.artifactId === "string" ? payloadMetadata.artifactId : undefined,
     artifactKind: payload.artifactKind,
     autoMetadata: {
       artifactKind: payload.artifactKind,
@@ -1081,6 +1104,7 @@ async function collectPrismaCandidates(opts: {
         documentId: candidate.chunk.documentId,
         chunkIndex: candidate.chunk.chunkIndex,
         content: candidate.chunk.content,
+        artifactId: candidate.chunk.artifactId ?? undefined,
         artifactKind: typeof chunkAutoMetadata?.artifactKind === "string" ? chunkAutoMetadata.artifactKind : undefined,
         autoMetadata: candidate.chunk.autoMetadata,
         document: {
@@ -1142,6 +1166,7 @@ async function collectCriticalEvidenceCandidates(opts: {
         documentId: candidate.documentId,
         chunkIndex: candidate.chunkIndex,
         content: candidate.content,
+        artifactId: candidate.artifactId ?? undefined,
         artifactKind: typeof chunkAutoMetadata?.artifactKind === "string" ? chunkAutoMetadata.artifactKind : undefined,
         autoMetadata: candidate.autoMetadata,
         document: {
@@ -1365,6 +1390,7 @@ function evidenceInputMaxChars(budgetMode: RetrievalBudgetMode): number {
 function sentenceParts(value: string): string[] {
   return value
     .replace(/\r\n/g, "\n")
+    .replace(/\s+([•])\s+/gu, "\n$1 ")
     .replace(/\s+(\d{1,2})\.\s*(?=[\p{L}A-ZÇĞİÖŞÜ])/gu, "\n$1. ")
     .split(/(?<!\b\d\.)(?<=[.!?])\s+|\n+/u)
     .map((part) => part.trim())
@@ -1435,6 +1461,10 @@ function isListEvidenceSentence(sentence: string): boolean {
   return /^\s*(?:[-*•]|\d{1,2}[.)])\s+/u.test(sentence);
 }
 
+function hasListEvidenceShape(text: string): boolean {
+  return /(?:^|\n|\s)(?:[-*•]|\d{1,2}[.)])\s+\S/u.test(text);
+}
+
 function pickRelevantSentences(query: string, text: string, maxChars: number, maxSentences = evidenceMaxFactSentences()): {
   text: string;
   candidateSentenceCount: number;
@@ -1466,7 +1496,7 @@ function pickRelevantSentences(query: string, text: string, maxChars: number, ma
       const structureBonus = isStructuredEvidenceSentence(sentence) ? 2 : 0;
       const riskBonus = isRiskEvidenceSentence(sentence) ? 1 : 0;
       const financeScore = financeLineItemScore(query, sentence);
-      const listNeighborBonus = isListEvidenceSentence(sentence) && closeToMatchingHeading(index) ? 6 : 0;
+      const listNeighborBonus = isListEvidenceSentence(sentence) && closeToMatchingHeading(index) ? 24 : 0;
       const isEarlyMetadata = structureBonus > 0 && index <= 2;
       const keep =
         overlap > 0 ||
@@ -1520,19 +1550,25 @@ export function buildPrunedEvidenceInputWithDiagnostics(opts: {
     opts.candidate.card.redFlags ? `Red Flags: ${opts.candidate.card.redFlags}` : "",
     opts.candidate.card.doNotInfer ? `Do Not Infer: ${opts.candidate.card.doNotInfer}` : "",
   ].filter(Boolean).join("\n");
-  const sourceText = structured.trim() || rawContent;
-  const picked = pickRelevantSentences(opts.query, sourceText, maxChars, opts.maxSentences);
+  const sourceText = rawContent || structured.trim();
+  const task = detectAnswerTask(opts.query);
+  const requestedMaxSentences = opts.maxSentences ?? evidenceMaxFactSentences();
+  const effectiveMaxSentences =
+    task.taskType === "list_items" && hasListEvidenceShape(sourceText)
+      ? Math.min(12, Math.max(requestedMaxSentences, requestedMaxSentences + 4))
+      : requestedMaxSentences;
+  const picked = pickRelevantSentences(opts.query, sourceText, maxChars, effectiveMaxSentences);
   const pruned = picked.text || sourceText.slice(0, maxChars).trim();
-  const text = pruned.length > 0 && pruned.length < rawContent.length ? pruned : rawContent;
+  const text = pruned.length > 0 && pruned.length < sourceText.length ? pruned : sourceText;
   return {
     text,
     diagnostics: {
-      mode: text.length < rawContent.length ? "pruned" : "raw",
-      rawChars: rawContent.length,
+      mode: text.length < sourceText.length ? "pruned" : "raw",
+      rawChars: sourceText.length,
       prunedChars: text.length,
       candidateSentenceCount: picked.candidateSentenceCount,
-      selectedSentenceCount: text.length < rawContent.length ? picked.selectedSentenceCount : picked.candidateSentenceCount,
-      droppedSentenceCount: text.length < rawContent.length ? picked.droppedSentenceCount : 0,
+      selectedSentenceCount: text.length < sourceText.length ? picked.selectedSentenceCount : picked.candidateSentenceCount,
+      droppedSentenceCount: text.length < sourceText.length ? picked.droppedSentenceCount : 0,
     },
   };
 }
@@ -1545,6 +1581,115 @@ export function buildPrunedEvidenceInput(opts: {
   maxSentences?: number;
 }): string {
   return buildPrunedEvidenceInputWithDiagnostics(opts).text;
+}
+
+function artifactContinuationEnabled(): boolean {
+  return process.env.R3MES_ENABLE_ARTIFACT_CONTINUATION !== "0";
+}
+
+function artifactContinuationMaxChunks(): number {
+  return parsePositiveInt(process.env.R3MES_ARTIFACT_CONTINUATION_MAX_CHUNKS, 4);
+}
+
+function artifactContinuationMaxChars(): number {
+  return parsePositiveInt(process.env.R3MES_ARTIFACT_CONTINUATION_MAX_CHARS, 2200);
+}
+
+export function mergeArtifactContinuationText(
+  selected: { id: string; content: string; chunkIndex: number },
+  siblings: Array<{ id: string; content: string; chunkIndex: number }>,
+  maxChunks = artifactContinuationMaxChunks(),
+  maxChars = artifactContinuationMaxChars(),
+): { text: string; appendedChunkCount: number; appendedChars: number } {
+  const ordered = [selected, ...siblings]
+    .filter((chunk) => chunk.content.trim().length > 0)
+    .sort((left, right) => left.chunkIndex - right.chunkIndex)
+    .slice(0, Math.max(1, maxChunks));
+  const parts: string[] = [];
+  let appendedChunkCount = 0;
+  let appendedChars = 0;
+  for (const chunk of ordered) {
+    const text = chunk.content.trim();
+    const candidate = parts.length > 0 ? `${parts.join("\n\n")}\n\n${text}` : text;
+    if (candidate.length > maxChars && parts.length > 0) continue;
+    parts.push(text.slice(0, Math.max(0, maxChars - parts.join("\n\n").length)));
+    if (chunk.id !== selected.id) {
+      appendedChunkCount += 1;
+      appendedChars += text.length;
+    }
+  }
+  return {
+    text: parts.join("\n\n").trim() || selected.content.trim(),
+    appendedChunkCount,
+    appendedChars,
+  };
+}
+
+async function loadArtifactContinuationContexts(
+  candidates: Array<{ chunk: HybridKnowledgeChunk; card: KnowledgeCard }>,
+): Promise<{ contexts: Map<string, string>; diagnostics: ArtifactContinuationDiagnostics }> {
+  const diagnostics: ArtifactContinuationDiagnostics = {
+    mode: artifactContinuationEnabled() ? "not_applicable" : "disabled",
+    candidateCount: candidates.length,
+    expandedCandidateCount: 0,
+    appendedChunkCount: 0,
+    appendedChars: 0,
+  };
+  const contexts = new Map<string, string>();
+  if (!artifactContinuationEnabled() || candidates.length === 0) {
+    return { contexts, diagnostics };
+  }
+
+  const chunkIds = candidates.map((candidate) => candidate.chunk.id).filter(Boolean);
+  if (chunkIds.length === 0) return { contexts, diagnostics };
+
+  const selectedRows = await prisma.knowledgeChunk.findMany({
+    where: { id: { in: chunkIds } },
+    select: { id: true, documentId: true, artifactId: true, chunkIndex: true, content: true },
+  }) as ArtifactContinuationRow[];
+  const selectedById = new Map(selectedRows.map((row) => [row.id, row]));
+  const scopeKeys = Array.from(new Set(
+    selectedRows
+      .filter((row) => typeof row.artifactId === "string" && row.artifactId.length > 0)
+      .map((row) => `${row.documentId}\u0000${row.artifactId}`),
+  ));
+  if (scopeKeys.length === 0) return { contexts, diagnostics };
+
+  const siblingRows = await prisma.knowledgeChunk.findMany({
+    where: {
+      OR: scopeKeys.map((key) => {
+        const [documentId, artifactId] = key.split("\u0000");
+        return { documentId, artifactId };
+      }),
+    },
+    select: { id: true, documentId: true, artifactId: true, chunkIndex: true, content: true },
+    orderBy: [{ documentId: "asc" }, { artifactId: "asc" }, { chunkIndex: "asc" }],
+  }) as ArtifactContinuationRow[];
+  const siblingsByScope = new Map<string, ArtifactContinuationRow[]>();
+  for (const row of siblingRows) {
+    if (!row.artifactId) continue;
+    const key = `${row.documentId}\u0000${row.artifactId}`;
+    const rows = siblingsByScope.get(key) ?? [];
+    rows.push(row);
+    siblingsByScope.set(key, rows);
+  }
+
+  for (const candidate of candidates) {
+    const selected = selectedById.get(candidate.chunk.id);
+    if (!selected?.artifactId) continue;
+    const scopeKey = `${selected.documentId}\u0000${selected.artifactId}`;
+    const siblings = (siblingsByScope.get(scopeKey) ?? []).filter((row) => row.id !== selected.id);
+    if (siblings.length === 0) continue;
+    const merged = mergeArtifactContinuationText(selected, siblings);
+    if (merged.appendedChunkCount === 0 || merged.text === selected.content.trim()) continue;
+    contexts.set(candidate.chunk.id, merged.text);
+    diagnostics.mode = "expanded";
+    diagnostics.expandedCandidateCount += 1;
+    diagnostics.appendedChunkCount += merged.appendedChunkCount;
+    diagnostics.appendedChars += merged.appendedChars;
+  }
+
+  return { contexts, diagnostics };
 }
 
 export async function retrieveKnowledgeContextTrueHybrid(opts: {
@@ -1946,11 +2091,24 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       excerpt: chunk.content.slice(0, 220),
     });
   }
+  const artifactContinuation = await loadArtifactContinuationContexts(finalCandidates);
+  const evidenceCandidates = finalCandidates.map((candidate) => {
+    const continuationText = artifactContinuation.contexts.get(candidate.chunk.id);
+    if (!continuationText) return candidate;
+    return {
+      ...candidate,
+      chunk: {
+        ...candidate.chunk,
+        content: continuationText,
+      },
+      card: parseKnowledgeCard(continuationText),
+    };
+  });
   const totalEvidenceMaxChars = evidenceInputMaxChars(budgetMode);
   const totalEvidenceMaxSentences = evidenceMaxFactSentences();
-  const perCandidateMaxChars = Math.max(240, Math.ceil(totalEvidenceMaxChars / Math.max(1, finalCandidates.length)));
-  const perCandidateMaxSentences = Math.max(1, Math.ceil(totalEvidenceMaxSentences / Math.max(1, finalCandidates.length)));
-  const prunedEvidenceInputs = finalCandidates.map((candidate) => ({
+  const perCandidateMaxChars = Math.max(240, Math.ceil(totalEvidenceMaxChars / Math.max(1, evidenceCandidates.length)));
+  const perCandidateMaxSentences = Math.max(1, Math.ceil(totalEvidenceMaxSentences / Math.max(1, evidenceCandidates.length)));
+  const prunedEvidenceInputs = evidenceCandidates.map((candidate) => ({
     candidate,
     ...buildPrunedEvidenceInputWithDiagnostics({
       query: evidenceQuery,
@@ -1971,7 +2129,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     redFlags: candidate.card.redFlags,
     doNotInfer: candidate.card.doNotInfer,
   }));
-  const evidenceInputChars = finalCandidates.reduce((sum, candidate) => sum + candidate.chunk.content.length, 0);
+  const evidenceInputChars = evidenceCandidates.reduce((sum, candidate) => sum + candidate.chunk.content.length, 0);
   const evidencePrunedInputChars = evidenceCards.reduce((sum, card) => sum + card.rawContent.length, 0);
   const evidenceFactCandidateCount = prunedEvidenceInputs.reduce(
     (sum, input) => sum + input.diagnostics.candidateSentenceCount,
@@ -2047,6 +2205,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
         deduplication: deduplicationResult.diagnostics,
         candidatePool,
         evidenceDemand,
+        artifactContinuation: artifactContinuation.diagnostics,
         ...providerFailureDiagnostics,
         retrievalMode: "true_hybrid",
       },
@@ -2074,7 +2233,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
             sourceRefs,
           })
         : buildGroundedBrief(
-            finalCandidates.map(({ card }) => card),
+            evidenceCandidates.map(({ card }) => card),
             {
               groundingConfidence,
               lowGroundingConfidence,
@@ -2117,6 +2276,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       deduplication: deduplicationResult.diagnostics,
       candidatePool,
       evidenceDemand,
+      artifactContinuation: artifactContinuation.diagnostics,
       ...providerFailureDiagnostics,
       retrievalMode: "true_hybrid",
     },
