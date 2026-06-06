@@ -43,6 +43,8 @@ const EVIDENCE_TYPE_ALIASES = new Map([
   ["compare", ["comparison", "comparison_point", "compare", "compare_concepts"]],
   ["procedure", ["procedure", "procedure_step", "how_to", "steps"]],
   ["how_to", ["procedure", "procedure_step", "how_to", "steps"]],
+  ["event", ["event", "text_fact", "definition", "procedure_step"]],
+  ["timing", ["timing", "text_fact", "definition", "procedure_step"]],
   ["code", ["code", "code_fact", "code_explanation", "procedure_step"]],
   ["code_explanation", ["code", "code_fact", "code_explanation", "procedure_step"]],
   ["visual_layout", ["visual_layout", "layout", "image_layout", "figure", "visual"]],

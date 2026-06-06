@@ -69,6 +69,37 @@ Date: 2026-06-06 16:16:00 +03:00
 - Definition, code, comparison, and visual/layout failures remain for their proper phase owners.
 - Overall release gate remains fail and should not be treated as product-ready.
 
+## Incremental Closure - Event Evidence Eval Contract
+
+Date: 2026-06-06 16:32:00 +03:00
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Backlog touched: eval contract accuracy for evidence-only classification.
+- Goal: close a false negative where an event/timing question had correct source-grounded text evidence and a clean final answer, but the fixture incorrectly required `procedure` evidence.
+
+### Changes
+- Added generic `event` and `timing` evidence-type aliases in the evidence-only scorer.
+- Updated the G.P `Form Load olayı ne zaman çalışır?` fixture to require `event` evidence instead of `procedure`.
+- No product runtime, retrieval, evidence extraction, composer, safety, parser, provider, or UI behavior was changed.
+
+### Verification
+| Command | Exit code | Result | Note |
+| --- | ---: | --- | --- |
+| node JSONL parse smoke | 0 | pass | 15 G.P smoke cases parse successfully |
+| pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit | 0 | pass | Typecheck clean |
+| pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke | 1 | expected fail | 9/15 pass; `gp_form_load_event` now passes |
+| pnpm --filter @r3mes/backend-api run eval:real-data-certification | 0 | fail gate | certificationBacklogCount 30, blockerCount 29 |
+
+### Measured Impact
+- G.P smoke improved from 8/15 to 9/15.
+- `procedure_extraction` bucket is now 2/2.
+- The release gate remains fail; global certification counts stayed 30 backlog / 29 blockers because production aggregate and other dataset blockers still remain.
+
+### Decision
+- Keep this as a Phase 10 eval-contract correction, not a product runtime fix.
+- Remaining G.P failures still route to real owner phases: definition source/retrieval, code evidence, comparison/table evidence, and visual/layout evidence.
+
 ## Measured Impact
 - G.P smoke remains 7/15 and release gate remains fail.
 - Target case gp_vs_project_types_list now produces 5 facts and captures more list evidence.
