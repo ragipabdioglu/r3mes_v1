@@ -358,3 +358,43 @@ Date: 2026-06-06 20:50:00 +03:00
 ### Decision
 - Accept this slice as a generic code answer carry-through improvement.
 - Continue with V2 data and do not add document-specific code/object literals to product logic.
+
+## 2026-06-07 - Dotted Uppercase Technology Prefix Retrieval Slice
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Backlog owner touched: Phase 4 Retrieval Quality and Phase 5 Query / Source Intelligence boundary.
+- Goal: prevent dotted uppercase technology prefixes from being misclassified as explicit document/company symbols before retrieval starts.
+
+### Change
+- Updated explicit uppercase symbol detection to ignore uppercase tokens directly preceded by a dot.
+- This keeps generic technology/runtime names like `.ABC Runtime` in normal lexical/semantic retrieval instead of failing identifier preflight early.
+- Added a synthetic regression test proving dotted prefixes do not block retrieval when the selected collection contains matching chunk evidence.
+- No data-specific literal was added to core logic. G.P terms and `.NET Framework` remain only in eval/report artifacts.
+- Parser, composer, evidence extraction, safety behavior, UI layout, Qdrant indexing, embedding provider, and reranker provider were not changed.
+
+### Verification
+| Command | Exit | Result | Note |
+| --- | ---: | --- | --- |
+| `pnpm --filter @r3mes/backend-api exec vitest run src/lib/hybridKnowledgeRetrieval.test.ts` | 0 | pass | 30 tests passed |
+| `pnpm --filter @r3mes/backend-api exec tsc --noEmit` | 0 | pass | Typecheck clean |
+| `pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json` | 0 | pass | Backend dist updated |
+| `pnpm local:status` | 0 | pass | backend/dApp/ai-engine/Qdrant/Postgres healthy; llama false, LoRA unavailable |
+| `pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke` | 1 | expected fail | 14/15 pass; `.NET Framework` definition now passes |
+| `pnpm --filter @r3mes/backend-api run eval:real-data-certification` | 0 | fail gate | certificationBacklogCount 27, blockerCount 26 |
+
+### Measured Impact
+- `gp_dotnet_framework_definition` now passes.
+- G.P smoke improved from 13/15 to 14/15.
+- Definition extraction bucket is now 5/5.
+- Certification improved from backlog 28 / blockers 27 to backlog 27 / blockers 26.
+- Provider fallback ratios stayed 0.
+
+### Remaining Risks / Backlog
+- `gp_ders8_visual_layout_controls` remains the only G.P smoke failure.
+- The remaining G.P failure is not a dotted-term/query issue; it is visual/layout evidence availability and should stay with Document Intelligence / visual-layout capability work.
+- Real-data certification remains release-gate fail because broader Phase 7 answer-presentation, Phase 4 retrieval, and Phase 5 query-source issues remain.
+
+### Decision
+- Accept this slice as a generic retrieval/source-intelligence fix.
+- Do not add object names, lesson names, or document-specific visual controls to product logic.

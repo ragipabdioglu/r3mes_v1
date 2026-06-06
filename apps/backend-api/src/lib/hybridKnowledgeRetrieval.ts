@@ -477,8 +477,11 @@ const NON_PRIMARY_UPPERCASE_TOKENS = new Set([
 ]);
 
 function explicitUppercaseSymbols(value: string): string[] {
-  return [...new Set(value.match(/\b[A-ZÇĞİÖŞÜ]{3,6}\b/gu) ?? [])]
-    .filter((token) => !NON_PRIMARY_UPPERCASE_TOKENS.has(token));
+  return [...new Set(
+    [...value.matchAll(/\b[A-ZÇĞİÖŞÜ]{3,6}\b/gu)]
+      .filter((match) => value[Math.max(0, match.index - 1)] !== ".")
+      .map((match) => match[0]),
+  )].filter((token) => !NON_PRIMARY_UPPERCASE_TOKENS.has(token));
 }
 
 function primaryQuerySymbol(query: string): string | null {

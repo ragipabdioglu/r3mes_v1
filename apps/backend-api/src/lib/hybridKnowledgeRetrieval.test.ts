@@ -268,6 +268,53 @@ describe("true hybrid retrieval helpers", () => {
     qdrant.mockRestore();
   });
 
+  it("does not treat dotted uppercase technology prefixes as explicit document symbols", async () => {
+    const documentFindMany = vi.spyOn(prisma.knowledgeDocument, "findMany").mockResolvedValue([
+      { title: "XYZ Architecture Notes" },
+    ] as never);
+    const chunkFindMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue([
+      {
+        id: "runtime-1",
+        documentId: "doc-runtime",
+        chunkIndex: 0,
+        content:
+          ".ABC Runtime: Cross-platform application components are provided as a reusable framework layer.",
+        tokenCount: 10,
+        autoMetadata: {
+          domain: "technical",
+          keywords: ["runtime", "framework"],
+          artifactKind: "paragraph",
+        },
+        document: {
+          title: "Generic Runtime Guide",
+          collectionId: "kc-1",
+          autoMetadata: {
+            domain: "technical",
+            keywords: ["runtime", "framework"],
+          },
+        },
+        embedding: { values: [] },
+      },
+    ] as never);
+    const qdrant = vi.mocked(searchQdrantKnowledge).mockResolvedValue([]);
+
+    const result = await retrieveKnowledgeContextTrueHybrid({
+      query: ".ABC Runtime nedir?",
+      accessibleCollectionIds: ["kc-1"],
+      limit: 1,
+    });
+
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0]?.title).toBe("Generic Runtime Guide");
+    expect(result.contextText).toContain(".ABC Runtime");
+    expect(documentFindMany).not.toHaveBeenCalled();
+    expect(chunkFindMany).toHaveBeenCalled();
+
+    documentFindMany.mockRestore();
+    chunkFindMany.mockRestore();
+    qdrant.mockRestore();
+  });
+
   it("fails closed on qdrant provider failure in strict runtime", async () => {
     vi.stubEnv("R3MES_RUNTIME_PROFILE", "eval");
     const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue([
