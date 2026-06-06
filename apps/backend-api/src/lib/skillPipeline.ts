@@ -392,6 +392,44 @@ function definitionQueryFragments(text: string, query: string, limit = 3): strin
   return unique(fragments).slice(0, limit);
 }
 
+function comparisonQueryFragments(text: string, query: string, limit = 4): string[] {
+  const task = detectAnswerTask(query);
+  if (task.taskType !== "compare_concepts") return [];
+  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
+  if (queryTokens.size === 0) return [];
+  const normalizedText = text
+    .replace(/#{1,6}\s*page\s+\d+/giu, "\n")
+    .replace(/#{1,6}\s+/g, "\n")
+    .replace(/^\s*(?:Source Summary|Key Takeaway|Temel Bilgi|Özet|Ozet)\s*:\s*/gimu, "")
+    .replace(/\s+[•]\s+/g, " ")
+    .replace(/\n{2,}/g, "\n");
+  const sentences = normalizedText
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((part) => normalizeDocumentScaffoldFragment(part.trim()))
+    .filter((part) => part.length >= 20 && part.length <= 520);
+  const windows: Array<{ fragment: string; index: number }> = [];
+  for (let index = 0; index < sentences.length; index += 1) {
+    const current = sentences[index] ?? "";
+    windows.push({ fragment: current, index });
+    const next = sentences[index + 1];
+    if (next) windows.push({ fragment: `${current} ${next}`, index });
+  }
+  const fragments = windows
+    .map(({ fragment, index }) => {
+      const normalized = normalizeConceptText(fragment);
+      const coreOverlap = queryCoreOverlapScore(queryTokens, fragment);
+      const relationBonus = /\b(?:fark|fark[ıi]|göre|gore|aras[ıi]nda|karşılaştır|karsilastir|benzer|ayn[ıi])\b/u.test(normalized)
+        ? 8
+        : 0;
+      const compactnessBonus = fragment.length <= 360 ? 3 : 0;
+      return { fragment, index, score: coreOverlap * 10 + relationBonus + compactnessBonus + fragmentQualityScore(fragment) };
+    })
+    .filter((item) => item.score >= 16)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => item.fragment);
+  return unique(fragments).slice(0, limit);
+}
+
 function isListLikeLine(value: string): boolean {
   return /^\s*(?:[-*•]|\d{1,2}[.)])\s+/u.test(value);
 }
@@ -1392,6 +1430,14 @@ export function buildDeterministicEvidenceExtraction(
           maxChars: 560,
         });
       }
+      for (const fragment of comparisonQueryFragments(rawContent, input.userQuery)) {
+        addUsableIfRelevant(sourceLabel, fragment, {
+          allowGenericGuidance: true,
+          kind: "direct",
+          force: true,
+          maxChars: 620,
+        });
+      }
       for (const fragment of financeTargetedFragments(rawContent, input.userQuery)) {
         addUsableIfRelevant(sourceLabel, fragment, {
           allowGenericGuidance: true,
@@ -1423,6 +1469,14 @@ export function buildDeterministicEvidenceExtraction(
             kind: section.kind === "supporting" ? "supporting" : "direct",
             force: true,
             maxChars: 560,
+          });
+        }
+        for (const fragment of comparisonQueryFragments(section.text, input.userQuery)) {
+          addUsableIfRelevant(sourceLabel, fragment, {
+            allowGenericGuidance: true,
+            kind: section.kind === "supporting" ? "supporting" : "direct",
+            force: true,
+            maxChars: 620,
           });
         }
         for (const fragment of financeTargetedFragments(section.text, input.userQuery)) {

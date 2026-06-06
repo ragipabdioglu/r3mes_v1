@@ -100,6 +100,42 @@ Date: 2026-06-06 16:32:00 +03:00
 - Keep this as a Phase 10 eval-contract correction, not a product runtime fix.
 - Remaining G.P failures still route to real owner phases: definition source/retrieval, code evidence, comparison/table evidence, and visual/layout evidence.
 
+## Incremental Closure - Adjacent Comparison Evidence Context
+
+Date: 2026-06-06 17:05:00 +03:00
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Backlog owner touched: Phase 6 - Full Evidence Intelligence / context-evidence-coverage.
+- Goal: close the generic comparison-evidence gap where retrieval selected the right V2 chunk, but evidence extraction dropped adjacent subject context required for a complete comparison answer.
+
+### Changes
+- Added a generic comparison evidence extractor that builds short adjacent sentence windows for comparison-style queries.
+- Preserved subject + relation context when the source chunk contains a subject sentence followed by a comparison sentence.
+- Kept the logic query-shape and evidence-shape based; no document-specific or fixture-specific literal was added.
+- Preserved parser, retrieval scoring, reranker, composer, safety, provider, and UI behavior.
+
+### Verification
+| Command | Exit code | Result | Note |
+| --- | ---: | --- | --- |
+| pnpm --filter @r3mes/backend-api exec vitest run src/lib/skillPipeline.test.ts | 0 | pass | 29 tests passed |
+| pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit | 0 | pass | Typecheck clean |
+| pnpm --filter @r3mes/backend-api run build | 0 | pass | Build succeeded after stopping the locked backend process |
+| pnpm local:status | 0 | pass | backend/dApp/ai-engine/Qdrant/Postgres healthy; llama false, LoRA unavailable |
+| pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke | 1 | expected fail | 10/15 pass; `gp_textbox_richtextbox_compare` now passes |
+| pnpm --filter @r3mes/backend-api run eval:real-data-certification | 0 | fail gate | certificationBacklogCount 30, blockerCount 29 |
+
+### Measured Impact
+- G.P smoke improved from 9/15 to 10/15.
+- `gp_textbox_richtextbox_compare` now passes without changing final composer behavior.
+- `comparison_extraction` bucket improved to 2/3.
+- Provider fallback ratios stayed 0 for the G.P smoke.
+- Global certification remains fail at 30 backlog / 29 blockers; this is expected because remaining failures belong to other owner phases.
+
+### Decision
+- Keep this as a Phase 6 evidence coverage closure discovered during Phase 10 certification.
+- Remaining G.P failures are still routed to definition retrieval/source, code evidence, table/comparison evidence, and visual/layout evidence owner work.
+
 ## Measured Impact
 - G.P smoke remains 7/15 and release gate remains fail.
 - Target case gp_vs_project_types_list now produces 5 facts and captures more list evidence.

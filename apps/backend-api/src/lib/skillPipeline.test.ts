@@ -249,6 +249,25 @@ describe("skill pipeline evidence extractor", () => {
     expect(joined).not.toContain("uzun bir açıklama");
   });
 
+  it("keeps adjacent subject context for comparison evidence", () => {
+    const extraction = buildDeterministicEvidenceExtraction({
+      userQuery: "Alpha ile Beta arasındaki fark nedir?",
+      cards: [
+        {
+          sourceId: "generic-comparison-source",
+          title: "generic-comparison-source",
+          rawContent:
+            "Beta nesnesi gelişmiş içeriklerle çalışabilen bir kutudur. Alpha'ya göre biçimlendirilebilir metin, aktif bağlantı ve medya gibi farkları vardır.",
+        },
+      ],
+    });
+
+    const joined = extraction.usableFacts.join(" ");
+    expect(joined).toContain("Beta nesnesi");
+    expect(joined).toContain("Alpha'ya göre");
+    expect(extraction.evidenceBundle?.diagnostics.kindCounts.comparison_point).toBeGreaterThanOrEqual(1);
+  });
+
   it("prioritizes labeled list items over nearby explanatory prose for list questions", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Sistemin temel özellikleri nelerdir?",
