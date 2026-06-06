@@ -330,6 +330,17 @@ async function main() {
         };
       })),
     );
+    await prisma.knowledgeDocument.update({
+      where: { id: row.document.id },
+      data: {
+        chunkStatus: "READY",
+        embeddingStatus: "READY",
+        vectorIndexStatus: "READY",
+        qualityStatus: "READY",
+        readinessStatus: "READY",
+        errorMessage: null,
+      },
+    });
   }
 
   console.log(JSON.stringify({ phase: "local_knowledge_folder_import_complete", ...report }, null, 2));

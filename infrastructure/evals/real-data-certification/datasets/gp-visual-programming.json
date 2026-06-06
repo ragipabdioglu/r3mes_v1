@@ -10,7 +10,7 @@
   "domains": ["education", "programming"],
   "sourceTypes": ["pdf"],
   "documentCountExpected": 10,
-  "collectionIds": ["cmpmh50070002kll4mdk1mlnf"],
+  "collectionIds": ["cmq2naxrb0002klscmec979ps"],
   "expectedArtifacts": ["definition", "list", "comparison", "code", "procedure", "visual_layout"],
   "certificationBuckets": [
     "source_resolution",

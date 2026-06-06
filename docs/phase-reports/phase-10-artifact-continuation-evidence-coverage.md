@@ -174,6 +174,50 @@ Date: 2026-06-06 17:35:00 +03:00
 - Do not add domain-specific field rules for comparison subjects.
 - Remaining G.P failures should continue through their owner phases instead of composer or fixture hacks.
 
+## Incremental Closure - Local Import Chat-Ready Lifecycle
+
+Date: 2026-06-06 20:50:00 +03:00
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Owner-phase closure touched: Phase 2/3 ingestion-storage handoff discovered by real-data certification.
+- Goal: make local folder imports finish the same chat-ready lifecycle expected by retrieval filters after successful Qdrant V2 upsert.
+
+### Changes
+- Updated local knowledge folder import so every imported document is marked `chunkStatus`, `embeddingStatus`, `vectorIndexStatus`, `qualityStatus`, and `readinessStatus` as `READY` after Qdrant point upsert succeeds.
+- Reingested the G.P PDF collection with the fixed generic lifecycle path.
+- Updated G.P smoke and real-data certification fixture collection ids to the newly reingested V2 collection.
+- No retrieval scoring, composer, safety, parser behavior, UI, or provider logic was changed.
+- No data-specific literal was added to core logic; G.P-specific ids only live in eval fixture/manifest/report context.
+
+### Verification
+| Command | Exit code | Result | Note |
+| --- | ---: | --- | --- |
+| pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json --noEmit | 0 | pass | Typecheck clean |
+| pnpm --filter @r3mes/backend-api run build | 0 | pass | Build succeeded after stopping backend DLL lock |
+| pnpm --filter @r3mes/backend-api run import:local-knowledge-folder -- --dir "..\\..\\data\\G.P" --collection-name "G.P PDFleri V2 - Phase 3 Verified" --wallet "<dev-wallet>" --replace | 0 | pass | 10 documents, 207 chunks, 0 embeddingText fallback |
+| pnpm local:status | 0 | pass | backend/dApp/ai-engine/Qdrant/Postgres healthy; llama false, LoRA unavailable |
+| pnpm --filter @r3mes/backend-api run qdrant:reindex:status -- --collection-id cmq2naxrb0002klscmec979ps | 0 | pass | 207/207 BGE-M3 points; valid payload V2; deterministic fallback 0 |
+| pnpm --filter @r3mes/backend-api exec vitest run src/lib/knowledgeIngestionProcessor.test.ts src/knowledgeRoutes.test.ts | 0 | pass | 7 tests passed |
+| pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke | 1 | expected fail | 11/15 pass; runtime coverage 1.0; provider fallback ratios 0 |
+| pnpm --filter @r3mes/backend-api run eval:real-data-certification | 0 | fail gate | certificationBacklogCount 30, blockerCount 29 |
+
+### Measured Impact
+- Fixed the local import lifecycle drift where Qdrant had 207 valid points but DB document readiness stayed `PENDING`.
+- New G.P V2 collection: `cmq2naxrb0002klscmec979ps`.
+- DB readiness now shows 10/10 documents `READY` and 207/207 chunks retrievable by existing retrieval filters.
+- G.P smoke is back to the real quality baseline: 11/15 pass, not 0/15 access-denied noise.
+- Remaining G.P fails are real retrieval/evidence gaps:
+  - `gp_dotnet_framework_definition`
+  - `gp_combobox_definition`
+  - `gp_button3_click_code`
+  - `gp_ders8_visual_layout_controls`
+
+### Decision
+- Treat this as required Phase 2/3 closure discovered during Phase 10 certification.
+- Continue Phase 10 using V2-reingested data only.
+- Do not solve the remaining four cases with fixture hacks or document-specific literals; keep them assigned to Phase 4/5/6/7 owner work according to diagnostics.
+
 ## Measured Impact
 - G.P smoke remains 7/15 and release gate remains fail.
 - Target case gp_vs_project_types_list now produces 5 facts and captures more list evidence.
