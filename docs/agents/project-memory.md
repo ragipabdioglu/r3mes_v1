@@ -78,6 +78,14 @@ of truth; these files are the short working charter read before each task.
 - Faz 4 acceptance should use the Phase 3 Verified B.Y and G.P collections.
 - BGE-M3 and QdrantPayloadV2 are verified Phase 3 backbone work.
 - LoRA is not part of knowledge correctness; chat must retain a LoRA-free path.
+- Phase 10 generic code evidence coverage slice completed.
+- Commit 94f9112 added code-like retrieval scoring, code candidate diversification, and code/procedure pruning preservation.
+- Skill pipeline now extracts generic code fragments as code_fact evidence without dataset-specific literals.
+- G.P smoke remains 12/15, but gp_button3_click_code evidence-only now passes.
+- That case moved from retrieval_or_evidence_failure to composer_or_model_generation_failure.
+- Remaining G.P blockers: .NET definition retrieval/no-source, code final answer rendering, and visual/layout evidence.
+- Real-data certification remains fail gate with backlog 29 and blockers 28.
+- Next slice should not patch code answers in retrieval/evidence; answer carry-through belongs to Phase 7.
 
 ## Fixed Roster
 
