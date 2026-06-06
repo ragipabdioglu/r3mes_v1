@@ -703,6 +703,46 @@ describe("composeDomainEvidenceAnswer", () => {
     expect(rendered).not.toContain("Yedeksiz işlem");
   });
 
+  it("preserves code identifiers and member access in code explanation answers", () => {
+    const answerSpec: AnswerSpec = {
+      answerDomain: "technical",
+      answerIntent: "explain",
+      groundingConfidence: "high",
+      userQuery: "saveButton_Click içinde ne yapılıyor?",
+      tone: "direct",
+      sections: ["assessment", "action", "summary"],
+      assessment:
+        "private void saveButton_Click(object sender, EventArgs e) { // The handler validates the input. if (nameTextBox.Text.Length > 0) { itemList.Items.Add(nameTextBox.Text); } nameTextBox.Clear(); nameTextBox.Focus(); }",
+      action:
+        "private void saveButton_Click(object sender, EventArgs e) { if (nameTextBox.Text.Length > 0) { itemList.Items.Add(nameTextBox.Text); } nameTextBox.Clear(); nameTextBox.Focus(); }",
+      caution: ["Generic caution should not be used for this source-grounded code explanation."],
+      summary: "The handler validates text input, adds it to a list, clears the input, and focuses it again.",
+      unknowns: [],
+      sourceIds: ["generic-code-source"],
+      facts: [
+        "private void saveButton_Click(object sender, EventArgs e) { if (nameTextBox.Text.Length > 0) { itemList.Items.Add(nameTextBox.Text); } nameTextBox.Clear(); nameTextBox.Focus(); }",
+      ],
+    };
+    const answerPlan = buildAnswerPlan(answerSpec);
+    const rendered = composePlannedAnswer({
+      answerSpec,
+      answerPlan,
+      compiledEvidence: compiledEvidence({
+        facts: answerSpec.facts,
+        usableFactCount: answerSpec.facts.length,
+      }),
+      constraints: answerPlan.constraints,
+    });
+
+    expect(answerPlan.taskType).toBe("code_explanation");
+    expect(rendered).toContain("saveButton_Click");
+    expect(rendered).toContain("nameTextBox.Text.Length");
+    expect(rendered).toContain("itemList.Items.Add");
+    expect(rendered).toContain("nameTextBox.Focus");
+    expect(rendered).not.toContain("Generic caution");
+    expect(rendered.split(/\s+/u).filter(Boolean).length).toBeLessThanOrEqual(85);
+  });
+
   it("uses source-grounded compare composition without adding unrelated caution", () => {
     const rendered = composeAnswerSpec({
       answerDomain: "general",

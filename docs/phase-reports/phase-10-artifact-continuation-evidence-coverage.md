@@ -317,3 +317,44 @@ Date: 2026-06-06 20:50:00 +03:00
 - Accept this slice as a generic code evidence coverage improvement.
 - Do not patch final answer text for the G.P case in retrieval/evidence.
 - Continue Phase 10 certification with V2 data and keep the remaining code answer issue assigned to Phase 7.
+
+## 2026-06-07 - Generic Code Answer Carry-Through Slice
+
+### Scope
+- Active roadmap phase: Phase 10 - Real Data Certification.
+- Backlog owner touched: Phase 7 - Full Answer Intelligence.
+- Goal: when code/procedure evidence is already sufficient, keep method names, conditions, and member calls in the final deterministic answer without dumping a long raw chunk.
+
+### Change
+- Added a generic code-like answer summarizer in the planned composer path.
+- Code explanation answers now preserve method names, `if (...)` conditions, and member-call identifiers when those are present in source-grounded evidence.
+- Code-like raw evidence bypasses natural-language sentence polishing that was truncating member access expressions.
+- Added a generic unit test using synthetic code identifiers only.
+- No data-specific literal was added to core logic. G.P identifiers remain only in eval/report artifacts.
+- Parser, retrieval scoring, Qdrant indexing, embedding provider, reranker provider, safety behavior, UI layout, and public response shape were not changed.
+
+### Verification
+| Command | Exit | Result | Note |
+| --- | ---: | --- | --- |
+| `pnpm --filter @r3mes/backend-api exec vitest run src/lib/domainEvidenceComposer.test.ts src/lib/hybridKnowledgeRetrieval.test.ts src/lib/skillPipeline.test.ts` | 0 | pass | 94 tests passed |
+| `pnpm --filter @r3mes/backend-api exec tsc --noEmit` | 0 | pass | Typecheck clean |
+| `pnpm --filter @r3mes/backend-api exec tsc -p tsconfig.json` | 0 | pass | Backend dist updated |
+| `pnpm local:status` | 0 | pass | backend/dApp/ai-engine/Qdrant/Postgres healthy; llama false, LoRA unavailable |
+| `pnpm --filter @r3mes/backend-api run eval:gp-visual-programming-smoke` | 1 | expected fail | 13/15 pass; code understanding now passes |
+| `pnpm --filter @r3mes/backend-api run eval:real-data-certification` | 0 | fail gate | certificationBacklogCount 28, blockerCount 27 |
+
+### Measured Impact
+- `gp_button3_click_code` now passes both evidence-only and answer-quality checks.
+- G.P smoke improved from 12/15 to 13/15.
+- Code-understanding bucket is now 1/1.
+- Certification improved from backlog 29 / blockers 28 to backlog 28 / blockers 27.
+- Provider fallback ratios stayed 0.
+
+### Remaining Risks / Backlog
+- `gp_dotnet_framework_definition`: evidence-only still fails with no selected source/context. Owner: Phase 4/5 retrieval and query/source intelligence.
+- `gp_ders8_visual_layout_controls`: visual/layout evidence remains unavailable. Owner: Document Intelligence / visual-layout capability.
+- Real-data certification remains release-gate fail because broader Phase 7 answer-presentation, Phase 4 retrieval, and Phase 5 query/source issues remain.
+
+### Decision
+- Accept this slice as a generic code answer carry-through improvement.
+- Continue with V2 data and do not add document-specific code/object literals to product logic.

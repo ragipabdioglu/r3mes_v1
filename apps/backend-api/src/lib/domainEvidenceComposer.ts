@@ -38,6 +38,20 @@ function uniqueSentences(values: string[], limit: number): string[] {
   return out;
 }
 
+function uniqueCodeEvidenceSentences(values: string[], limit: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values.filter((item) => item.trim())) {
+    const value = hasCodeLikeAnswerShape(raw) ? sentence(raw.trim().replace(/\s+/gu, " ")) : sentence(clean(raw, ""));
+    const key = normalizeForMatch(value).slice(0, 220);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 function firstSentence(value: string): string {
   const cleaned = clean(value, "");
   const match = cleaned.match(/^(.{12,260}?[.!?])(?:\s|$)/u);
@@ -116,6 +130,16 @@ function conciseProcedureStep(value: string): string {
 }
 
 function conciseCodeExplanation(value: string): string {
+  if (hasCodeLikeAnswerShape(value)) {
+    const summarized = summarizeCodeLikeAnswer(value);
+    if (summarized) return summarized;
+    const compacted = value.replace(/\s+/gu, " ").trim();
+    const words = compacted.split(/\s+/u).filter(Boolean);
+    const bounded = words.length <= 64
+      ? compacted
+      : words.slice(0, 64).join(" ").replace(/[.,;:!?]*$/u, "");
+    return sentence(bounded);
+  }
   const sentenceText = firstSentence(value)
     .replace(/^\s*(?:\d+[.)]|[-*•])\s*/u, "")
     .replace(/\s+/gu, " ")
@@ -123,6 +147,36 @@ function conciseCodeExplanation(value: string): string {
   const words = sentenceText.split(/\s+/u).filter(Boolean);
   if (words.length <= 32) return sentence(sentenceText);
   return `${words.slice(0, 32).join(" ").replace(/[.,;:!?]*$/u, "")}.`;
+}
+
+function summarizeCodeLikeAnswer(value: string): string | null {
+  const compacted = value.replace(/\s+/gu, " ").trim();
+  const methodName = compacted.match(/\b([a-zA-Z_][a-zA-Z0-9_]{2,})\s*\([^)]*\)\s*\{/u)?.[1] ?? null;
+  const conditions = [...compacted.matchAll(/\bif\s*\(([^)]{3,140})\)/gu)]
+    .map((match) => match[1]?.trim())
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 2);
+  const calls = [...compacted.matchAll(/\b([a-zA-Z_][a-zA-Z0-9_]{1,}(?:\.[a-zA-Z_][a-zA-Z0-9_]{1,})+\s*\([^)]{0,140}\))/gu)]
+    .map((match) => match[1]?.trim())
+    .filter((item): item is string => Boolean(item))
+    .filter((item) => !methodName || !item.startsWith(`${methodName}(`))
+    .slice(0, 4);
+  const parts: string[] = [];
+  for (const condition of conditions) parts.push(`${condition} kontrol edilir`);
+  for (const call of calls) parts.push(`${call} çağrılır`);
+  if (!methodName && parts.length === 0) return null;
+  const prefix = methodName ? `${methodName}: ` : "";
+  const body = parts.length > 0 ? parts.join("; ") : compacted;
+  return sentence(`${prefix}${body}`);
+}
+
+function hasCodeLikeAnswerShape(value: string): boolean {
+  return (
+    /```[\s\S]*?```/u.test(value) ||
+    /\b(?:class|function|def|private|public|protected|static|async|void|return|if|else|for|foreach|while|switch|try|catch)\b[\s\S]{0,180}[({;]/iu.test(value) ||
+    /\b[a-zA-Z_][a-zA-Z0-9_]{2,}\s*\([^)]*\)\s*\{/u.test(value) ||
+    /\b[a-zA-Z_][a-zA-Z0-9_]{1,}\.[a-zA-Z_][a-zA-Z0-9_]{1,}\s*(?:=|\()/u.test(value)
+  );
 }
 
 function normalizeForMatch(value: string): string {
@@ -873,7 +927,7 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
   }
 
   if (answerPlan.taskType === "code_explanation") {
-    const candidates = uniqueSentences(
+    const candidates = uniqueCodeEvidenceSentences(
       [
         ...spec.facts,
         opts.assessment,
