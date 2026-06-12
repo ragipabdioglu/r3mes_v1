@@ -132,6 +132,8 @@ function taskTypeFromContract(queryContract: QueryContract): AnswerTaskType | "g
       return "procedure";
     case "code_explanation":
       return "code_explanation";
+    case "visual_layout":
+      return "visual_layout";
     case "extract_fields":
       return "field_extraction";
     case "explain_with_sources":
@@ -147,7 +149,7 @@ function taskTypeFromContract(queryContract: QueryContract): AnswerTaskType | "g
 
 function outputFormatFromTask(taskType: AnswerPlan["taskType"], format: AnswerPlanFormat): AnswerPlanFormat {
   if (format !== "freeform") return format;
-  if (taskType === "list_items") return "bullets";
+  if (taskType === "list_items" || taskType === "visual_layout") return "bullets";
   return format;
 }
 

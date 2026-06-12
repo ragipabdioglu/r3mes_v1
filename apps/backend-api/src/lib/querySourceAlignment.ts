@@ -82,6 +82,23 @@ const GENERIC_TERMS = new Set([
   "uzman",
 ]);
 
+const UI_IDENTIFIER_SUFFIXES = [
+  "Button",
+  "Box",
+  "Label",
+  "Picker",
+  "Bar",
+  "Icon",
+  "Timer",
+  "List",
+  "Panel",
+  "View",
+  "Field",
+  "Form",
+  "Image",
+  "Control",
+] as const;
+
 export function normalizeAlignmentText(value: string): string {
   return normalizeConceptText(value);
 }
@@ -245,6 +262,35 @@ function phraseTerms(value: string): string[] {
   return unique(phrases, 12);
 }
 
+export function asksForVisualLayoutEvidence(value: string): boolean {
+  const normalized = normalizeAlignmentText(value);
+  return (
+    /\b(?:arayuz|arayüz|ekran|layout|tasarim|tasarım|gorsel|görsel|kontrol|kontroller|ogeler|ögeler|bilesen|bileşen)\b/u.test(normalized) ||
+    /\b(?:form|panel)\s+(?:tasarim|tasarım|gorsel|görsel|arayuz|arayüz|layout)\b/u.test(normalized)
+  );
+}
+
+function asksForVisualLayoutBreadth(value: string): boolean {
+  const normalized = normalizeAlignmentText(value);
+  return /\b(?:gorunen|görünen|bulunan|yer alan|temel)?\s*(?:kontrol|kontroller|ogeler|ögeler|bilesen|bileşen)\b/u.test(normalized);
+}
+
+export function uiLikeIdentifierTerms(value: string): string[] {
+  const suffixPattern = UI_IDENTIFIER_SUFFIXES.join("|");
+  const lowerSuffixPattern = UI_IDENTIFIER_SUFFIXES.map((suffix) => suffix.toLocaleLowerCase("en-US")).join("|");
+  const pattern = new RegExp(`\\b(?:[A-Za-z][A-Za-z0-9]*(?:${suffixPattern})\\d*|(?:${lowerSuffixPattern})\\d+)\\b`, "gu");
+  return unique(
+    [...value.matchAll(pattern)]
+      .map((match) => match[0].replace(/\d+$/u, ""))
+      .filter((token) => token.length >= 4),
+    24,
+  );
+}
+
+function hasCodeLikeUiEvidence(value: string): boolean {
+  return /\b(?:private|public|function|void|def)\b|\b[A-Za-z_][A-Za-z0-9_]*\s*\(/u.test(value);
+}
+
 function strictEntityTerms(value: string): string[] {
   const terms = new Set<string>();
   const broadAcronyms = new Set(["bist", "cmb", "ifrs", "kap", "pdf", "spk", "tsrs", "yk"]);
@@ -360,6 +406,21 @@ export function scoreQuerySourceAlignment(opts: {
       ? Math.max(lexicalOverlapScore, canonicalOverlapScore * 0.72)
       : lexicalOverlapScore;
   const phraseBonus = phraseMatches.length > 0 ? 0.28 : 0;
+  const visualLayoutRequested = asksForVisualLayoutEvidence(opts.query);
+  const visualLayoutTerms = visualLayoutRequested ? uiLikeIdentifierTerms(opts.sourceText) : [];
+  const hasEnoughVisualLayoutEvidence = visualLayoutTerms.length >= 3 || (hasCodeLikeUiEvidence(opts.sourceText) && visualLayoutTerms.length >= 2);
+  if (visualLayoutRequested && asksForVisualLayoutBreadth(opts.query) && !hasEnoughVisualLayoutEvidence) {
+    return {
+      mode: "mismatch",
+      score: 0,
+      matchedTerms: [],
+      queryTerms: unique(queryTerms, 20),
+      sourceTerms: unique(sourceTerms, 24),
+      genericMatchedTerms: unique(genericMatchedTerms, 8),
+      reason: "Visual layout breadth query requires source-visible control-like evidence.",
+    };
+  }
+  const visualLayoutScoreFloor = hasEnoughVisualLayoutEvidence ? Math.max(opts.weakScore, 0.48) : 0;
   const routeDomainBonus =
     opts.routePlan?.domain && opts.routePlan.domain !== "general" && sourceTerms.includes(tokenKey(opts.routePlan.domain))
       ? 0.08
@@ -369,13 +430,18 @@ export function scoreQuerySourceAlignment(opts: {
   const hasRouteSpecificMatch =
     routeSpecificTerms.length === 0 ||
     routeSpecificTerms.some((term) => sourceTerms.some((sourceTerm) => fuzzyMatch(term, sourceTerm)) || sourceText.includes(term));
-  const rawScore = Math.max(0, Math.min(1, overlapScore + phraseBonus + routeDomainBonus - genericOnlyPenalty));
+  const rawScore = Math.max(
+    visualLayoutScoreFloor,
+    Math.min(1, overlapScore + phraseBonus + routeDomainBonus - genericOnlyPenalty),
+  );
   const score = hasRouteSpecificMatch ? rawScore : Math.min(rawScore, Math.max(0, opts.minScore - 0.001));
   const mode: AlignmentMode = score >= opts.weakScore ? "aligned" : score >= opts.minScore ? "weak" : "mismatch";
   const reason =
     mode === "mismatch"
       ? !hasRouteSpecificMatch
         ? "Source does not match the high-confidence route subtopic."
+        : hasEnoughVisualLayoutEvidence
+        ? "Source exposes layout/control-like evidence for a visual layout query."
         : genericMatchedTerms.length > 0 && matchedTerms.length === 0
         ? "Only generic query terms matched the source."
         : "Query concepts did not match source concepts."
@@ -385,7 +451,12 @@ export function scoreQuerySourceAlignment(opts: {
   return {
     mode,
     score: Number(score.toFixed(3)),
-    matchedTerms: unique([...matchedCanonicalTerms, ...matchedTerms, ...phraseMatches], 12),
+    matchedTerms: unique([
+      ...matchedCanonicalTerms,
+      ...matchedTerms,
+      ...phraseMatches,
+      ...(hasEnoughVisualLayoutEvidence ? ["visual_layout"] : []),
+    ], 12),
     queryTerms: unique(queryTerms, 20),
     sourceTerms: unique(sourceTerms, 24),
     genericMatchedTerms: unique(genericMatchedTerms, 8),

@@ -9,6 +9,7 @@ export type AnswerTaskType =
   | "summarize_opinions"
   | "procedure"
   | "code_explanation"
+  | "visual_layout"
   | "field_extraction"
   | "source_grounded_explain"
   | "unknown";
@@ -121,6 +122,17 @@ function detectTask(normalizedQuery: string, requestedFields: RequestedField[]):
   if (hasAny(normalizedQuery, [/\b(fark(?:lar)?(?:i|ı|ini|ını)?|karsilastir|karşılaştır|ayni sey mi|aynı şey mi|arasindaki|arasındaki)\b/u])) {
     reasons.push("compare_language");
     return { taskType: "compare_concepts", answerIntent: "compare", reasons };
+  }
+  if (
+    hasAny(normalizedQuery, [
+      /\b(?:arayuz|arayüz|ekran|layout|tasarim|tasarım|gorsel|görsel)\b/u,
+      /\b(?:form|panel)\s+(?:tasarim|tasarım|gorsel|görsel|arayuz|arayüz|layout)\b/u,
+      /\b(?:tasariminda|tasarımında|gorselinde|görselinde|arayuzunde|arayüzünde)\s+(?:gorunen|görünen|bulunan|yer alan)?\b/u,
+      /\b(?:gorunen|görünen|bulunan|yer alan)\s+(?:temel\s+)?(?:kontrol|kontroller|ogeler|ögeler|bilesen|bileşen)/u,
+    ])
+  ) {
+    reasons.push("visual_layout_language");
+    return { taskType: "visual_layout", answerIntent: "explain", reasons };
   }
   if (hasAny(normalizedQuery, [/\b(nelerdir|neler|cesitleri|çeşitleri|turleri|türleri|tipleri|ozellikleri|özellikleri|bilesenleri|bileşenleri|maddeleri|madde\s+madde|adimlari|adımları|sirala|sırala|5v)\b/u])) {
     reasons.push("list_language");

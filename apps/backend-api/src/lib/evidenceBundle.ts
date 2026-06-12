@@ -10,6 +10,7 @@ export type EvidenceItemKind =
   | "table_fact"
   | "numeric_fact"
   | "procedure_step"
+  | "visual_layout"
   | "source_limit"
   | "contradiction";
 
@@ -22,6 +23,7 @@ export const EVIDENCE_ITEM_KINDS = [
   "table_fact",
   "numeric_fact",
   "procedure_step",
+  "visual_layout",
   "source_limit",
   "contradiction",
 ] as const satisfies readonly EvidenceItemKind[];
@@ -33,7 +35,8 @@ export type TextEvidenceItemKind =
   | "list_item"
   | "comparison_point"
   | "code_fact"
-  | "procedure_step";
+  | "procedure_step"
+  | "visual_layout";
 
 export interface EvidenceItem {
   id: string;
@@ -137,6 +140,8 @@ function evidenceKindForTaskType(taskType: BuildEvidenceBundleInput["taskType"])
       return "procedure_step";
     case "code_explanation":
       return "code_fact";
+    case "visual_layout":
+      return "visual_layout";
     default:
       return "text_fact";
   }
@@ -271,7 +276,8 @@ export function hasUsableEvidenceItem(item: EvidenceItem): boolean {
     item.kind === "code_fact" ||
     item.kind === "table_fact" ||
     item.kind === "numeric_fact" ||
-    item.kind === "procedure_step";
+    item.kind === "procedure_step" ||
+    item.kind === "visual_layout";
 }
 
 export function countUsableEvidenceItems(bundle: EvidenceBundle | null | undefined): number {

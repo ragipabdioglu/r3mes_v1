@@ -291,6 +291,8 @@ function inferContractOperation(opts: {
       return "procedure";
     case "code_explanation":
       return "code_explanation";
+    case "visual_layout":
+      return "visual_layout";
     case "field_extraction":
       return "extract_fields";
     case "source_grounded_explain":
@@ -306,10 +308,12 @@ function inferContractOperation(opts: {
 
 function inferRequiredEvidenceType(opts: {
   mode: QueryUnderstandingMode;
+  taskType: AnswerTaskDetection["taskType"];
   sourceOnly: boolean;
   requestedFieldCount: number;
 }): QueryContractRequiredEvidenceType {
   if (opts.mode === "conversation") return "none";
+  if (opts.taskType === "visual_layout") return "visual_layout";
   if (opts.sourceOnly && opts.requestedFieldCount > 0) return "source_and_structured_fields";
   if (opts.sourceOnly) return "source";
   if (opts.requestedFieldCount > 0) return "structured_fields";
@@ -325,6 +329,7 @@ export function buildQueryContract(understanding: Omit<QueryUnderstanding, "quer
     }),
     requiredEvidenceType: inferRequiredEvidenceType({
       mode: understanding.mode,
+      taskType: understanding.answerTask.taskType,
       sourceOnly,
       requestedFieldCount: understanding.requestedFieldDetection.requestedFields.length,
     }),

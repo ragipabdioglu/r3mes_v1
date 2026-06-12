@@ -7,6 +7,7 @@ export type QueryContractOperation =
   | "summarize"
   | "procedure"
   | "code_explanation"
+  | "visual_layout"
   | "extract_fields"
   | "explain_with_sources"
   | "unknown";
@@ -16,6 +17,7 @@ export type QueryContractRequiredEvidenceType =
   | "source"
   | "structured_fields"
   | "source_and_structured_fields"
+  | "visual_layout"
   | "unknown";
 
 export type QueryContractOutputFormat = "bullets" | "short" | "table" | "freeform";

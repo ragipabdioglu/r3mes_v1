@@ -19,10 +19,12 @@ import { ensureNoSourceEvidence } from "./noSourceEvidence.js";
 import { rerankKnowledgeCardsWithDiagnostics, type RerankDiagnostics } from "./modelRerank.js";
 import { prisma } from "./prisma.js";
 import {
+  asksForVisualLayoutEvidence,
   buildSourceConceptText,
   scoreQuerySourceAlignment,
   type AlignmentDiagnostics,
   type AlignmentScore,
+  uiLikeIdentifierTerms,
 } from "./querySourceAlignment.js";
 import type { QdrantEmbeddingDiagnostics } from "./qdrantEmbedding.js";
 import { searchQdrantKnowledge, type QdrantKnowledgePayload } from "./qdrantStore.js";
@@ -915,6 +917,32 @@ function diversifyCodeEvidenceCandidates<T extends { chunk: HybridKnowledgeChunk
   return selected.slice(0, limit);
 }
 
+function diversifyVisualLayoutCandidates<T extends { chunk: HybridKnowledgeChunk }>(
+  query: string,
+  accepted: T[],
+  candidates: T[],
+  limit: number,
+): T[] {
+  if (!asksForVisualLayoutEvidence(query) || candidates.length === 0) return accepted.slice(0, limit);
+  const key = (candidate: T) => candidate.chunk.id || `${candidate.chunk.documentId}:${candidate.chunk.chunkIndex}`;
+  const scored = candidates
+    .map((candidate) => ({ candidate, identifierCount: visualLayoutEvidenceScore(candidate.chunk.content) }))
+    .filter((item) => item.identifierCount > 0)
+    .sort((a, b) => b.identifierCount - a.identifierCount || a.candidate.chunk.chunkIndex - b.candidate.chunk.chunkIndex);
+  if (scored.length === 0) return accepted.slice(0, limit);
+
+  const selected = accepted
+    .filter((candidate) => visualLayoutEvidenceScore(candidate.chunk.content) > 0)
+    .slice(0, limit);
+  const selectedKeys = () => new Set(selected.map(key));
+  for (const item of scored) {
+    if (selected.length >= limit) break;
+    if (selectedKeys().has(key(item.candidate))) continue;
+    selected.push(item.candidate);
+  }
+  return selected.length > 0 ? selected.slice(0, limit) : accepted.slice(0, limit);
+}
+
 function prioritizeCriticalEvidenceCandidates<T extends { chunk: HybridKnowledgeChunk }>(
   query: string,
   candidates: T[],
@@ -1289,6 +1317,77 @@ async function collectCriticalEvidenceCandidates(opts: {
     .slice(0, Math.max(8, prismaLimit()));
 }
 
+async function collectVisualLayoutCandidates(opts: {
+  query: string;
+  accessibleCollectionIds: string[];
+  routePlan?: DomainRoutePlan | null;
+}): Promise<HybridKnowledgeCandidate[]> {
+  if (!asksForVisualLayoutEvidence(opts.query)) return [];
+  const chunks = await prisma.knowledgeChunk.findMany({
+    where: {
+      document: {
+        collectionId: { in: opts.accessibleCollectionIds },
+        parseStatus: "READY",
+        chunkStatus: "READY",
+        embeddingStatus: "READY",
+        readinessStatus: { in: READY_READINESS_STATUSES },
+      },
+    },
+    include: {
+      document: true,
+      embedding: true,
+    },
+    orderBy: [{ createdAt: "desc" }, { chunkIndex: "asc" }],
+    take: Math.max(160, prismaLimit() * 16),
+  });
+
+  return chunks
+    .map((candidate) => {
+      const visualEvidenceScore = visualLayoutEvidenceScore(candidate.content);
+      const chunkAutoMetadata = candidate.autoMetadata as Record<string, unknown> | null;
+      const chunk: HybridKnowledgeChunk = {
+        id: candidate.id,
+        documentId: candidate.documentId,
+        chunkIndex: candidate.chunkIndex,
+        content: candidate.content,
+        artifactId: candidate.artifactId ?? undefined,
+        artifactKind: typeof chunkAutoMetadata?.artifactKind === "string" ? chunkAutoMetadata.artifactKind : undefined,
+        autoMetadata: candidate.autoMetadata,
+        document: {
+          title: candidate.document.title,
+          collectionId: candidate.document.collectionId,
+          autoMetadata: candidate.document.autoMetadata,
+        },
+        embedding: candidate.embedding,
+      };
+      const score = Math.min(72, visualEvidenceScore * 8 + 16);
+      return {
+        chunk,
+        card: parseKnowledgeCard(chunk.content),
+        sources: ["prisma" as const],
+        lexicalScore: score,
+        preRankScore: score,
+      };
+    })
+    .filter((candidate) =>
+      visualLayoutEvidenceScore(candidate.chunk.content) > 0 &&
+      candidateMatchesRouteScope(candidate.card, candidate.chunk, opts.routePlan),
+    )
+    .sort((a, b) => b.preRankScore - a.preRankScore)
+    .slice(0, Math.max(6, Math.min(10, prismaLimit())));
+}
+
+function hasCodeLikeUiEvidence(value: string): boolean {
+  return /\b(?:private|public|function|void|def)\b|\b[A-Za-z_][A-Za-z0-9_]*\s*\(/u.test(value);
+}
+
+function visualLayoutEvidenceScore(value: string): number {
+  const identifierCount = uiLikeIdentifierTerms(value).length;
+  if (identifierCount >= 3) return identifierCount;
+  if (identifierCount >= 2 && hasCodeLikeUiEvidence(value)) return identifierCount;
+  return 0;
+}
+
 export function dedupeHybridKnowledgeCandidates(candidates: HybridKnowledgeCandidate[]): HybridKnowledgeCandidate[] {
   return dedupeCandidatesIdentitySafe(candidates).candidates;
 }
@@ -1331,12 +1430,15 @@ function scoreLightweightCandidate(query: string, candidate: HybridKnowledgeCand
     Math.max(0, ...criticalEvidenceTermGroups(query).map((group) => criticalEvidenceCoverageScore(candidate, group) * 3)),
   );
   const codeEvidenceBonus = codeEvidenceRelevanceScore(query, candidate);
+  const visualLayoutIdentifierBonus = asksForVisualLayoutEvidence(query)
+    ? Math.min(24, uiLikeIdentifierTerms(candidate.chunk.content).length * 3)
+    : 0;
   const identifierBonus = targetIndexes.some((index) => title.includes(index) || candidate.chunk.content.includes(index))
     ? 10
     : 0;
   const symbolBonus = primarySymbol && candidateTitleSymbol(title) === primarySymbol ? 8 : 0;
   const lengthPenalty = candidate.chunk.content.trim().length < 80 ? 1 : 0;
-  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus + criticalEvidenceBonus + codeEvidenceBonus + identifierBonus + symbolBonus - lengthPenalty;
+  return overlap + phraseBonus + routeBonus + sourceBonus + semanticBonus + criticalEvidenceBonus + codeEvidenceBonus + visualLayoutIdentifierBonus + identifierBonus + symbolBonus - lengthPenalty;
 }
 
 export function preRankHybridKnowledgeCandidates(opts: {
@@ -1883,16 +1985,18 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
   }
 
   const strictRouteScope = isStrictRouteScope(routePlan);
-  const [qdrantResult, prismaResult, criticalEvidenceResult] = await Promise.allSettled([
+  const [qdrantResult, prismaResult, criticalEvidenceResult, visualLayoutResult] = await Promise.allSettled([
     collectQdrantCandidates({ query, accessibleCollectionIds, routePlan }),
     collectPrismaCandidates({ query, accessibleCollectionIds, routePlan }),
     collectCriticalEvidenceCandidates({ query: evidenceQuery, accessibleCollectionIds, routePlan }),
+    collectVisualLayoutCandidates({ query: evidenceQuery, accessibleCollectionIds, routePlan }),
   ]);
   const qdrantCandidates = qdrantResult.status === "fulfilled" ? qdrantResult.value.candidates : [];
   const qdrantEmbeddingDiagnostics =
     qdrantResult.status === "fulfilled" ? qdrantResult.value.embedding : emptyQdrantEmbeddingDiagnostics();
   const prismaCandidates = prismaResult.status === "fulfilled" ? prismaResult.value : [];
   const criticalEvidenceCandidates = criticalEvidenceResult.status === "fulfilled" ? criticalEvidenceResult.value : [];
+  const visualLayoutCandidates = visualLayoutResult.status === "fulfilled" ? visualLayoutResult.value : [];
   const providerFailures: NonNullable<HybridRetrievedKnowledgeContext["diagnostics"]["providerFailures"]> = [];
   if (qdrantResult.status === "rejected") {
     const reason = qdrantResult.reason instanceof Error ? qdrantResult.reason.message : String(qdrantResult.reason);
@@ -1915,6 +2019,14 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     providerFailures.push({ provider: "critical_evidence", reason });
     console.warn(`[hybrid-retrieval] critical evidence candidate collection failed: ${criticalEvidenceResult.reason}`);
   }
+  if (visualLayoutResult.status === "rejected") {
+    const reason =
+      visualLayoutResult.reason instanceof Error
+        ? visualLayoutResult.reason.message
+        : String(visualLayoutResult.reason);
+    providerFailures.push({ provider: "prisma", reason: `visual_layout_candidates:${reason}` });
+    console.warn(`[hybrid-retrieval] visual layout candidate collection failed: ${visualLayoutResult.reason}`);
+  }
   const qdrantProviderFailed = providerFailures.some((failure) => failure.provider === "qdrant");
   const providerFailureDiagnostics = {
     providerFailures,
@@ -1922,7 +2034,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     qdrantFallbackUsed: qdrantProviderFailed,
   };
 
-  const collectedCandidates = [...criticalEvidenceCandidates, ...qdrantCandidates, ...prismaCandidates];
+  const collectedCandidates = [...criticalEvidenceCandidates, ...visualLayoutCandidates, ...qdrantCandidates, ...prismaCandidates];
   const deduplicationResult = dedupeCandidatesIdentitySafe(collectedCandidates);
   const deduped = deduplicationResult.candidates;
   const candidatePool = adaptHybridCandidatePoolTelemetry(
@@ -1964,7 +2076,13 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
       },
     };
   }
-  const preRanked = preRankHybridKnowledgeCandidates({ query, candidates: deduped, routePlan });
+  const preRankedBase = preRankHybridKnowledgeCandidates({ query, candidates: deduped, routePlan });
+  const preRanked = diversifyVisualLayoutCandidates(
+    evidenceQuery,
+    preRankedBase,
+    visualLayoutCandidates,
+    preRankedBase.length || preRankLimit(),
+  );
   const alignedPreRanked = alignHybridKnowledgeCandidates({
     query: evidenceQuery,
     candidates: preRanked,

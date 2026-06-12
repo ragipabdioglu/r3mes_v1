@@ -32,4 +32,17 @@ describe("querySourceAlignment", () => {
     expect(alignment.mode).toBe("mismatch");
     expect(alignment.matchedTerms).not.toContain("bas");
   });
+
+  it("keeps generic UI-like layout evidence for visual layout questions", () => {
+    const alignment = scoreQuerySourceAlignment({
+      query: "Form tasarımında görünen temel kontroller nelerdir?",
+      sourceText: "Session 8 layout notes: AlphaBox, BetaButton, GammaLabel, DeltaPicker, OmegaBar.",
+      minScore: 0.34,
+      weakScore: 0.5,
+      genericPenalty: 0.2,
+    });
+
+    expect(alignment.mode).not.toBe("mismatch");
+    expect(alignment.matchedTerms).toContain("visual layout");
+  });
 });

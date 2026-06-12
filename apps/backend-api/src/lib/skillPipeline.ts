@@ -479,6 +479,78 @@ function codeQueryFragments(text: string, query: string, limit = 3): string[] {
   return unique(fragments).slice(0, limit);
 }
 
+const UI_IDENTIFIER_SUFFIXES = [
+  "Button",
+  "Box",
+  "Label",
+  "Picker",
+  "Bar",
+  "Icon",
+  "Timer",
+  "List",
+  "Panel",
+  "View",
+  "Field",
+  "Form",
+  "Image",
+  "Control",
+] as const;
+
+function uiLikeIdentifiers(value: string, limit = 16): string[] {
+  const suffixPattern = UI_IDENTIFIER_SUFFIXES.join("|");
+  const lowerSuffixPattern = UI_IDENTIFIER_SUFFIXES.map((suffix) => suffix.toLocaleLowerCase("en-US")).join("|");
+  const pattern = new RegExp(`\\b(?:[A-Za-z][A-Za-z0-9]*(?:${suffixPattern})\\d*|(?:${lowerSuffixPattern})\\d+)\\b`, "gu");
+  const canonicalize = (token: string): string => {
+    const withoutDigits = token.replace(/\d+$/u, "");
+    const suffix = UI_IDENTIFIER_SUFFIXES.find((candidate) =>
+      withoutDigits.toLocaleLowerCase("en-US").endsWith(candidate.toLocaleLowerCase("en-US")),
+    );
+    if (!suffix) return withoutDigits;
+    if (withoutDigits.length === suffix.length) return suffix;
+    return withoutDigits.charAt(0).toLocaleUpperCase("en-US") + withoutDigits.slice(1);
+  };
+  return unique(
+    [...value.matchAll(pattern)]
+      .map((match) => canonicalize(match[0]))
+      .filter((token) => token.length >= 4),
+  ).slice(0, limit);
+}
+
+function visualLayoutQueryFragments(text: string, query: string, limit = 4): string[] {
+  const task = detectAnswerTask(query);
+  if (task.taskType !== "visual_layout") return [];
+  const normalizedText = text
+    .replace(/\r\n/g, "\n")
+    .replace(/#{1,6}\s*page\s+\d+/giu, "\n")
+    .replace(/#{1,6}\s+/g, "\n")
+    .trim();
+  const lines = normalizedText
+    .split(/\n+/u)
+    .map((line) => normalizeDocumentScaffoldFragment(line.trim()))
+    .filter(Boolean);
+  const windows: Array<{ fragment: string; identifiers: string[]; index: number }> = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const fragment = lines.slice(index, index + 4).join(" ").trim();
+    const identifiers = uiLikeIdentifiers(fragment);
+    const codeLikeUiFragment = /\b(?:private|public|function|void|def)\b|\b[A-Za-z_][A-Za-z0-9_]*\s*\(/u.test(fragment);
+    if (identifiers.length >= 3 || (codeLikeUiFragment && identifiers.length >= 2)) windows.push({ fragment, identifiers, index });
+  }
+  if (lines.length === 1) {
+    const identifiers = uiLikeIdentifiers(lines[0] ?? "");
+    const codeLikeUiFragment = /\b(?:private|public|function|void|def)\b|\b[A-Za-z_][A-Za-z0-9_]*\s*\(/u.test(lines[0] ?? "");
+    if (identifiers.length >= 3 || (codeLikeUiFragment && identifiers.length >= 2)) windows.push({ fragment: lines[0] ?? "", identifiers, index: 0 });
+  }
+  return windows
+    .map((item) => ({
+      ...item,
+      score: item.identifiers.length * 12 + (/\b(?:layout|form|panel|screen|arayuz|arayüz|ekran|tasarim|tasarım)\b/iu.test(item.fragment) ? 16 : 0),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => `Arayüz/layout öğeleri: ${item.identifiers.join(", ")}`)
+    .filter((fragment, index, all) => all.indexOf(fragment) === index)
+    .slice(0, limit);
+}
+
 function isListLikeLine(value: string): boolean {
   return /^\s*(?:[-*•]|\d{1,2}[.)])\s+/u.test(value);
 }
@@ -1471,6 +1543,14 @@ export function buildDeterministicEvidenceExtraction(
           maxChars: 900,
         });
       }
+      for (const fragment of visualLayoutQueryFragments(rawContent, input.userQuery)) {
+        addUsableIfRelevant(sourceLabel, fragment, {
+          allowGenericGuidance: true,
+          kind: "direct",
+          force: true,
+          maxChars: 520,
+        });
+      }
       for (const fragment of listQueryFragments(rawContent, input.userQuery)) {
         addUsableIfRelevant(sourceLabel, fragment, {
           allowGenericGuidance: true,
@@ -1542,6 +1622,14 @@ export function buildDeterministicEvidenceExtraction(
             kind: section.kind === "supporting" ? "supporting" : "direct",
             force: true,
             maxChars: 900,
+          });
+        }
+        for (const fragment of visualLayoutQueryFragments(section.text, input.userQuery)) {
+          addUsableIfRelevant(sourceLabel, fragment, {
+            allowGenericGuidance: true,
+            kind: section.kind === "supporting" ? "supporting" : "direct",
+            force: true,
+            maxChars: 520,
           });
         }
         for (const fragment of financeTargetedFragments(section.text, input.userQuery)) {

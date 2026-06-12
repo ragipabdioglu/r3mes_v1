@@ -367,6 +367,7 @@ const ARTIFACT_KINDS_FOR_EVIDENCE_KIND: Record<
   numeric: ["table", "table_row", "table_cell", "key_value"],
   procedure: ["procedure"],
   table: ["table", "table_row", "table_cell"],
+  visual_layout: ["visual_layout", "ocr_span", "paragraph"],
 };
 
 function uniqueEvidenceKinds<Kind extends string>(kinds: Kind[]): Kind[] {

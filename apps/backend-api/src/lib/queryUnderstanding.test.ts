@@ -202,6 +202,14 @@ describe("queryUnderstanding", () => {
       requestedFields: [],
     });
 
+    const visualLayout = buildQueryUnderstanding("Form tasarımında görünen temel kontroller nelerdir?");
+    expect(visualLayout.answerTask.taskType).toBe("visual_layout");
+    expect(visualLayout.queryContract).toMatchObject({
+      operation: "visual_layout",
+      requiredEvidenceType: "visual_layout",
+      outputFormat: "freeform",
+    });
+
     const categoryList = buildQueryUnderstanding("Varsayılan seçenek çeşitlerini madde madde yaz.");
     expect(categoryList.answerTask.taskType).toBe("list_items");
     expect(categoryList.queryContract).toMatchObject({

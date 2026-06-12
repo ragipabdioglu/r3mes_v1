@@ -347,7 +347,7 @@ function shouldIncludeOptionalCaution(spec: AnswerSpec, answerPlan?: AnswerPlan)
   if (lowGroundingLead(spec)) return true;
   if (
     answerPlan &&
-    ["definition", "list_items", "compare_concepts", "summarize_opinions", "source_grounded_explain"].includes(answerPlan.taskType) &&
+    ["definition", "list_items", "visual_layout", "compare_concepts", "summarize_opinions", "source_grounded_explain"].includes(answerPlan.taskType) &&
     spec.answerIntent !== "triage"
   ) return false;
   if (asksForDefinitionAnswer(spec.userQuery)) return false;
@@ -869,7 +869,7 @@ function composePlannedKnowledgeAnswer(spec: AnswerSpec, answerPlan: AnswerPlan,
   enableProcedureRenderer?: boolean;
 }): string | null {
   if (lowGroundingLead(spec)) return null;
-  if (answerPlan.taskType === "list_items") {
+  if (answerPlan.taskType === "list_items" || answerPlan.taskType === "visual_layout") {
     const expandedFactItems = expandListEvidenceItems(spec.facts)
       .filter((item) => !isGenericSourceLimitGuidance(item) && !isDocumentScaffoldFact(item));
     const listInputs = expandedFactItems.length >= 2 && expandedFactItems.length > spec.facts.length

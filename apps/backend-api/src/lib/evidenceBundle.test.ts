@@ -48,22 +48,31 @@ describe("buildEvidenceBundle", () => {
       textFacts: ["doc-1: Handler kaynakta girdiyi kontrol eder."],
       sourceIds: ["doc-1"],
     });
+    const visualLayout = buildEvidenceBundle({
+      userQuery: "Form tasarımında görünen kontroller nelerdir?",
+      taskType: "visual_layout",
+      textFacts: ["doc-1: Arayüz/layout öğeleri: AlphaBox, BetaButton, GammaLabel."],
+      sourceIds: ["doc-1"],
+    });
 
     expect(definition.items[0]?.kind).toBe("definition");
     expect(list.items[0]?.kind).toBe("list_item");
     expect(comparison.items[0]?.kind).toBe("comparison_point");
     expect(procedure.items[0]?.kind).toBe("procedure_step");
     expect(code.items[0]?.kind).toBe("code_fact");
+    expect(visualLayout.items[0]?.kind).toBe("visual_layout");
     expect(definition.diagnostics.kindCounts.definition).toBe(1);
     expect(list.diagnostics.kindCounts.list_item).toBe(1);
     expect(comparison.diagnostics.kindCounts.comparison_point).toBe(1);
     expect(procedure.diagnostics.kindCounts.procedure_step).toBe(1);
     expect(code.diagnostics.kindCounts.code_fact).toBe(1);
+    expect(visualLayout.diagnostics.kindCounts.visual_layout).toBe(1);
     expect(countUsableEvidenceItems(definition)).toBe(1);
     expect(countUsableEvidenceItems(list)).toBe(1);
     expect(countUsableEvidenceItems(comparison)).toBe(1);
     expect(countUsableEvidenceItems(procedure)).toBe(1);
     expect(countUsableEvidenceItems(code)).toBe(1);
+    expect(countUsableEvidenceItems(visualLayout)).toBe(1);
   });
 
   it("allows explicit evidence type to override task type for text facts only", () => {

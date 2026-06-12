@@ -35,7 +35,7 @@ export interface SourceResolutionPlanLike {
   [key: string]: unknown;
 }
 
-export type ExpectedEvidenceKind = "paragraph" | "table" | "numeric" | "procedure" | "definition" | "code";
+export type ExpectedEvidenceKind = "paragraph" | "table" | "numeric" | "procedure" | "definition" | "code" | "visual_layout";
 
 export interface RetrievalPlanEvidenceDemandBasis {
   operation: QueryContract["operation"];
@@ -88,6 +88,7 @@ function inferEvidenceKinds(input: BuildRetrievalPlanInput): ExpectedEvidenceKin
   if (/\b\d+|oran|yüzde|yuzde|tutar|adet|miktar|numeric|sayısal|sayisal\b/u.test(joined)) kinds.push("numeric");
   if (/\bprosedür|prosedur|süreç|surec|adım|adim|procedure\b/u.test(joined)) kinds.push("procedure");
   if (/\bkod|code|metot|method|fonksiyon|function|event|olay|handler|click\b/u.test(joined)) kinds.push("code");
+  if (/\b(?:arayuz|arayüz|ekran|form|panel|layout|tasarim|tasarım|gorsel|görsel|kontrol|kontroller)\b/u.test(joined)) kinds.push("visual_layout");
   if (/\bnedir|tanım|tanim|definition|ne demek\b/u.test(joined)) kinds.push("definition");
   return [...new Set(kinds)];
 }
@@ -100,6 +101,9 @@ export function buildRetrievalPlanInputsFromQueryContract(
   const expectedEvidenceKinds: ExpectedEvidenceKind[] = ["paragraph"];
   if (queryContract.operation === "procedure") expectedEvidenceKinds.push("procedure");
   if (queryContract.operation === "code_explanation") expectedEvidenceKinds.push("code");
+  if (queryContract.operation === "visual_layout" || queryContract.requiredEvidenceType === "visual_layout") {
+    expectedEvidenceKinds.push("visual_layout");
+  }
   if (queryContract.operation === "define") expectedEvidenceKinds.push("definition");
   if (
     queryContract.outputFormat === "table" ||
