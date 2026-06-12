@@ -75,6 +75,8 @@ interface AlignableKnowledgeCandidate {
   vectorScore?: number;
   embeddingScore?: number;
   preRankScore?: number;
+  rerankScore?: number;
+  modelNormalizedScore?: number;
 }
 
 function buildNoSourceEvidenceDiagnostics(input: {
@@ -1135,6 +1137,23 @@ export function candidateMatchesRouteScope(card: KnowledgeCard, chunk: HybridKno
   return routeTerms.some((term) => haystack.includes(term));
 }
 
+function candidateHasSpecificRouteTopicSupport(
+  candidate: AlignableKnowledgeCandidate,
+  routePlan?: DomainRoutePlan | null,
+): boolean {
+  if (!routePlan || routePlan.confidence === "low") return false;
+  const specificSubtopics = routePlan.subtopics
+    .map((subtopic) => normalize(subtopic).replace(/_/g, " "))
+    .filter((subtopic) => subtopic.length >= 3 && !["general", "genel"].includes(subtopic));
+  if (specificSubtopics.length === 0) return false;
+  const haystack = normalize([
+    buildRerankCandidateText(candidate, getAlignmentConfig().maxRerankWords),
+    metadataText(candidate.chunk.autoMetadata),
+    metadataText(candidate.chunk.document.autoMetadata),
+  ].join(" "));
+  return specificSubtopics.some((subtopic) => haystack.includes(subtopic));
+}
+
 function buildPrismaQueryTokens(query: string, routePlan?: DomainRoutePlan | null): string[] {
   return uniqueTokens([
     ...buildExpandedQueryTokens(query, routePlan, 24),
@@ -1469,6 +1488,8 @@ export function alignHybridKnowledgeCandidates<T extends AlignableKnowledgeCandi
   candidates: T[];
   routePlan?: DomainRoutePlan | null;
   allowSemanticReview?: boolean;
+  keepWeakCandidatesForReview?: boolean;
+  keepModelReviewedWeakCandidates?: boolean;
 }): { candidates: Array<T & { alignment: AlignmentScore }>; diagnostics: AlignmentDiagnostics } {
   const config = getAlignmentConfig();
   if (!config.enabled) {
@@ -1503,16 +1524,30 @@ export function alignHybridKnowledgeCandidates<T extends AlignableKnowledgeCandi
       genericPenalty: config.genericPenalty,
     });
     const semanticScore = Math.max(candidate.vectorScore ?? 0, candidate.embeddingScore ?? 0);
+    const hasSpecificRouteTopicSupport = candidateHasSpecificRouteTopicSupport(candidate, opts.routePlan);
+    const hasModelReviewSupport =
+      opts.keepModelReviewedWeakCandidates === true &&
+      hasSpecificRouteTopicSupport &&
+      typeof candidate.modelNormalizedScore === "number" &&
+      candidate.modelNormalizedScore > 0 &&
+      typeof candidate.rerankScore === "number" &&
+      candidate.rerankScore >= minRerankScore();
     const shouldKeepForSemanticReview =
       opts.allowSemanticReview === true &&
       lexicalAlignment.mode === "mismatch" &&
-      semanticScore >= config.semanticKeepScore;
-    const alignment: AlignmentScore = shouldKeepForSemanticReview
+      semanticScore >= config.semanticKeepScore &&
+      hasSpecificRouteTopicSupport;
+    const shouldKeepForModelReview =
+      hasModelReviewSupport &&
+      lexicalAlignment.mode === "mismatch";
+    const alignment: AlignmentScore = shouldKeepForSemanticReview || shouldKeepForModelReview
       ? {
           ...lexicalAlignment,
           mode: "weak",
           score: Math.max(lexicalAlignment.score, Number(config.minScore.toFixed(3))),
-          reason: `Lexical alignment is weak, but semantic score ${semanticScore.toFixed(3)} is high enough for reranker review.`,
+          reason: shouldKeepForModelReview
+            ? `Lexical alignment is weak, but model reranker support ${candidate.rerankScore?.toFixed(3)} is high enough for reviewed evidence.`
+            : `Lexical alignment is weak, but semantic score ${semanticScore.toFixed(3)} is high enough for reranker review.`,
         }
       : lexicalAlignment;
     return { ...candidate, alignment };
@@ -1523,7 +1558,18 @@ export function alignHybridKnowledgeCandidates<T extends AlignableKnowledgeCandi
     opts.routePlan.subtopics.some((subtopic) => !["general", "genel"].includes(normalize(subtopic)));
   const kept = scored.filter((candidate) => {
     if (candidate.alignment.mode === "mismatch") return false;
-    if (shouldDropWeak && candidate.alignment.mode === "weak") return false;
+    if (shouldDropWeak && candidate.alignment.mode === "weak") {
+      if (opts.keepWeakCandidatesForReview === true) return true;
+      if (
+        opts.keepModelReviewedWeakCandidates === true &&
+        candidateHasSpecificRouteTopicSupport(candidate, opts.routePlan) &&
+        typeof candidate.modelNormalizedScore === "number" &&
+        candidate.modelNormalizedScore > 0 &&
+        typeof candidate.rerankScore === "number" &&
+        candidate.rerankScore >= minRerankScore()
+      ) return true;
+      return false;
+    }
     return true;
   });
   return {
@@ -2088,6 +2134,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     candidates: preRanked,
     routePlan,
     allowSemanticReview: true,
+    keepWeakCandidatesForReview: true,
   });
   const candidatesForRerank = prioritizeCriticalEvidenceCandidates(evidenceQuery, alignedPreRanked.candidates);
   if (alignedPreRanked.diagnostics.fastFailed) {
@@ -2264,6 +2311,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
     candidates: accepted,
     routePlan,
     allowSemanticReview: criticalEvidenceTermGroups(evidenceQuery).length > 0,
+    keepModelReviewedWeakCandidates: true,
   });
   const finalCandidates = alignedAccepted.candidates;
   const finalAlignmentDiagnostics: AlignmentDiagnostics = {

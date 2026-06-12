@@ -168,6 +168,72 @@ describe("true hybrid retrieval helpers", () => {
     expect(deduped[0]?.lexicalScore).toBe(3.2);
   });
 
+  it("lets weak high-confidence route candidates reach model review", () => {
+    const routePlan = {
+      domain: "technical" as const,
+      subtopics: ["alpha"],
+      riskLevel: "low" as const,
+      retrievalHints: ["alpha process"],
+      mustIncludeTerms: ["alpha"],
+      mustExcludeTerms: [],
+      confidence: "high" as const,
+    };
+
+    const aligned = alignHybridKnowledgeCandidates({
+      query: "alpha gamma delta epsilon zeta eta theta",
+      candidates: [
+        candidate({
+          id: "weak-review",
+          title: "Generic alpha process",
+          content: "Alpha eta process note.",
+          vectorScore: 0.8,
+        }),
+      ],
+      routePlan,
+      allowSemanticReview: true,
+      keepWeakCandidatesForReview: true,
+    });
+
+    expect(aligned.candidates).toHaveLength(1);
+    expect(aligned.candidates[0]?.alignment.mode).toBe("weak");
+    expect(aligned.diagnostics.fastFailed).toBe(false);
+  });
+
+  it("keeps model-reviewed weak candidates after final alignment", () => {
+    const routePlan = {
+      domain: "technical" as const,
+      subtopics: ["alpha"],
+      riskLevel: "low" as const,
+      retrievalHints: ["alpha process"],
+      mustIncludeTerms: ["alpha"],
+      mustExcludeTerms: [],
+      confidence: "high" as const,
+    };
+
+    const aligned = alignHybridKnowledgeCandidates({
+      query: "alpha gamma delta epsilon zeta eta theta",
+      candidates: [
+        {
+          ...candidate({
+            id: "model-reviewed",
+            title: "Generic alpha process",
+            content: "Alpha eta process note.",
+            vectorScore: 0.8,
+          }),
+          rerankScore: 2.4,
+          modelNormalizedScore: 0.9,
+        },
+      ],
+      routePlan,
+      allowSemanticReview: true,
+      keepModelReviewedWeakCandidates: true,
+    });
+
+    expect(aligned.candidates).toHaveLength(1);
+    expect(aligned.candidates[0]?.alignment.mode).toBe("weak");
+    expect(aligned.diagnostics.fastFailed).toBe(false);
+  });
+
   it("returns no context instead of falling back to unrelated raw candidates under strict route scope", async () => {
     vi.stubEnv("R3MES_EMBEDDING_PROVIDER", "deterministic");
     const findMany = vi.spyOn(prisma.knowledgeChunk, "findMany").mockResolvedValue([
