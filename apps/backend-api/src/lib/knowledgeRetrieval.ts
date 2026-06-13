@@ -9,7 +9,13 @@ import { rerankKnowledgeCardsWithFallback } from "./modelRerank.js";
 import { ensureNoSourceEvidence } from "./noSourceEvidence.js";
 import { prisma } from "./prisma.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
-import { runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
+import {
+  evidenceOutputLimitText,
+  evidenceOutputRiskText,
+  evidenceOutputUsableTextFacts,
+  runEvidenceExtractorSkill,
+  type EvidenceExtractorOutput,
+} from "./skillPipeline.js";
 
 export interface RetrievedKnowledgeContext {
   contextText: string;
@@ -90,12 +96,9 @@ function renderEvidenceBrief(
   const sections = [
     `GROUNDING DURUMU: ${opts.groundingConfidence}${opts.lowGroundingConfidence ? " (düşük güven; kesin konuşma)" : ""}`,
     `CEVAP NIYETI: ${evidence.answerIntent}`,
-    bulletSection("DOGRUDAN CEVAP KANITLARI:", evidence.directAnswerFacts.slice(0, 4)),
-    bulletSection("DESTEKLEYICI BAGLAM:", evidence.supportingContext.slice(0, 3)),
-    bulletSection("BELIRSIZ / KULLANILAMAYAN:", [
-      ...evidence.notSupported.slice(0, 4),
-    ]),
-    bulletSection("RED FLAGS:", evidence.riskFacts.slice(0, 3)),
+    bulletSection("KULLANILABILIR TYPED KANITLAR:", evidenceOutputUsableTextFacts(evidence).slice(0, 4)),
+    bulletSection("BELIRSIZ / KULLANILAMAYAN:", evidenceOutputLimitText(evidence).slice(0, 4)),
+    bulletSection("RISK / DIKKAT:", evidenceOutputRiskText(evidence).slice(0, 3)),
     bulletSection("KAYNAK KIMLIKLARI:", evidence.sourceIds.slice(0, 4)),
     [
       "YANIT KURALLARI:",

@@ -4,7 +4,7 @@ import type { AnswerSpec } from "./answerSpec.js";
 import type { AnswerPlan, AnswerPlanCoverage } from "./answerPlan.js";
 import type { EvidenceBundle } from "./evidenceBundle.js";
 import { countUsableEvidenceItems } from "./evidenceBundle.js";
-import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import { evidenceOutputUsableTextFacts, type EvidenceExtractorOutput } from "./skillPipeline.js";
 
 export interface SafetyEvidenceSignals {
   legacyUsableFactCount: number;
@@ -68,7 +68,7 @@ export function buildSafetyEvidenceSignals(input: BuildSafetyEvidenceSignalsInpu
   const coveredCount = coveredRequestedFieldCount(input, requestedCount);
 
   return {
-    legacyUsableFactCount: input.evidence?.usableFacts.length ?? input.answerSpec?.facts.length ?? 0,
+    legacyUsableFactCount: input.evidence ? evidenceOutputUsableTextFacts(input.evidence).length : input.answerSpec?.facts.length ?? 0,
     usableEvidenceBundleItemCount: countUsableEvidenceItems(input.evidenceBundle),
     selectedStructuredFactCount: selectedStructuredFactCount(input),
     requestedFieldCount: requestedCount,

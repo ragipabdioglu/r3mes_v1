@@ -3,7 +3,12 @@ import type { CompiledEvidence } from "./compiledEvidence.js";
 import { getDecisionConfig } from "./decisionConfig.js";
 import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
 import { detectAnswerTask, type AnswerTaskType } from "./answerTaskDetector.js";
-import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import {
+  evidenceOutputLimitText,
+  evidenceOutputRiskText,
+  evidenceOutputUsableTextFacts,
+  type EvidenceExtractorOutput,
+} from "./skillPipeline.js";
 import type { StructuredFact } from "./structuredFact.js";
 import type { EvidenceBundle, EvidenceItemKind } from "./evidenceBundle.js";
 
@@ -422,26 +427,25 @@ export function buildAnswerSpec(opts: {
   const compiledRisks = cleanValues(opts.compiledEvidence?.risks);
   const compiledUnknowns = cleanValues(opts.compiledEvidence?.unknowns);
   const compiledContradictions = cleanValues(opts.compiledEvidence?.contradictions);
-  const evidenceDirectFacts = cleanValues(opts.evidence?.directAnswerFacts);
-  const evidenceUsableFacts = cleanValues(opts.evidence?.usableFacts);
+  const evidenceUsableFacts = cleanValues(evidenceOutputUsableTextFacts(opts.evidence));
   const taskDetection = detectAnswerTask(opts.userQuery);
   const taskTypedFacts = factsFromEvidenceBundle(opts.evidence?.evidenceBundle, taskDetection.taskType);
   const directFacts = taskTypedFacts.length > 0
     ? taskTypedFacts
-    : prioritizeFacts(evidenceDirectFacts.length > 0 ? evidenceDirectFacts : compiledFacts, opts.userQuery);
-  const supportingFacts = prioritizeFacts(cleanValues(opts.evidence?.supportingContext), opts.userQuery);
+    : prioritizeFacts(evidenceUsableFacts.length > 0 ? evidenceUsableFacts : compiledFacts, opts.userQuery);
+  const supportingFacts: string[] = [];
   const usableFacts = taskTypedFacts.length > 0
     ? taskTypedFacts
     : prioritizeFacts(evidenceUsableFacts.length > 0 ? evidenceUsableFacts : compiledFacts, opts.userQuery);
   const riskFacts = prioritizeFacts(
     compiledRisks.length > 0
       ? compiledRisks
-      : cleanValues([...(opts.evidence?.riskFacts ?? []), ...(opts.evidence?.redFlags ?? [])]),
+      : cleanValues(evidenceOutputRiskText(opts.evidence)),
     opts.userQuery,
   );
   const unknowns = cleanValues([
     ...compiledUnknowns,
-    ...(compiledUnknowns.length === 0 ? opts.evidence?.uncertainOrUnusable ?? [] : []),
+    ...(compiledUnknowns.length === 0 ? evidenceOutputLimitText(opts.evidence) : []),
     ...(compiledUnknowns.length === 0 ? opts.evidence?.missingInfo ?? [] : []),
   ]);
   const facts = cleanValues([...directFacts, ...supportingFacts, ...usableFacts, ...compiledFacts]);

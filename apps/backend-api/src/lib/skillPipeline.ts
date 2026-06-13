@@ -1,19 +1,15 @@
 import { routeQuery, type DomainRoutePlan } from "./queryRouter.js";
 import type { AnswerIntent } from "./answerSchema.js";
 import { detectAnswerTask } from "./answerTaskDetector.js";
-import { expandConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { getDecisionConfig } from "./decisionConfig.js";
-import type { EvidenceBundle } from "./evidenceBundle.js";
+import type { EvidenceBundle, EvidenceItem } from "./evidenceBundle.js";
+import { buildEvidenceBundleFromItems, hasUsableEvidenceItem } from "./evidenceBundle.js";
 import { extractEvidenceV2 } from "./evidence/evidenceExtractorOrchestrator.js";
-import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
 import type { StructuredFact } from "./structuredFact.js";
 
 export type SkillName =
-  | "intent-router"
   | "query-planner"
-  | "evidence-extractor"
-  | "response-composer"
-  | "style-persona";
+  | "evidence-extractor";
 
 export type SkillRuntime = "deterministic" | "lora";
 
@@ -22,19 +18,6 @@ export interface SkillRunEnvelope<TInput, TOutput> {
   runtime: SkillRuntime;
   input: TInput;
   output: TOutput;
-}
-
-export interface IntentRouterOutput {
-  intent:
-    | "medical_question"
-    | "legal_question"
-    | "document_summary"
-    | "general_chat"
-    | "unknown";
-  riskLevel: "low" | "medium" | "high";
-  needsRetrieval: boolean;
-  needsClarification: boolean;
-  language: "tr" | "en" | "unknown";
 }
 
 export interface QueryPlannerInput {
@@ -48,10 +31,14 @@ export interface QueryPlannerOutput {
   mustIncludeTerms: string[];
   mustExcludeTerms: string[];
   expectedEvidenceType:
-    | "symptom_card"
-    | "guideline"
-    | "user_record"
-    | "faq"
+    | "definition"
+    | "list"
+    | "comparison"
+    | "procedure"
+    | "code"
+    | "table"
+    | "visual_layout"
+    | "text"
     | "unknown";
   retrievalQuery: string;
 }
@@ -59,17 +46,10 @@ export interface QueryPlannerOutput {
 export interface EvidenceExtractorOutput {
   answerIntent: AnswerIntent;
   intentResolution: AnswerIntentResolution;
-  directAnswerFacts: string[];
-  supportingContext: string[];
-  riskFacts: string[];
-  notSupported: string[];
-  usableFacts: string[];
-  uncertainOrUnusable: string[];
-  redFlags: string[];
   sourceIds: string[];
   missingInfo: string[];
-  structuredFacts?: StructuredFact[];
-  evidenceBundle?: EvidenceBundle;
+  structuredFacts: StructuredFact[];
+  evidenceBundle: EvidenceBundle;
 }
 
 export interface EvidenceExtractorBudget {
@@ -114,91 +94,122 @@ export interface AnswerIntentResolution {
   reasons: string[];
 }
 
-export interface ResponseComposerOutput {
-  answer: string;
-  sourcesUsed: string[];
-  confidence: "low" | "medium" | "high";
+export function getEvidenceExtractorBudget(): EvidenceExtractorBudget {
+  const budget = getDecisionConfig().evidenceBudget;
+  return {
+    directFactLimit: budget.usableFactLimit,
+    supportingFactLimit: 0,
+    riskFactLimit: budget.riskFactLimit,
+    notSupportedLimit: budget.notSupportedLimit,
+    usableFactLimit: budget.usableFactLimit,
+    sourceIdLimit: budget.sourceIdLimit,
+  };
 }
 
-function unique(values: string[]): string[] {
+function unique(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const value of values.map((item) => item.trim()).filter(Boolean)) {
-    const key = value.toLocaleLowerCase("tr-TR");
+  for (const value of values) {
+    const text = value?.trim().replace(/\s+/gu, " ");
+    if (!text) continue;
+    const key = text.toLocaleLowerCase("tr-TR");
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(value);
+    out.push(text);
   }
   return out;
 }
 
-export function getEvidenceExtractorBudget(): EvidenceExtractorBudget {
-  return getDecisionConfig().evidenceBudget;
+function evidenceLine(item: EvidenceItem): string {
+  const source = item.chunkId ? `${item.sourceId}/${item.chunkId}` : item.sourceId;
+  return `${source}: ${item.quote}`;
 }
 
-function hasAny(text: string, terms: string[]): boolean {
-  const normalized = text.toLocaleLowerCase("tr-TR");
-  return terms.some((term) => normalized.includes(term.toLocaleLowerCase("tr-TR")));
+export function isUsableEvidenceOutputItem(item: EvidenceItem): boolean {
+  return item.kind !== "source_limit" && item.kind !== "contradiction";
 }
 
-function inferAnswerIntent(query: string): AnswerIntent {
-  if (hasAny(query, ["panik", "kork", "endişe", "endise", "normal mi", "kötü mü", "kotu mu"])) return "reassure";
-  if (
-    hasAny(query, [
-      "ne yap",
-      "nasıl",
-      "nasil",
-      "takip",
-      "adım",
-      "adim",
-      "öner",
-      "oner",
-      "hazırla",
-      "hazirla",
-      "hazırlamalı",
-      "hazirlamali",
-      "hangi belge",
-      "hangi belg",
-      "hangi kayıt",
-      "hangi kayit",
-      "hangi kontrol",
-      "neye dikkat",
-      "ilk ne",
-      "ilk hangi",
-      "ne sormalı",
-      "ne sormali",
-      "konuşulmalı",
-      "konusulmali",
-      "saklamalı",
-      "saklamali",
-      "toplamam",
-      "kontrolleri",
-      "kontrol listesi",
-    ])
-  ) return "steps";
-  if (hasAny(query, ["acil", "beklemeli", "ne zaman", "şiddetli", "siddetli", "ateş", "ates", "riskli mi"])) return "triage";
-  if (hasAny(query, ["fark", "karşılaştır", "karsilastir", "hangisi"])) return "compare";
-  if (hasAny(query, ["nedir", "ne anlama", "yorum", "açıkla", "acikla", "neden"])) return "explain";
-  if (hasAny(query, ["risk"])) return "triage";
+export function evidenceOutputUsableItems(evidence: EvidenceExtractorOutput | null | undefined): EvidenceItem[] {
+  return (evidence?.evidenceBundle?.items ?? []).filter((item) => isUsableEvidenceOutputItem(item) && hasUsableEvidenceItem(item));
+}
+
+export function evidenceOutputUsableTextFacts(evidence: EvidenceExtractorOutput | null | undefined): string[] {
+  return evidenceOutputUsableItems(evidence).map(evidenceLine);
+}
+
+export function evidenceOutputLimitText(evidence: EvidenceExtractorOutput | null | undefined): string[] {
+  const items = evidence?.evidenceBundle?.items ?? [];
+  return [
+    ...items.filter((item) => item.kind === "source_limit" || item.kind === "contradiction").map(evidenceLine),
+    ...(evidence?.missingInfo ?? []),
+  ];
+}
+
+export function evidenceOutputRiskText(_evidence: EvidenceExtractorOutput | null | undefined): string[] {
+  return [];
+}
+
+export function evidenceOutputStructuredFacts(evidence: EvidenceExtractorOutput | null | undefined): StructuredFact[] {
+  return evidence?.structuredFacts ?? [];
+}
+
+export function createEmptyEvidenceOutput(input: {
+  userQuery: string;
+  sourceIds?: string[];
+  missingInfo?: string[];
+  reason?: string;
+}): EvidenceExtractorOutput {
+  const sourceIds = unique(input.sourceIds ?? []);
+  const missingInfo = unique(input.missingInfo ?? []);
+  return {
+    answerIntent: "unknown",
+    intentResolution: {
+      intent: "unknown",
+      primarySignal: "no_source",
+      confidence: "high",
+      scores: { no_source: 1 },
+      weakIntent: "unknown",
+      reasons: [input.reason ?? "no usable typed evidence was found"],
+    },
+    sourceIds,
+    missingInfo,
+    structuredFacts: [],
+    evidenceBundle: buildEvidenceBundleFromItems({
+      userQuery: input.userQuery,
+      items: [],
+      requestedFieldIds: [],
+      coverage: {
+        status: "none",
+        requestedItemCount: 0,
+        coveredItemCount: 0,
+        missingFields: [],
+        missingEvidenceKinds: [],
+        reason: input.reason ?? "no_usable_evidence",
+      },
+    }),
+  };
+}
+
+function intentFromTask(taskType: ReturnType<typeof detectAnswerTask>["taskType"]): AnswerIntent {
+  if (taskType === "compare_concepts") return "compare";
+  if (taskType === "procedure" || taskType === "code_explanation" || taskType === "list_items") return "steps";
+  if (taskType === "unknown") return "unknown";
+  return "explain";
+}
+
+function expectedEvidenceType(taskType: ReturnType<typeof detectAnswerTask>["taskType"]): QueryPlannerOutput["expectedEvidenceType"] {
+  if (taskType === "definition") return "definition";
+  if (taskType === "list_items") return "list";
+  if (taskType === "compare_concepts") return "comparison";
+  if (taskType === "procedure") return "procedure";
+  if (taskType === "code_explanation") return "code";
+  if (taskType === "field_extraction") return "table";
+  if (taskType === "visual_layout") return "visual_layout";
+  if (taskType === "source_grounded_explain" || taskType === "summarize_opinions") return "text";
   return "unknown";
 }
 
-function addIntentScore(
-  scores: Partial<Record<AnswerIntentSignal, number>>,
-  intent: AnswerIntentSignal,
-  amount: number,
-): void {
-  scores[intent] = (scores[intent] ?? 0) + amount;
-}
-
-function mapIntentSignalToAnswerIntent(signal: AnswerIntentSignal): AnswerIntent {
-  if (signal === "checklist") return "steps";
-  if (signal === "summarize") return "explain";
-  if (signal === "clarify" || signal === "no_source") return "unknown";
-  return signal;
-}
-
-export function resolveAnswerIntent(opts: {
+export function resolveAnswerIntent(input: {
   userQuery: string;
   weakIntent?: AnswerIntent;
   directFactCount?: number;
@@ -207,1128 +218,53 @@ export function resolveAnswerIntent(opts: {
   missingInfoCount?: number;
   sourceCount?: number;
 }): AnswerIntentResolution {
-  const query = opts.userQuery;
-  const scores: Partial<Record<AnswerIntentSignal, number>> = {};
-  const reasons: string[] = [];
-  const weakIntent = opts.weakIntent ?? inferAnswerIntent(query);
-  const directFactCount = opts.directFactCount ?? 0;
-  const supportingFactCount = opts.supportingFactCount ?? 0;
-  const riskFactCount = opts.riskFactCount ?? 0;
-  const missingInfoCount = opts.missingInfoCount ?? 0;
-  const sourceCount = opts.sourceCount ?? 0;
-
-  if (weakIntent !== "unknown") {
-    addIntentScore(scores, weakIntent, 30);
-    reasons.push(`weak query intent: ${weakIntent}`);
+  const task = detectAnswerTask(input.userQuery);
+  const weakIntent = input.weakIntent ?? intentFromTask(task.taskType);
+  const noSource = (input.directFactCount ?? 0) === 0 &&
+    (input.supportingFactCount ?? 0) === 0 &&
+    (input.sourceCount ?? 0) === 0 &&
+    (input.missingInfoCount ?? 0) > 0;
+  if (noSource) {
+    return {
+      intent: "unknown",
+      primarySignal: "no_source",
+      confidence: "high",
+      scores: { no_source: 1 },
+      weakIntent,
+      reasons: ["no usable typed evidence was found"],
+    };
   }
-  if (hasAny(query, ["kontrol listesi", "checklist", "liste", "maddeli", "madde madde"])) {
-    addIntentScore(scores, "checklist", 85);
-    reasons.push("query asks for checklist/list output");
-  }
-  if (hasAny(query, ["ne yap", "nasıl", "nasil", "hangi adım", "hangi adim", "hazırla", "hazirla", "saklamalı", "saklamali", "toplamam", "kontrol"])) {
-    addIntentScore(scores, "steps", 35);
-    reasons.push("query asks for action/steps");
-  }
-  if (hasAny(query, ["acil", "ne zaman", "riskli", "tehlikeli", "şiddetli", "siddetli", "ateş", "ates"])) {
-    addIntentScore(scores, "triage", 35);
-    reasons.push("query contains risk/triage language");
-  }
-  if (riskFactCount > 0) {
-    addIntentScore(scores, "triage", Math.min(25, 10 + riskFactCount * 5));
-    reasons.push("retrieved evidence contains risk facts");
-  }
-  if (hasAny(query, ["nedir", "neden", "ne anlama", "açıkla", "acikla", "yorumla"])) {
-    addIntentScore(scores, "explain", 35);
-    reasons.push("query asks for explanation");
-  }
-  if (hasAny(query, ["özetle", "ozetle", "kısa özet", "kisa ozet", "özet", "ozet"])) {
-    addIntentScore(scores, "summarize", 40);
-    reasons.push("query asks for summary");
-  }
-  if (hasAny(query, ["fark", "karşılaştır", "karsilastir", "hangisi", "versus", "vs"])) {
-    addIntentScore(scores, "compare", 45);
-    reasons.push("query asks for comparison");
-  }
-  if (hasAny(query, ["panik", "kork", "endişe", "endise", "normal mi", "sakin"])) {
-    addIntentScore(scores, "reassure", 35);
-    reasons.push("query asks for reassurance/calm tone");
-  }
-  if (missingInfoCount > 0 && directFactCount === 0 && supportingFactCount === 0) {
-    addIntentScore(scores, "no_source", 90);
-    reasons.push("no directly usable evidence was found");
-  }
-  if (sourceCount === 0) {
-    addIntentScore(scores, "clarify", 25);
-    reasons.push("no source ids are available");
-  }
-
-  const ranked = (Object.entries(scores) as Array<[AnswerIntentSignal, number]>)
-    .sort((a, b) => b[1] - a[1]);
-  const [primarySignal = weakIntent, primaryScore = 0] = ranked[0] ?? [weakIntent, 0];
-  const secondScore = ranked[1]?.[1] ?? 0;
-  const mappedIntent = mapIntentSignalToAnswerIntent(primarySignal);
-  const intent = mappedIntent === "unknown" && weakIntent !== "unknown" && primarySignal !== "no_source"
-    ? weakIntent
-    : mappedIntent;
-  const confidence =
-    primaryScore >= 55 && primaryScore - secondScore >= 15
-      ? "high"
-      : primaryScore >= 35
-        ? "medium"
-        : "low";
-
+  const primarySignal: AnswerIntentSignal =
+    task.taskType === "list_items" ? "checklist" : weakIntent;
   return {
-    intent,
+    intent: weakIntent,
     primarySignal,
-    confidence,
-    scores,
+    confidence: (input.directFactCount ?? 0) > 0 || task.confidence === "high" ? "high" : "medium",
+    scores: { [primarySignal]: 1 },
     weakIntent,
-    reasons: reasons.slice(0, 6),
+    reasons: [`task=${task.taskType}`, "intent derived from query contract and typed evidence"],
   };
-}
-
-function normalizeTableLine(line: string): string {
-  const trimmed = line.trim();
-  if (!trimmed.includes("|")) return trimmed;
-  const cells = trimmed
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim())
-    .filter(Boolean);
-  if (cells.length === 0 || cells.every((cell) => /^:?-{2,}:?$/.test(cell))) return "";
-  return cells.join(" - ");
-}
-
-function normalizeDocumentScaffoldFragment(value: string): string {
-  const cleaned = value
-    .replace(/\bPDF\s+COPY\s*>{2,}\s*/giu, "")
-    .replace(/\bOCR\s+HATASI\s*:?\s*/giu, "")
-    .replace(/\bTABLO\s*[-:]\s*/giu, "")
-    .replace(/\s*-\s*bulgu\s*-\s*yorum\s*/giu, "; ")
-    .replace(/^#+\s*Page\s+\d+\s*/giu, "")
-    .replace(/^#+\s*XML Text Fallback\s*/giu, "")
-    .replace(/^#+\s*word\/[^\s]+\s*/giu, "")
-    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9()[\]\s_-]{8,})\s+\d+\s*[•\-–:]\s*/u, "")
-    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9()[\]\s_-]{8,})\s+\d+\s+/u, "")
-    .replace(/^\s*(?:[A-ZÇĞİÖŞÜ0-9()[\]\s_-]{24,}?)\s+(?=(Bu|Bu\s+ilaç|Eğer|Eller|Okul|Öğrenci|Hasta|Veli|Kaynak|Amaç)\b)/u, "")
-    .trim();
-  const letters = cleaned.match(/\p{L}/gu) ?? [];
-  const uppercaseLetters = cleaned.match(/\p{Lu}/gu) ?? [];
-  if (letters.length >= 6 && uppercaseLetters.length / letters.length > 0.85 && cleaned.length <= 140) return "";
-  return cleaned;
-}
-
-function fragmentQualityScore(value: string): number {
-  const scoring = getDecisionConfig().evidenceScoring;
-  const normalized = value.trim();
-  if (!normalized) return -100;
-  const tokenCount = normalizeConceptText(normalized).split(/\s+/).filter((token) => token.length >= 3).length;
-  const actionBonus = /(göndermeyiniz|göndermeyin|bilgilendir|başvur|kontrol|hazır|sakla|denenmel|planlan|yapılmal|edilmel|olmalıdır|olmalidir)/iu.test(normalized)
-    ? scoring.fragmentActionBonus
-    : 0;
-  const completeBonus = /[.!?]$/u.test(normalized) ? scoring.fragmentCompleteSentenceBonus : 0;
-  const incompleteLongPenalty = !/[.!?]$/u.test(normalized) && normalized.length >= 60 ? scoring.fragmentIncompleteLongPenalty : 0;
-  const lengthBonus = normalized.length >= 35 && normalized.length <= 260
-    ? scoring.fragmentLengthBonus
-    : normalized.length < 20
-      ? -scoring.fragmentShortLengthPenalty
-      : 0;
-  const scaffoldPenalty = /(page\s+\d+|rehberi\s+\d+|önemseyiniz|para ile satılamaz)/iu.test(normalized) ? scoring.fragmentScaffoldPenalty : 0;
-  const truncationPenalty = /[…]|\.{3}$/u.test(normalized) ? scoring.fragmentTruncationPenalty : 0;
-  return tokenCount + actionBonus + completeBonus + lengthBonus - scaffoldPenalty - truncationPenalty - incompleteLongPenalty;
-}
-
-function sentenceFragments(text: string, limit = 2): string[] {
-  const normalized = text
-    .replace(/^\s*[-*]\s+/gm, "")
-    .replace(/\s+[•]\s+/g, "\n")
-    .split(/\n+/)
-    .map(normalizeTableLine)
-    .map(normalizeDocumentScaffoldFragment)
-    .filter(Boolean)
-    .join("\n");
-  const fragments = normalized
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((part) => part.trim())
-    .map(normalizeDocumentScaffoldFragment)
-    .filter(Boolean);
-  return fragments
-    .map((fragment, index) => ({ fragment, index, score: fragmentQualityScore(fragment) }))
-    .filter(({ score }) => score > getDecisionConfig().evidenceScoring.fragmentMinScore)
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, limit)
-    .map(({ fragment }) => fragment);
-}
-
-function definitionQueryFragments(text: string, query: string, limit = 3): string[] {
-  const normalizedQuery = normalizeConceptText(query);
-  if (!/\b(nedir|ne demek|tan[ıi]m|a[cç][ıi]kla|anlat)\b/u.test(normalizedQuery)) return [];
-  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
-  if (queryTokens.size === 0) return [];
-  const normalizedText = text
-    .replace(/#{1,6}\s*page\s+\d+/giu, "\n")
-    .replace(/#{1,6}\s+/g, "\n")
-    .replace(/^\s*(?:Source Summary|Key Takeaway|Temel Bilgi|Özet|Ozet)\s*:\s*/gimu, "")
-    .replace(/\s+[•]\s+/g, " ")
-    .replace(/\n{2,}/g, "\n");
-  const fragments = normalizedText
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((part) => part.trim())
-    .map(normalizeDocumentScaffoldFragment)
-    .filter((part) => part.length >= 45 && part.length <= 520)
-    .map((fragment, index) => {
-      const coreOverlap = queryCoreOverlapScore(queryTokens, fragment);
-      const normalizedFragment = normalizeConceptText(fragment);
-      const definitionBonus = /\b(?:denir|ifade eder|tan[ıi]mlan[ıi]r|bütünüdür|butunudur|amac[ıi]|kavram[ıi]|teknoloji|sistem)\b/u
-        .test(normalizedFragment)
-        ? 5
-        : 0;
-      return { fragment, index, score: coreOverlap * 10 + definitionBonus + fragmentQualityScore(fragment) };
-    })
-    .filter((item) => item.score >= 12)
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .map((item) => item.fragment);
-  return unique(fragments).slice(0, limit);
-}
-
-function comparisonQueryFragments(text: string, query: string, limit = 4): string[] {
-  const task = detectAnswerTask(query);
-  if (task.taskType !== "compare_concepts") return [];
-  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
-  if (queryTokens.size === 0) return [];
-  const normalizedText = text
-    .replace(/#{1,6}\s*page\s+\d+/giu, "\n")
-    .replace(/#{1,6}\s+/g, "\n")
-    .replace(/^\s*(?:Source Summary|Key Takeaway|Temel Bilgi|Özet|Ozet)\s*:\s*/gimu, "")
-    .replace(/\s+[•]\s+/g, " ")
-    .replace(/\n{2,}/g, "\n");
-  const sentences = normalizedText
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((part) => normalizeDocumentScaffoldFragment(part.trim()))
-    .filter((part) => part.length >= 20 && part.length <= 520);
-  const windows: Array<{ fragment: string; index: number }> = [];
-  for (let index = 0; index < sentences.length; index += 1) {
-    const current = sentences[index] ?? "";
-    windows.push({ fragment: current, index });
-    const next = sentences[index + 1];
-    if (next) windows.push({ fragment: `${current} ${next}`, index });
-  }
-  const fragments = windows
-    .map(({ fragment, index }) => {
-      const normalized = normalizeConceptText(fragment);
-      const coreOverlap = queryCoreOverlapScore(queryTokens, fragment);
-      const relationBonus = /\b(?:fark|fark[ıi]|göre|gore|aras[ıi]nda|karşılaştır|karsilastir|benzer|ayn[ıi])\b/u.test(normalized)
-        ? 8
-        : 0;
-      const compactnessBonus = fragment.length <= 360 ? 3 : 0;
-      return { fragment, index, score: coreOverlap * 10 + relationBonus + compactnessBonus + fragmentQualityScore(fragment) };
-    })
-    .filter((item) => item.score >= 16)
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .map((item) => item.fragment);
-  return unique(fragments).slice(0, limit);
-}
-
-function hasCodeLikeFragmentShape(value: string): boolean {
-  return (
-    /```[\s\S]*?```/u.test(value) ||
-    /\b(?:class|function|def|private|public|protected|static|async|void|return|if|else|for|foreach|while|switch|try|catch)\b[\s\S]{0,160}[({;]/iu.test(value) ||
-    /\b[a-zA-Z_][a-zA-Z0-9_]{2,}\s*\([^)]*\)\s*\{/u.test(value) ||
-    /\b[a-zA-Z_][a-zA-Z0-9_]{1,}\.[a-zA-Z_][a-zA-Z0-9_]{1,}\s*(?:=|\()/u.test(value)
-  );
-}
-
-function codeQueryFragments(text: string, query: string, limit = 3): string[] {
-  const task = detectAnswerTask(query);
-  if (task.taskType !== "code_explanation" && task.taskType !== "procedure") return [];
-  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
-  if (queryTokens.size === 0) return [];
-  const normalizedText = text
-    .replace(/#{1,6}\s*page\s+\d+/giu, "\n")
-    .replace(/#{1,6}\s+/g, "\n")
-    .replace(/^\s*(?:Source Summary|Key Takeaway|Temel Bilgi|Özet|Ozet)\s*:\s*/gimu, "")
-    .replace(/\r\n/g, "\n")
-    .trim();
-  const lines = normalizedText
-    .split(/\n+/u)
-    .map((line) => normalizeDocumentScaffoldFragment(line.trim()))
-    .filter(Boolean);
-  const windows: Array<{ fragment: string; index: number }> = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const parts = lines.slice(index, index + 5);
-    const fragment = parts.join(" ").trim();
-    if (fragment) windows.push({ fragment, index });
-  }
-  if (lines.length === 1) windows.push({ fragment: lines[0] ?? "", index: 0 });
-  const fragments = windows
-    .map(({ fragment, index }) => {
-      const coreOverlap = queryCoreOverlapScore(queryTokens, fragment);
-      const codeShapeBonus = hasCodeLikeFragmentShape(fragment) ? 18 : 0;
-      const memberAccessBonus = /\b[a-zA-Z_][a-zA-Z0-9_]{1,}\.[a-zA-Z_][a-zA-Z0-9_]{1,}/u.test(fragment) ? 8 : 0;
-      const lengthBonus = fragment.length >= 80 && fragment.length <= 900 ? 4 : 0;
-      return {
-        fragment: fragment.slice(0, 900),
-        index,
-        score: coreOverlap * 12 + codeShapeBonus + memberAccessBonus + lengthBonus,
-      };
-    })
-    .filter((item) => item.score >= 18)
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .map((item) => item.fragment);
-  return unique(fragments).slice(0, limit);
-}
-
-const UI_IDENTIFIER_SUFFIXES = [
-  "Button",
-  "Box",
-  "Label",
-  "Picker",
-  "Bar",
-  "Icon",
-  "Timer",
-  "List",
-  "Panel",
-  "View",
-  "Field",
-  "Form",
-  "Image",
-  "Control",
-] as const;
-
-function uiLikeIdentifiers(value: string, limit = 16): string[] {
-  const suffixPattern = UI_IDENTIFIER_SUFFIXES.join("|");
-  const lowerSuffixPattern = UI_IDENTIFIER_SUFFIXES.map((suffix) => suffix.toLocaleLowerCase("en-US")).join("|");
-  const pattern = new RegExp(`\\b(?:[A-Za-z][A-Za-z0-9]*(?:${suffixPattern})\\d*|(?:${lowerSuffixPattern})\\d+)\\b`, "gu");
-  const canonicalize = (token: string): string => {
-    const withoutDigits = token.replace(/\d+$/u, "");
-    const suffix = UI_IDENTIFIER_SUFFIXES.find((candidate) =>
-      withoutDigits.toLocaleLowerCase("en-US").endsWith(candidate.toLocaleLowerCase("en-US")),
-    );
-    if (!suffix) return withoutDigits;
-    if (withoutDigits.length === suffix.length) return suffix;
-    return withoutDigits.charAt(0).toLocaleUpperCase("en-US") + withoutDigits.slice(1);
-  };
-  return unique(
-    [...value.matchAll(pattern)]
-      .map((match) => canonicalize(match[0]))
-      .filter((token) => token.length >= 4),
-  ).slice(0, limit);
-}
-
-function visualLayoutQueryFragments(text: string, query: string, limit = 4): string[] {
-  const task = detectAnswerTask(query);
-  if (task.taskType !== "visual_layout") return [];
-  const normalizedText = text
-    .replace(/\r\n/g, "\n")
-    .replace(/#{1,6}\s*page\s+\d+/giu, "\n")
-    .replace(/#{1,6}\s+/g, "\n")
-    .trim();
-  const lines = normalizedText
-    .split(/\n+/u)
-    .map((line) => normalizeDocumentScaffoldFragment(line.trim()))
-    .filter(Boolean);
-  const windows: Array<{ fragment: string; identifiers: string[]; index: number }> = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const fragment = lines.slice(index, index + 4).join(" ").trim();
-    const identifiers = uiLikeIdentifiers(fragment);
-    const codeLikeUiFragment = /\b(?:private|public|function|void|def)\b|\b[A-Za-z_][A-Za-z0-9_]*\s*\(/u.test(fragment);
-    if (identifiers.length >= 3 || (codeLikeUiFragment && identifiers.length >= 2)) windows.push({ fragment, identifiers, index });
-  }
-  if (lines.length === 1) {
-    const identifiers = uiLikeIdentifiers(lines[0] ?? "");
-    const codeLikeUiFragment = /\b(?:private|public|function|void|def)\b|\b[A-Za-z_][A-Za-z0-9_]*\s*\(/u.test(lines[0] ?? "");
-    if (identifiers.length >= 3 || (codeLikeUiFragment && identifiers.length >= 2)) windows.push({ fragment: lines[0] ?? "", identifiers, index: 0 });
-  }
-  return windows
-    .map((item) => ({
-      ...item,
-      score: item.identifiers.length * 12 + (/\b(?:layout|form|panel|screen|arayuz|arayüz|ekran|tasarim|tasarım)\b/iu.test(item.fragment) ? 16 : 0),
-    }))
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .map((item) => `Arayüz/layout öğeleri: ${item.identifiers.join(", ")}`)
-    .filter((fragment, index, all) => all.indexOf(fragment) === index)
-    .slice(0, limit);
-}
-
-function isListLikeLine(value: string): boolean {
-  return /^\s*(?:[-*•]|\d{1,2}[.)])\s+/u.test(value);
-}
-
-function stripListMarker(value: string): string {
-  return value.replace(/^\s*(?:[-*•]|\d{1,2}[.)])\s+/u, "").trim();
-}
-
-function hasLabeledListShape(value: string): boolean {
-  return /^[^:]{1,80}:\s+\S/u.test(value.trim());
-}
-
-function listQueryFragments(text: string, query: string, limit = 6): string[] {
-  const task = detectAnswerTask(query);
-  if (task.taskType !== "list_items") return [];
-  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
-  if (queryTokens.size === 0) return [];
-  const lines = text
-    .replace(/\r\n/g, "\n")
-    .replace(/\s+[•]\s+/gu, "\n• ")
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const matchedHeadingIndexes = lines
-    .map((line, index) => ({ line: normalizeDocumentScaffoldFragment(stripListMarker(line)), index }))
-    .filter(({ line }) => line && !isListLikeLine(line) && queryCoreOverlapScore(queryTokens, line) > 0)
-    .map(({ index }) => index);
-  const closeToMatchedHeading = (index: number) =>
-    matchedHeadingIndexes.some((headingIndex) => Math.abs(index - headingIndex) <= 8);
-
-  return lines
-    .map((line, index) => ({ line, index, fragment: normalizeDocumentScaffoldFragment(stripListMarker(line)) }))
-    .map(({ line, fragment, index }) => ({
-      line,
-      fragment,
-      index,
-      nearMatchedHeading: closeToMatchedHeading(index),
-    }))
-    .filter(({ line, fragment, nearMatchedHeading }) => {
-      if (!fragment || !isListLikeLine(line)) return false;
-      if (hasSourceScopeExclusion(fragment) || hasContradictionMarker(fragment)) return false;
-      if (matchedHeadingIndexes.length > 0 && nearMatchedHeading) return true;
-      return queryCoreOverlapScore(queryTokens, fragment) > 0 || queryOverlapScore(queryTokens, fragment) >= 2;
-    })
-    .map(({ fragment, index, nearMatchedHeading }) => ({
-      fragment,
-      index,
-      score: fragmentQualityScore(fragment) + (hasLabeledListShape(fragment) ? 100 : 0) + (nearMatchedHeading ? 40 : 0),
-      nearMatchedHeading,
-    }))
-    .filter(({ score, nearMatchedHeading }) => nearMatchedHeading || score > getDecisionConfig().evidenceScoring.fragmentMinScore)
-    .sort((a, b) => {
-      if (a.nearMatchedHeading && b.nearMatchedHeading) return a.index - b.index;
-      if (a.nearMatchedHeading !== b.nearMatchedHeading) return a.nearMatchedHeading ? -1 : 1;
-      return b.score - a.score || a.index - b.index;
-    })
-    .slice(0, limit)
-    .map(({ fragment }) => fragment);
-}
-
-function splitNumberedTableRows(text: string): string[] {
-  return text
-    .replace(/\s+(\d{1,2})\.\s*(?=[\p{L}A-ZÇĞİÖŞÜ])/gu, "\n$1. ")
-    .replace(/\s+(\d{1,2})\.\s+(?=[A-ZÇĞİÖŞÜ][\p{L}\s]{2,})/gu, "\n$1. ")
-    .split(/\n+/)
-    .map(normalizeTableLine)
-    .map(normalizeDocumentScaffoldFragment)
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-}
-
-function hasFinancialTableValue(value: string): boolean {
-  return /(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+\s*%|%\s*\d+|\(\s*\d)/u.test(value);
-}
-
-function isLikelyFinancialTableRow(value: string): boolean {
-  const lexicon = getEvidenceLexicon();
-  const normalized = normalizeConceptText(value);
-  if (!hasFinancialTableValue(value)) return false;
-  const hasShareGroupTableRows =
-    /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalized) &&
-    /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalized) &&
-    normalizedIncludesAny(normalized, lexicon.cashRateTerms);
-  if (hasShareGroupTableRows) return true;
-  const hasLineItemLabel =
-    /^\s*\d{1,2}\.\s*\p{L}/u.test(value) ||
-    normalizedIncludesAny(normalized, [
-      ...lexicon.netPeriodTerms,
-      ...lexicon.periodProfitTerms,
-      ...lexicon.distributableTerms,
-      ...lexicon.withholdingTerms,
-      "profit",
-      "dividend",
-    ]);
-  if (!hasLineItemLabel) return false;
-  return [
-    ...lexicon.periodProfitTerms,
-    ...lexicon.netPeriodTerms,
-    ...lexicon.distributableTerms,
-    ...lexicon.spkTerms,
-    "yasal kayit",
-    "tax",
-    "profit",
-    "net profit",
-    "dividend",
-    ...lexicon.withholdingTerms,
-    "sermaye",
-    "capital",
-  ].some((term) => normalized.includes(normalizeConceptText(term)));
-}
-
-function financialEvidenceLineLimit(value: string): number {
-  const normalized = normalizeConceptText(value);
-  const hasShareGroupTable =
-    normalizedIncludesAny(normalized, getEvidenceLexicon().cashRateTerms) &&
-    /(?:^|\s)a\s+grubu\s+[\d.,-]+/u.test(normalized) &&
-    /(?:^|\s)b\s+grubu\s+[\d.,-]+/u.test(normalized);
-  if (hasShareGroupTable) return 820;
-  return isLikelyFinancialTableRow(value) ? 520 : 320;
-}
-
-function queryRejectsConcept(normalizedQuery: string, concept: string): boolean {
-  const escaped = concept.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:${escaped}.{0,48}(?:sanma|karistirma|karıştırma|degil|değil|not)|(?:sanma|karistirma|karıştırma|degil|değil|not).{0,48}${escaped})`, "u")
-    .test(normalizedQuery);
-}
-
-function evidenceRelevanceScore(query: string, fact: string): number {
-  const scoring = getDecisionConfig().evidenceScoring;
-  const lexicon = getEvidenceLexicon();
-  const normalizedQuery = normalizeConceptText(query);
-  const normalizedFact = normalizeConceptText(fact);
-  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
-  const coreOverlap = queryCoreOverlapScore(queryTokens, fact);
-  const titleEvidenceBonus =
-    asksForSourceTitleEvidence(query) && normalizedFact.includes("kaynak basligi")
-      ? scoring.sourceTitleBonus
-      : 0;
-  const languageEvidenceBonus =
-    asksForSourceTitleEvidence(query) &&
-    ((normalizedQuery.includes("turkce") && normalizedFact.includes("turkce")) ||
-      (normalizedQuery.includes("ingilizce") && normalizedFact.includes("ingilizce")))
-      ? scoring.languageEvidenceBonus
-      : 0;
-  const tableValueBonus = hasFinancialTableValue(fact) ? scoring.tableValueBonus : 0;
-  const tableRowBonus = isLikelyFinancialTableRow(fact) ? scoring.tableRowBonus : 0;
-  const exactPhraseBonus =
-    normalizedIncludesAny(normalizedQuery, lexicon.netPeriodTerms) && normalizedIncludesAny(normalizedFact, lexicon.netPeriodTerms)
-      ? scoring.exactNetPeriodBonus
-      : normalizedIncludesAny(normalizedQuery, lexicon.periodProfitTerms) && normalizedIncludesAny(normalizedFact, lexicon.periodProfitTerms)
-        ? scoring.exactPeriodProfitBonus
-        : 0;
-  const requestedPlainPeriodProfit =
-    normalizedIncludesAny(normalizedQuery, lexicon.periodProfitTerms) &&
-    !normalizedQuery.includes(`sadece ${lexicon.netPeriodTerms[0] ?? "net donem"}`);
-  const plainPeriodProfitBonus =
-    requestedPlainPeriodProfit && /(?:^|:\s*)\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(fact)
-      ? scoring.plainPeriodProfitBonus
-      : 0;
-  const shortRelevantBonus = fact.length <= 360 ? scoring.shortRelevantBonus : 0;
-  const spkScopeBonus =
-    normalizedIncludesAny(normalizedQuery, lexicon.spkTerms) && normalizedFact.includes("spk")
-      ? scoring.spkScopeBonus
-      : normalizedIncludesAny(normalizedQuery, lexicon.spkTerms) && normalizedFact.includes("capital markets board")
-        ? scoring.spkEnglishScopeBonus
-        : 0;
-  const stopajScopeBonus =
-    normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms) &&
-    normalizedIncludesAny(normalizedFact, lexicon.withholdingTerms)
-      ? scoring.stopajScopeBonus
-      : 0;
-  const stopajGroupRateBonus =
-    normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms) &&
-    (normalizedQuery.includes("b") || normalizedQuery.includes("c") || normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms)) &&
-    normalizedIncludesAny(normalizedFact, lexicon.withholdingTerms) &&
-    (normalizedFact.includes("b") || normalizedFact.includes("group b") || normalizedFact.includes("b grubu")) &&
-    (normalizedFact.includes("c") || normalizedFact.includes("group c") || normalizedFact.includes("c grubu")) &&
-    /(?:%?\s*0|0\s*%|0,00)/u.test(normalizedFact) &&
-    /(?:%?\s*5|5\s*%|5,00)/u.test(normalizedFact)
-      ? scoring.stopajGroupRateBonus
-      : 0;
-  const otherSourcesScopeBonus =
-    normalizedIncludesAny(normalizedQuery, lexicon.otherSourcesTerms) &&
-    normalizedIncludesAny(normalizedFact, lexicon.otherSourcesTerms)
-      ? scoring.otherSourcesScopeBonus
-      : 0;
-  const shareGroupScopeBonus =
-    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
-    normalizedIncludesAny(normalizedFact, lexicon.shareGroupTerms) &&
-    normalizedIncludesAny(normalizedFact, lexicon.cashRateTerms)
-      ? scoring.shareGroupScopeBonus
-      : 0;
-  const shareGroupDenseTableBonus =
-    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
-    normalizedIncludesAny(normalizedQuery, lexicon.cashRateTerms) &&
-    /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
-    /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact)
-      ? scoring.shareGroupDenseTableBonus
-      : 0;
-  const rejectedExtraordinaryReservePenalty =
-    (queryRejectsConcept(normalizedQuery, "olaganustu yedek") || queryRejectsConcept(normalizedQuery, "extraordinary reserves")) &&
-    (normalizedFact.includes("olaganustu yedek") || normalizedFact.includes("extraordinary reserves"))
-      ? scoring.rejectedExtraordinaryReservePenalty
-      : 0;
-  const unrequestedNetDistributablePenalty =
-    normalizedIncludesAny(normalizedFact, lexicon.distributableTerms) &&
-    !normalizedIncludesAny(normalizedQuery, lexicon.distributableTerms) &&
-    shareGroupScopeBonus === 0 &&
-    stopajGroupRateBonus === 0 &&
-    otherSourcesScopeBonus === 0 &&
-    shareGroupDenseTableBonus === 0
-      ? scoring.unrequestedNetDistributablePenalty
-      : 0;
-  const headerPenalty =
-    /spk'?ya\s+gore\s+yasal\s+kayitlara\s+gore/u.test(normalizedFact) && !/^\s*[^:]+:\s*\d{1,2}\./u.test(fact)
-      ? scoring.headerPenalty
-      : 0;
-  return coreOverlap * scoring.coreOverlapWeight +
-    tableValueBonus +
-    tableRowBonus +
-    exactPhraseBonus +
-    plainPeriodProfitBonus +
-    titleEvidenceBonus +
-    languageEvidenceBonus +
-    spkScopeBonus +
-    stopajScopeBonus +
-    stopajGroupRateBonus +
-    otherSourcesScopeBonus +
-    shareGroupScopeBonus +
-    shareGroupDenseTableBonus +
-    shortRelevantBonus -
-    headerPenalty -
-    rejectedExtraordinaryReservePenalty -
-    unrequestedNetDistributablePenalty;
-}
-
-function addQueryLanguageAlias(query: string, fragment: string): string {
-  const lexicon = getEvidenceLexicon();
-  const normalizedQuery = normalizeConceptText(query);
-  const normalizedFragment = normalizeConceptText(fragment);
-  if (
-    normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms) &&
-    normalizedFragment.includes("withholding") &&
-    !normalizedFragment.includes("stopaj")
-  ) {
-    return `Stopaj oranı / withholding tax rate: ${fragment}`;
-  }
-  if (
-    normalizedIncludesAny(normalizedQuery, lexicon.spkTerms) &&
-    normalizedFragment.includes("capital markets board") &&
-    !normalizedFragment.includes("spk")
-  ) {
-    return `SPK / Capital Markets Board: ${fragment}`;
-  }
-  return fragment;
-}
-
-function rankEvidenceFacts(query: string, facts: string[]): string[] {
-  const task = detectAnswerTask(query);
-  const uniqueFacts = unique(facts);
-  if (task.taskType === "list_items") {
-    const factBody = (fact: string) => {
-      const separator = fact.indexOf(":");
-      return (separator >= 0 ? fact.slice(separator + 1) : fact).trim();
-    };
-    const isConciseListFact = (fact: string) => {
-      const body = factBody(fact);
-      if (body.length < 2 || body.length > 120) return false;
-      if (/[:;]\s*$/u.test(body) || body.includes(";")) return false;
-      if (/[.!?]\s+\p{L}/u.test(body)) return false;
-      if (/\b(?:aşağıdaki|asagidaki|başlığı|basligi|listelenir|üretil|uretil|geliştir|gelistir)\b/iu.test(body)) return false;
-      return true;
-    };
-    const isLabeledListFact = (fact: string) => {
-      const body = factBody(fact);
-      return hasLabeledListShape(body);
-    };
-    const conciseFacts = uniqueFacts.filter(isConciseListFact);
-    if (conciseFacts.length >= 3) {
-      const nonConciseFacts = uniqueFacts.filter((fact) => !isConciseListFact(fact));
-      return [...conciseFacts, ...nonConciseFacts];
-    }
-    const labeledFacts = uniqueFacts.filter(isLabeledListFact);
-    if (labeledFacts.length >= 3) {
-      const unlabeledFacts = uniqueFacts.filter((fact) => !isLabeledListFact(fact));
-      return [...labeledFacts, ...unlabeledFacts];
-    }
-  }
-  return uniqueFacts
-    .map((fact, index) => ({ fact, index, score: evidenceRelevanceScore(query, fact) }))
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .map(({ fact }) => fact);
-}
-
-function promoteCriticalDirectFacts(query: string, directFacts: string[], usableFacts: string[]): string[] {
-  const lexicon = getEvidenceLexicon();
-  const normalizedQuery = normalizeConceptText(query);
-  const promoted: string[] = [];
-  if (normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms)) {
-    promoted.push(
-      ...usableFacts.filter((fact) => {
-        const normalizedFact = normalizeConceptText(fact);
-        return (
-          normalizedIncludesAny(normalizedFact, lexicon.withholdingTerms) &&
-          (
-            /(?:^|\s)0(?:\s|$)|0,00|%0/u.test(normalizedFact) ||
-            normalizedFact.includes("group b") ||
-            normalizedFact.includes("b grubu")
-          )
-        );
-      }),
-    );
-  }
-  if (
-    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
-    normalizedIncludesAny(normalizedQuery, lexicon.cashRateTerms)
-  ) {
-    promoted.push(
-      ...usableFacts.filter((fact) => {
-        const normalizedFact = normalizeConceptText(fact);
-        return (
-          /(?:^|\s)a\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
-          /(?:^|\s)b\s+[\d.,-]+\s+[-\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+/u.test(normalizedFact) &&
-          normalizedIncludesAny(normalizedFact, lexicon.cashRateTerms)
-        );
-      }),
-    );
-  }
-  return unique([...promoted, ...directFacts]);
-}
-
-function asksForSourceTitleEvidence(query: string): boolean {
-  const lexicon = getEvidenceLexicon();
-  const normalized = normalizeConceptText(query);
-  const asksForTableDetails =
-    normalizedIncludesAny(normalized, lexicon.shareGroupTerms) ||
-    normalizedIncludesAny(normalized, lexicon.cashRateTerms);
-  return (
-    (normalized.includes("kaynak") && normalized.includes("baslik")) ||
-    normalized.includes("bildirim indeksi") ||
-    normalized.includes("ayni bildirim") ||
-    (normalized.includes("turkce") && normalized.includes("ingilizce") && !asksForTableDetails)
-  );
-}
-
-function sourceTitleLanguageLabel(title: string): "Türkçe" | "İngilizce" | "Belirsiz" {
-  const normalized = normalizeConceptText(title);
-  if (/(profit distribution|dividend distribution|withholding|board|table)/u.test(normalized)) return "İngilizce";
-  if (/(kar payi|kâr payi|dagitim|dağıtım|islemlerine|işlemlerine|bildirim)/u.test(normalized)) return "Türkçe";
-  return "Belirsiz";
-}
-
-function buildSourceTitleEvidence(title: string): string | null {
-  const clean = title.trim();
-  if (!clean) return null;
-  const language = sourceTitleLanguageLabel(clean);
-  return `${language} kaynak başlığı: ${clean}`;
-}
-
-function tokenizeForOverlap(text: string): string[] {
-  const normalized = normalizeConceptText(text);
-  return [
-    ...expandConceptTerms(normalized),
-    ...normalized
-    .split(/[^\p{L}\p{N}-]+/u)
-    .map((part) => part.trim())
-    .map((part) => {
-      const canonical: Record<string, string> = {
-        agrim: "agri",
-        agrisi: "agri",
-        karnim: "karin",
-        kasigim: "kasik",
-        okulda: "okul",
-        destegi: "destek",
-        adimlari: "adim",
-        konusmaliyim: "konus",
-      };
-      const direct = canonical[part] ?? part;
-      if (direct.startsWith("depozito")) return "depozito";
-      if (direct.startsWith("protokol")) return "protokol";
-      if (direct.startsWith("belge")) return "belge";
-      if (direct.startsWith("dekont")) return "belge";
-      if (direct.startsWith("sozlesme")) return "sozlesme";
-      if (direct.startsWith("bosanma")) return "bosanma";
-      if (direct.startsWith("anlasma")) return "anlasma";
-      if (direct.startsWith("baslik")) return "baslik";
-      if (direct.startsWith("netlestir")) return "netlestir";
-      if (direct.startsWith("velayet")) return "velayet";
-      if (direct.startsWith("nafaka")) return "nafaka";
-      if (direct.startsWith("kayit")) return "kayit";
-      if (direct.startsWith("basvuru")) return "basvuru";
-      if (direct.startsWith("migration")) return "migration";
-      if (direct.startsWith("rollback")) return "rollback";
-      return direct;
-    })
-    .filter((part) => part.length >= 3),
-  ];
-}
-
-function queryOverlapScore(queryTokens: Set<string>, text: string): number {
-  return tokenizeForOverlap(text).filter((token) => queryTokens.has(token)).length;
-}
-
-const GENERIC_OVERLAP_TOKENS = new Set([
-  "agri",
-  "agriyor",
-  "belirti",
-  "durum",
-  "genel",
-  "kontrol",
-  "sikayet",
-  "sorun",
-  "takip",
-  "uzman",
-]);
-
-function queryCoreOverlapScore(queryTokens: Set<string>, text: string): number {
-  return tokenizeForOverlap(text).filter((token) => queryTokens.has(token) && !GENERIC_OVERLAP_TOKENS.has(token)).length;
-}
-
-function hasStrongQueryOverlap(queryTokens: Set<string>, text: string): boolean {
-  return queryOverlapScore(queryTokens, text) >= 2;
-}
-
-function hasOffQuerySymptom(query: string, text: string): boolean {
-  const symptomGroups = [
-    ["kanama", "lekelenme"],
-    ["akıntı", "akinti", "koku", "kaşıntı", "kasinti"],
-    ["gebelik", "hamile"],
-    ["kist", "yumurtalık", "yumurtalik"],
-    ["ateş", "ates", "kusma", "bayılma", "bayilma"],
-  ];
-  const normalizedQuery = query.toLocaleLowerCase("tr-TR");
-  const normalizedText = text.toLocaleLowerCase("tr-TR");
-  return symptomGroups.some((group) => {
-    const textHasGroup = group.some((term) => normalizedText.includes(term));
-    if (!textHasGroup) return false;
-    return !group.some((term) => normalizedQuery.includes(term));
-  });
-}
-
-function removeOffQuerySymptomPhrases(query: string, text: string): string {
-  const normalizedQuery = query.toLocaleLowerCase("tr-TR");
-  let next = text;
-  if (!["kanama", "lekelenme"].some((term) => normalizedQuery.includes(term))) {
-    next = next
-      .replace(/\s+veya\s+kanama(?:\s+nedenini|\s+nedeni|\s+yakınması)?/giu, "")
-      .replace(/\s+ya da\s+kanama(?:\s+nedenini|\s+nedeni|\s+yakınması)?/giu, "")
-      .replace(/,\s*kanama\/lekelenme eşlik edebiliyor\.?/giu, ".")
-      .replace(/\s*kanama\/lekelenme eşlik edebiliyor\.?/giu, "")
-      .replace(/\s+veya\s+lekelenme/giu, "");
-  }
-  if (!["akıntı", "akinti", "koku", "kaşıntı", "kasinti"].some((term) => normalizedQuery.includes(term))) {
-    next = next
-      .replace(/,\s*akıntı tarif ediyor\.?/giu, ".")
-      .replace(/\s*akıntı tarif ediyor\.?/giu, "");
-  }
-  return next.replace(/\s+/g, " ").replace(/\s+\./g, ".").trim();
-}
-
-function evidenceLine(prefix: string, value: string): string {
-  const trimmed = value.trim().replace(/\s+/g, " ");
-  return trimmed ? `${prefix}: ${trimmed}` : "";
-}
-
-function compactEvidenceLine(line: string, maxChars = 320): string {
-  const normalized = line.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxChars) return normalized;
-  const clipped = normalized.slice(0, maxChars).trim();
-  const lastPunctuation = Math.max(
-    clipped.lastIndexOf("."),
-    clipped.lastIndexOf("!"),
-    clipped.lastIndexOf("?"),
-  );
-  if (lastPunctuation >= 80) return clipped.slice(0, lastPunctuation + 1).trim();
-  const lastSeparator = Math.max(clipped.lastIndexOf(";"), clipped.lastIndexOf(","));
-  if (lastSeparator >= 80) return clipped.slice(0, lastSeparator).trim();
-  return clipped.replace(/\s+\S*$/, "").trim();
-}
-
-function structuredFactLegacyEvidenceLine(fact: StructuredFact): string {
-  const quote = fact.provenance.quote.trim();
-  const valueSummary = [fact.field, fact.value].filter(Boolean).join(": ");
-  const body = quote || valueSummary;
-  if (!body) return "";
-  return compactEvidenceLine(evidenceLine(fact.sourceId, body), financialEvidenceLineLimit(body));
-}
-
-const NEGATION_PATTERNS = [
-  /\bgerek(?:li|ir)\s+degildir\b/u,
-  /\bgerek(?:li|ir)\s+değildir\b/u,
-  /\bgerek(?:li|ir)\s+degil\b/u,
-  /\bgerek(?:li|ir)\s+değil\b/u,
-  /\bgerek\s+olmadigini\b/u,
-  /\bgerek\s+olmadığını\b/u,
-  /\bgerek\s+yok\b/u,
-  /\byapilma(?:z|mali)\b/u,
-  /\byapılma(?:z|malı)\b/u,
-  /\bonerilme(?:z|meli)\b/u,
-  /\bönerilme(?:z|meli)\b/u,
-  /\bzorunlu\s+degil\b/u,
-  /\bzorunlu\s+değil\b/u,
-  /\bkontrendike\b/u,
-  /\bkullanma\b/u,
-  /\bkullanilmamali\b/u,
-  /\bkullanılmamalı\b/u,
-];
-
-const AFFIRMATION_PATTERNS = [
-  /\bgerek(?:li|ir)\b/u,
-  /\byapilmali\b/u,
-  /\byapılmalı\b/u,
-  /\bonerilir\b/u,
-  /\bönerilir\b/u,
-  /\bzorunlu\b/u,
-  /\bkullanilmali\b/u,
-  /\bkullanılmalı\b/u,
-  /\bkontrol\s+edilmeli\b/u,
-];
-
-function evidencePolarity(value: string): "negative" | "positive" | "neutral" {
-  const text = normalizeConceptText(value);
-  if (NEGATION_PATTERNS.some((pattern) => pattern.test(text))) return "negative";
-  if (AFFIRMATION_PATTERNS.some((pattern) => pattern.test(text))) return "positive";
-  return "neutral";
-}
-
-function evidenceSubjectKey(value: string): string {
-  const withoutSourceLabel = value.includes(":") ? value.slice(value.indexOf(":") + 1) : value;
-  const generic = new Set([
-    "kaynak",
-    "source",
-    "gerekli",
-    "gerekir",
-    "degil",
-    "değil",
-    "yapilmali",
-    "yapılmalı",
-    "onerilir",
-    "önerilir",
-    "kontrol",
-    "edilmeli",
-    "kisa",
-    "sakin",
-  ]);
-  const tokens = tokenizeForOverlap(withoutSourceLabel)
-    .filter((token) => !GENERIC_OVERLAP_TOKENS.has(token))
-    .filter((token) => !generic.has(token))
-  const hasMigration = tokens.some((token) => token.startsWith("migration"));
-  const technicalSafetyTerms = ["migration", "yedek", "backup", "rollback", "staging", "log"]
-    .filter((term) => tokens.some((token) => token.startsWith(term)));
-  if (hasMigration && technicalSafetyTerms.length > 0) {
-    return unique(technicalSafetyTerms).slice(0, 5).join(" ");
-  }
-  return tokens.slice(0, 5).join(" ");
-}
-
-function hasContradictionMarker(value: string): boolean {
-  const normalized = normalizeConceptText(value);
-  return [
-    "celisir",
-    "celiski",
-    "çelişir",
-    "çelişki",
-    "farkli yonlendirme",
-    "farklı yönlendirme",
-    "guvenilmez",
-    "güvenilmez",
-  ].some((term) => normalized.includes(normalizeConceptText(term)));
-}
-
-function hasSourceScopeExclusion(value: string): boolean {
-  const normalized = normalizeConceptText(value);
-  return [
-    "kaynak degildir",
-    "kaynak değildir",
-    "dogrudan kaynak degildir",
-    "doğrudan kaynak değildir",
-    "icin kaynak degildir",
-    "için kaynak değildir",
-    "konular icin kaynak degildir",
-    "konular için kaynak değildir",
-    "hakkinda kesin yonlendirme yapma",
-    "hakkında kesin yönlendirme yapma",
-  ].some((term) => normalized.includes(normalizeConceptText(term)));
-}
-
-function findContradictoryEvidence(facts: string[]): { conflicts: string[]; conflictedFacts: Set<string> } {
-  const bySubject = new Map<string, { positive: string[]; negative: string[] }>();
-  const migrationSafety = { positive: [] as string[], negative: [] as string[] };
-  for (const fact of facts) {
-    const polarity = evidencePolarity(fact);
-    if (polarity === "neutral") continue;
-    const subject = evidenceSubjectKey(fact);
-    if (!subject) continue;
-    const bucket = bySubject.get(subject) ?? { positive: [], negative: [] };
-    bucket[polarity].push(fact);
-    bySubject.set(subject, bucket);
-    if (subject.includes("migration") && (subject.includes("yedek") || subject.includes("backup") || subject.includes("rollback"))) {
-      migrationSafety[polarity].push(fact);
-    }
-  }
-  const conflicts: string[] = [];
-  const conflictedFacts = new Set<string>();
-  for (const [subject, bucket] of bySubject.entries()) {
-    if (bucket.positive.length === 0 || bucket.negative.length === 0) continue;
-    for (const fact of [...bucket.positive, ...bucket.negative]) conflictedFacts.add(fact);
-    conflicts.push(`Çelişen kaynak bilgisi: ${subject} için kaynaklar farklı yönlendirme veriyor.`);
-  }
-  if (migrationSafety.positive.length > 0 && migrationSafety.negative.length > 0) {
-    for (const fact of [...migrationSafety.positive, ...migrationSafety.negative]) conflictedFacts.add(fact);
-    conflicts.push("Çelişen kaynak bilgisi: migration yedek/rollback güvenliği için kaynaklar farklı yönlendirme veriyor.");
-  }
-  return { conflicts: unique(conflicts).slice(0, 3), conflictedFacts };
-}
-
-type EvidenceSectionKind = "direct" | "supporting" | "risk" | "limit";
-
-interface EvidenceSection {
-  kind: EvidenceSectionKind;
-  text: string;
-}
-
-const SECTION_LABELS: Record<EvidenceSectionKind, string[]> = {
-  direct: [
-    "Source Summary",
-    "Key Takeaway",
-    "Clinical Takeaway",
-    "Patient Summary",
-    "Temel Bilgi",
-    "Özet",
-    "Ozet",
-    "Bulgular",
-    "Finding",
-    "Findings",
-    "Claim",
-    "Context",
-    "Kullanılabilir Bilgiler",
-    "Kullanilabilir Bilgiler",
-    "Gerçekler",
-    "Gercekler",
-  ],
-  supporting: [
-    "Safe Guidance",
-    "Guidance",
-    "Recommendation",
-    "Recommended Action",
-    "Ne Yapmalı",
-    "Ne Yapmali",
-    "Öneri",
-    "Oneri",
-    "Steps",
-    "Checklist",
-    "Procedure",
-    "Runbook",
-  ],
-  risk: [
-    "Red Flags",
-    "Risk",
-    "Risks",
-    "Warning",
-    "Warnings",
-    "Uyarı Bulguları",
-    "Uyari Bulgulari",
-    "Uyarılar",
-    "Uyarilar",
-    "Alarm",
-    "Dikkat",
-    "Dikkat Edilecekler",
-  ],
-  limit: [
-    "Do Not Infer",
-    "Limitations",
-    "Limits",
-    "Not Supported",
-    "Belirsiz",
-    "Kullanılamayan",
-    "Kullanilamayan",
-    "Çıkarım Yapma",
-    "Cikarim Yapma",
-    "Uydurma",
-  ],
-};
-
-const ALL_SECTION_LABELS = Object.values(SECTION_LABELS).flat();
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function sectionKindForLabel(label: string): EvidenceSectionKind | null {
-  const normalized = label.toLocaleLowerCase("tr-TR");
-  for (const [kind, labels] of Object.entries(SECTION_LABELS) as Array<[EvidenceSectionKind, string[]]>) {
-    if (labels.some((item) => item.toLocaleLowerCase("tr-TR") === normalized)) return kind;
-  }
-  return null;
-}
-
-function extractSectionBlock(content: string, label: string): string {
-  const normalized = content.replace(/\r\n/g, "\n");
-  const labelPattern = escapeRegExp(label);
-  const startMatch = normalized.match(new RegExp(`(^|\\n)\\s*(?:#{1,6}\\s*)?${labelPattern}\\s*:?[ \\t]*`, "i"));
-  if (!startMatch || typeof startMatch.index !== "number") return "";
-  const start = startMatch.index + startMatch[0].length;
-  const afterStart = normalized.slice(start);
-  let endIndex = afterStart.length;
-  for (const otherLabel of ALL_SECTION_LABELS) {
-    const otherPattern = escapeRegExp(otherLabel);
-    const match = afterStart.match(new RegExp(`\\n\\s*(?:#{1,6}\\s*)?${otherPattern}\\s*:?[ \\t]*`, "i"));
-    if (match && typeof match.index === "number") {
-      endIndex = Math.min(endIndex, match.index);
-    }
-  }
-  return afterStart.slice(0, endIndex).trim();
-}
-
-function extractRawEvidenceSections(content: string | undefined): EvidenceSection[] {
-  if (!content?.trim()) return [];
-  const sections: EvidenceSection[] = [];
-  for (const label of ALL_SECTION_LABELS) {
-    const kind = sectionKindForLabel(label);
-    if (!kind) continue;
-    const text = extractSectionBlock(content, label);
-    if (text) sections.push({ kind, text });
-  }
-  return sections;
-}
-
-function cardSections(card: EvidenceExtractorCardInput): EvidenceSection[] {
-  const explicitSections: EvidenceSection[] = [
-    { kind: "direct", text: card.patientSummary ?? "" },
-    { kind: "direct", text: card.clinicalTakeaway ?? "" },
-    { kind: "supporting", text: card.safeGuidance ?? "" },
-    { kind: "risk", text: card.redFlags ?? "" },
-    { kind: "limit", text: card.doNotInfer ?? "" },
-  ];
-  return [...explicitSections, ...extractRawEvidenceSections(card.rawContent)].filter((section) => section.text.trim());
-}
-
-function cardHasQueryScopedExclusion(card: EvidenceExtractorCardInput, queryTokens: Set<string>): boolean {
-  return cardSections(card).some((section) =>
-    sentenceFragments(section.text, section.text.includes("|") ? 6 : 3).some((fragment) => {
-      if (!hasSourceScopeExclusion(fragment)) return false;
-      return queryCoreOverlapScore(queryTokens, fragment) > 0 || queryOverlapScore(queryTokens, fragment) >= 2;
-    }),
-  );
-}
-
-function renderPlannerHintQuery(template: string, userQuery: string): string {
-  return template.replace(/\{query\}/gu, userQuery);
 }
 
 export function buildDeterministicQueryPlan(input: QueryPlannerInput): QueryPlannerOutput {
-  const userQuery = input.userQuery.trim();
-  const routePlan = routeQuery(userQuery);
-  const searchQueries = [userQuery];
-  const mustIncludeTerms: string[] = [...routePlan.mustIncludeTerms];
-  const mustExcludeTerms: string[] = [...routePlan.mustExcludeTerms];
-  let expectedEvidenceType: QueryPlannerOutput["expectedEvidenceType"] = "unknown";
-
-  for (const hint of getDecisionConfig().evidencePlannerHints) {
-    if (!hasAny(userQuery, hint.matchTerms)) continue;
-    expectedEvidenceType = hint.expectedEvidenceType;
-    searchQueries.push(...hint.searchQueries.map((query) => renderPlannerHintQuery(query, userQuery)));
-    mustIncludeTerms.push(...hint.mustIncludeTerms);
-  }
-
-  searchQueries.push(...routePlan.retrievalHints);
-  const plannedQueries = unique(searchQueries).slice(0, 7);
-  const includeTerms = unique(mustIncludeTerms).slice(0, 10);
-
+  const routePlan = routeQuery(input.userQuery);
+  const task = detectAnswerTask(input.userQuery);
+  const taskTerms = unique([
+    ...task.requestedFields.flatMap((field) => [field.label, ...field.aliases]),
+    ...task.targetDocumentHints.map((hint) => hint.value),
+  ]);
+  const searchQueries = unique([
+    input.userQuery,
+    ...routePlan.retrievalHints,
+    ...taskTerms,
+  ]).slice(0, 8);
   return {
     routePlan,
-    searchQueries: plannedQueries,
-    mustIncludeTerms: includeTerms,
-    mustExcludeTerms: unique(mustExcludeTerms),
-    expectedEvidenceType,
-    retrievalQuery: unique([...plannedQueries, ...includeTerms]).join("\n"),
+    searchQueries,
+    mustIncludeTerms: routePlan.mustIncludeTerms,
+    mustExcludeTerms: routePlan.mustExcludeTerms,
+    expectedEvidenceType: expectedEvidenceType(task.taskType),
+    retrievalQuery: unique([input.userQuery, ...searchQueries]).join(" | "),
   };
 }
 
@@ -1343,254 +279,32 @@ export async function runQueryPlannerSkill(
   };
 }
 
-export function buildDeterministicEvidenceExtraction(
-  input: EvidenceExtractorInput,
-): EvidenceExtractorOutput {
+export function buildDeterministicEvidenceExtraction(input: EvidenceExtractorInput): EvidenceExtractorOutput {
   const budget = getEvidenceExtractorBudget();
-  const usableFacts: string[] = [];
-  const directAnswerFacts: string[] = [];
-  const supportingContext: string[] = [];
-  const uncertainOrUnusable: string[] = [];
-  const redFlags: string[] = [];
-  const sourceIds: string[] = [];
-  const queryTokens = new Set(tokenizeForOverlap(input.userQuery));
-  const weakIntent = inferAnswerIntent(input.userQuery);
-
-  const addUsableIfRelevant = (sourceLabel: string, fragment: string, opts: { allowGenericGuidance?: boolean; kind?: "direct" | "supporting"; force?: boolean; maxChars?: number } = {}) => {
-    const sanitized = removeOffQuerySymptomPhrases(input.userQuery, addQueryLanguageAlias(input.userQuery, fragment));
-    if (!sanitized.trim()) return;
-    if (hasContradictionMarker(sanitized) || hasSourceScopeExclusion(sanitized)) {
-      uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
-      return;
-    }
-    const overlap = queryOverlapScore(queryTokens, sanitized);
-    const coreOverlap = queryCoreOverlapScore(queryTokens, sanitized);
-    const strongOverlap = hasStrongQueryOverlap(queryTokens, sanitized);
-    const offQuerySymptom = hasOffQuerySymptom(input.userQuery, sanitized);
-    if (offQuerySymptom && !opts.allowGenericGuidance) return;
-    const acceptDirect = opts.kind !== "supporting" && (opts.force || strongOverlap || coreOverlap > 0 || (weakIntent === "explain" && overlap > 0));
-    const acceptSupporting =
-      opts.kind === "supporting" &&
-      (opts.force || strongOverlap || coreOverlap > 0 || (opts.allowGenericGuidance && overlap > 0));
-    if (acceptDirect || acceptSupporting) {
-      const line = compactEvidenceLine(evidenceLine(sourceLabel, sanitized), opts.maxChars ?? financialEvidenceLineLimit(sanitized));
-      usableFacts.push(line);
-      if (opts.kind === "supporting") {
-        supportingContext.push(line);
-      } else {
-        directAnswerFacts.push(line);
-      }
-    }
-  };
-
-  for (const card of input.cards) {
-    const sourceLabel = card.title || card.sourceId;
-    if (cardHasQueryScopedExclusion(card, queryTokens)) {
-      uncertainOrUnusable.push(
-        compactEvidenceLine(evidenceLine(sourceLabel, "Kaynak kendi kapsamına göre bu soruya doğrudan dayanak olmadığını belirtiyor.")),
-      );
-      continue;
-    }
-    sourceIds.push(card.sourceId);
-    if (asksForSourceTitleEvidence(input.userQuery)) {
-      const titleEvidence = buildSourceTitleEvidence(sourceLabel);
-      if (titleEvidence) {
-        const line = compactEvidenceLine(evidenceLine(sourceLabel, titleEvidence), 520);
-        usableFacts.push(line);
-        directAnswerFacts.push(line);
-      }
-    }
-
-    const rawContent = card.rawContent?.trim() ?? "";
-    if (rawContent) {
-      for (const fragment of codeQueryFragments(rawContent, input.userQuery)) {
-        addUsableIfRelevant(sourceLabel, fragment, {
-          allowGenericGuidance: true,
-          kind: "direct",
-          force: true,
-          maxChars: 900,
-        });
-      }
-      for (const fragment of visualLayoutQueryFragments(rawContent, input.userQuery)) {
-        addUsableIfRelevant(sourceLabel, fragment, {
-          allowGenericGuidance: true,
-          kind: "direct",
-          force: true,
-          maxChars: 520,
-        });
-      }
-      for (const fragment of listQueryFragments(rawContent, input.userQuery)) {
-        addUsableIfRelevant(sourceLabel, fragment, {
-          allowGenericGuidance: true,
-          kind: "direct",
-          force: true,
-          maxChars: 420,
-        });
-      }
-      for (const fragment of definitionQueryFragments(rawContent, input.userQuery)) {
-        addUsableIfRelevant(sourceLabel, fragment, {
-          allowGenericGuidance: true,
-          kind: "direct",
-          force: true,
-          maxChars: 560,
-        });
-      }
-      for (const fragment of comparisonQueryFragments(rawContent, input.userQuery)) {
-        addUsableIfRelevant(sourceLabel, fragment, {
-          allowGenericGuidance: true,
-          kind: "direct",
-          force: true,
-          maxChars: 620,
-        });
-      }
-      // Table/numeric evidence is owned by the V2 artifact-aware extractor.
-      // Legacy string facts intentionally do not duplicate that domain-specific path.
-    }
-
-    for (const section of cardSections(card)) {
-      if (section.kind === "direct" || section.kind === "supporting") {
-        for (const fragment of listQueryFragments(section.text, input.userQuery)) {
-          addUsableIfRelevant(sourceLabel, fragment, {
-            allowGenericGuidance: true,
-            kind: section.kind === "supporting" ? "supporting" : "direct",
-            force: true,
-            maxChars: 420,
-          });
-        }
-        for (const fragment of definitionQueryFragments(section.text, input.userQuery)) {
-          addUsableIfRelevant(sourceLabel, fragment, {
-            allowGenericGuidance: true,
-            kind: section.kind === "supporting" ? "supporting" : "direct",
-            force: true,
-            maxChars: 560,
-          });
-        }
-        for (const fragment of comparisonQueryFragments(section.text, input.userQuery)) {
-          addUsableIfRelevant(sourceLabel, fragment, {
-            allowGenericGuidance: true,
-            kind: section.kind === "supporting" ? "supporting" : "direct",
-            force: true,
-            maxChars: 620,
-          });
-        }
-        for (const fragment of codeQueryFragments(section.text, input.userQuery)) {
-          addUsableIfRelevant(sourceLabel, fragment, {
-            allowGenericGuidance: true,
-            kind: section.kind === "supporting" ? "supporting" : "direct",
-            force: true,
-            maxChars: 900,
-          });
-        }
-        for (const fragment of visualLayoutQueryFragments(section.text, input.userQuery)) {
-          addUsableIfRelevant(sourceLabel, fragment, {
-            allowGenericGuidance: true,
-            kind: section.kind === "supporting" ? "supporting" : "direct",
-            force: true,
-            maxChars: 520,
-          });
-        }
-        // Table/numeric evidence is owned by the V2 artifact-aware extractor.
-        // Legacy string facts intentionally do not duplicate that domain-specific path.
-      }
-      const fragmentLimit = section.text.includes("|") ? 6 : 2;
-      for (const fragment of sentenceFragments(section.text, fragmentLimit)) {
-        if (section.kind === "direct") {
-          addUsableIfRelevant(sourceLabel, fragment, { allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment) });
-        } else if (section.kind === "supporting") {
-          addUsableIfRelevant(sourceLabel, fragment, {
-            allowGenericGuidance: !hasOffQuerySymptom(input.userQuery, fragment),
-            kind: "supporting",
-          });
-        } else if (section.kind === "risk") {
-          const sanitized = removeOffQuerySymptomPhrases(input.userQuery, fragment);
-          if (hasSourceScopeExclusion(sanitized)) {
-            uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
-            continue;
-          }
-          const overlap = queryOverlapScore(queryTokens, sanitized);
-          if (sanitized && (overlap > 0 || !hasOffQuerySymptom(input.userQuery, sanitized))) {
-            redFlags.push(compactEvidenceLine(evidenceLine(sourceLabel, sanitized)));
-          }
-        } else {
-          uncertainOrUnusable.push(compactEvidenceLine(evidenceLine(sourceLabel, fragment)));
-        }
-      }
-    }
-  }
-
-  const missingInfo =
-    usableFacts.length === 0
-      ? ["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]
-      : [];
-  const contradiction = findContradictoryEvidence(unique([...directAnswerFacts, ...supportingContext]));
-  if (contradiction.conflicts.length > 0) {
-    for (let index = directAnswerFacts.length - 1; index >= 0; index -= 1) {
-      if (contradiction.conflictedFacts.has(directAnswerFacts[index] ?? "")) directAnswerFacts.splice(index, 1);
-    }
-    for (let index = supportingContext.length - 1; index >= 0; index -= 1) {
-      if (contradiction.conflictedFacts.has(supportingContext[index] ?? "")) supportingContext.splice(index, 1);
-    }
-    for (let index = usableFacts.length - 1; index >= 0; index -= 1) {
-      if (contradiction.conflictedFacts.has(usableFacts[index] ?? "")) usableFacts.splice(index, 1);
-    }
-    uncertainOrUnusable.push(...contradiction.conflicts);
-    if (usableFacts.length === 0) {
-      missingInfo.push("Kaynaklar arasında çelişki olduğu için doğrudan öneri çıkarılmadı.");
-    }
-  }
-  const intentResolution = resolveAnswerIntent({
-    userQuery: input.userQuery,
-    weakIntent,
-    directFactCount: directAnswerFacts.length,
-    supportingFactCount: supportingContext.length,
-    riskFactCount: redFlags.length,
-    missingInfoCount: missingInfo.length,
-    sourceCount: sourceIds.length,
-  });
-
-  const rankedUsableFacts = rankEvidenceFacts(input.userQuery, usableFacts);
-  const rankedDirectFacts = rankEvidenceFacts(input.userQuery, directAnswerFacts);
-  const finalDirectAnswerFacts = promoteCriticalDirectFacts(input.userQuery, rankedDirectFacts, rankedUsableFacts).slice(0, budget.directFactLimit);
-  const finalSupportingContext = rankEvidenceFacts(input.userQuery, supportingContext).slice(0, budget.supportingFactLimit);
-  const finalRiskFacts = unique(redFlags).slice(0, budget.riskFactLimit);
-  const finalNotSupported = unique([...uncertainOrUnusable, ...missingInfo]).slice(0, budget.notSupportedLimit);
-  const finalUsableFacts = rankedUsableFacts.slice(0, budget.usableFactLimit);
-  const finalUncertainOrUnusable = unique(uncertainOrUnusable).slice(0, budget.notSupportedLimit);
-  const finalRedFlags = unique(redFlags).slice(0, budget.riskFactLimit + 1);
-  const finalSourceIds = unique(sourceIds).slice(0, budget.sourceIdLimit);
   const taskDetection = detectAnswerTask(input.userQuery);
   const evidenceV2 = extractEvidenceV2({
     query: input.userQuery,
     cards: input.cards,
     taskDetection,
-    legacySeeds: {
-      directAnswerFacts: finalDirectAnswerFacts,
-      usableFacts: finalUsableFacts,
-      supportingContext: finalSupportingContext,
-      riskFacts: finalRiskFacts,
-      notSupported: finalNotSupported,
-    },
-    sourceIds: finalSourceIds,
   });
-  const structuredFactLegacyLines = evidenceV2.structuredFacts
-    .map(structuredFactLegacyEvidenceLine)
-    .filter(Boolean);
-  const finalDirectAnswerFactsV2 = unique([...structuredFactLegacyLines, ...finalDirectAnswerFacts])
-    .slice(0, budget.directFactLimit);
-  const finalUsableFactsV2 = unique([...structuredFactLegacyLines, ...finalUsableFacts])
-    .slice(0, budget.usableFactLimit);
+  const usableItems = evidenceV2.items.filter(isUsableEvidenceOutputItem);
+  const sourceIds = unique(evidenceV2.sourceIds).slice(0, budget.sourceIdLimit);
+  const missingInfo = usableItems.length === 0
+    ? ["No usable typed evidence item was found for this query."]
+    : [];
+  const answerIntent = intentFromTask(taskDetection.taskType);
+  const intentResolution = resolveAnswerIntent({
+    userQuery: input.userQuery,
+    weakIntent: answerIntent,
+    directFactCount: usableItems.length,
+    missingInfoCount: missingInfo.length,
+    sourceCount: sourceIds.length,
+  });
 
   return {
-    answerIntent: intentResolution.intent,
+    answerIntent,
     intentResolution,
-    directAnswerFacts: finalDirectAnswerFactsV2,
-    supportingContext: finalSupportingContext,
-    riskFacts: finalRiskFacts,
-    notSupported: finalNotSupported,
-    usableFacts: finalUsableFactsV2,
-    uncertainOrUnusable: finalUncertainOrUnusable,
-    redFlags: finalRedFlags,
-    sourceIds: finalSourceIds,
+    sourceIds,
     missingInfo,
     structuredFacts: evidenceV2.structuredFacts,
     evidenceBundle: evidenceV2.evidenceBundle,

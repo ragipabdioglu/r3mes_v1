@@ -1,6 +1,10 @@
 import type { AnswerDomain } from "./answerSchema.js";
 import type { DomainRoutePlan } from "./queryRouter.js";
-import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import {
+  evidenceOutputLimitText,
+  evidenceOutputUsableTextFacts,
+  type EvidenceExtractorOutput,
+} from "./skillPipeline.js";
 
 export interface DomainPolicy {
   domain: AnswerDomain;
@@ -38,9 +42,8 @@ export function inferAnswerDomain(opts: {
   }
 
   const evidenceText = [
-    ...(opts.evidence?.usableFacts ?? []),
-    ...(opts.evidence?.uncertainOrUnusable ?? []),
-    ...(opts.evidence?.redFlags ?? []),
+    ...evidenceOutputUsableTextFacts(opts.evidence),
+    ...evidenceOutputLimitText(opts.evidence),
   ].join(" ");
   const haystack = `${opts.userQuery}\n${evidenceText}\n${opts.contextText}`;
 

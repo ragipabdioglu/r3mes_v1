@@ -52,17 +52,6 @@ function sourceIdForFact(fact: string, fallback: string): string {
   return fallback;
 }
 
-function requestedShareGroups(query: string): string[] {
-  const normalized = normalize(query);
-  const groups = new Set<string>();
-  const mentionsGroupContext = /\b(grub\w*|grup\w*|group\w*)\b/u.test(normalized);
-  if (!mentionsGroupContext) return [];
-  if (/\ba\b/u.test(normalized) || /\ba\s+grup\w*\b/u.test(normalized)) groups.add("A Grubu");
-  if (/\bb\b/u.test(normalized) || /\bb\s+grup\w*\b/u.test(normalized)) groups.add("B Grubu");
-  if (/\bc\b/u.test(normalized) || /\bc\s+grup\w*\b/u.test(normalized)) groups.add("C Grubu");
-  return [...groups];
-}
-
 function isFieldAliasContextAllowedAt(normalizedFact: string, alias: string, field: RequestedField, index: number): boolean {
   if (index < 0) return false;
   const aliasTokens = alias.split(/\s+/u).filter(Boolean);
@@ -187,10 +176,30 @@ function fieldSuggestsPercentValue(field: RequestedField): boolean {
   return /\b(oran\w*|rate\w*|ratio\w*|percent\w*|percentage\w*|yuzde\w*)\b/u.test(fieldSearchText(field));
 }
 
-function fieldSuggestsGroupedValue(field: RequestedField, query: string): boolean {
-  const combined = `${fieldSearchText(field)} ${normalize(query)}`;
-  return /\b(grub\w*|grup\w*|group\w*)\b/u.test(combined) &&
-    /\b(tutar\w*|amount\w*|oran\w*|rate\w*|ratio\w*|cash\w*|nakit\w*|deger\w*|value\w*)\b/u.test(combined);
+function isSpecificRawFallbackField(field: RequestedField): boolean {
+  const genericFieldTerms = new Set([
+    "oran",
+    "rate",
+    "ratio",
+    "percent",
+    "percentage",
+    "yuzde",
+    "tutar",
+    "amount",
+    "cash",
+    "nakit",
+    "deger",
+    "value",
+    "miktar",
+    "sayi",
+    "rakam",
+  ]);
+  const candidates = [field.label, ...field.aliases].map(normalize).filter(Boolean);
+  return candidates.some((candidate) => {
+    const tokens = candidate.split(/\s+/u).filter(Boolean);
+    if (tokens.length >= 2) return true;
+    return tokens.length === 1 && !genericFieldTerms.has(tokens[0] ?? "");
+  });
 }
 
 function tableFactMatchesRequestedField(fact: TableFact, field: RequestedField): boolean {
@@ -259,54 +268,6 @@ function structuredFactsFromTableFacts(opts: {
   return out;
 }
 
-function extractShareGroupFacts(opts: {
-  query: string;
-  facts: string[];
-  field: RequestedField;
-  fallbackSourceId: string;
-}): StructuredFact[] {
-  if (!fieldSuggestsGroupedValue(opts.field, opts.query)) return [];
-  const groups = requestedShareGroups(opts.query);
-  if (groups.length === 0) return [];
-  const out: StructuredFact[] = [];
-  const seen = new Set<string>();
-  for (const fact of opts.facts) {
-    const sourceId = sourceIdForFact(fact, opts.fallbackSourceId);
-    for (const group of groups) {
-      const groupLetter = group[0];
-      const pattern = new RegExp(
-        `\\b${groupLetter}\\s*(?:Grubu|Group)?\\s+((?:\\d{1,3}(?:[.,]\\d{3})+(?:[.,]\\d+)?|\\d+[.,]\\d+|\\d+)\\s+){2,6}`,
-        "iu",
-      );
-      const match = fact.match(pattern);
-      if (!match?.[0]) continue;
-      const numbers = extractNumbers(match[0]).slice(0, 6);
-      if (numbers.length < 2) continue;
-      const key = `${sourceId}|${group}|${numbers.join("/")}`.toLocaleLowerCase("tr-TR");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        id: `sf_${hashId(key)}`,
-        kind: "table_row",
-        sourceId,
-        field: `${group} Grouped Numeric Values`,
-        value: numbers.join(" / "),
-        unit: unitForValue(numbers.join(" / ")),
-        confidence: numbers.length >= 4 ? "high" : "medium",
-        table: {
-          rowLabel: group,
-          rawRow: match[0].trim(),
-        },
-        provenance: {
-          quote: fact.slice(0, 520),
-          extractor: "share-group-table-v1",
-        },
-      });
-    }
-  }
-  return out;
-}
-
 export function extractTableNumericFacts(input: TableNumericFactExtractionInput): StructuredFact[] {
   const detection = detectAnswerTask(input.query);
   const requestedFields = detection.requestedFields;
@@ -325,19 +286,7 @@ export function extractTableNumericFacts(input: TableNumericFactExtractionInput)
   const seen = new Set<string>();
 
   for (const field of requestedFields) {
-    const groupFacts = extractShareGroupFacts({
-      query: input.query,
-      facts: input.facts,
-      field,
-      fallbackSourceId,
-    });
-    for (const fact of groupFacts) {
-      const key = `${fact.field}|${fact.sourceId}|${fact.value}`.toLocaleLowerCase("tr-TR");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      structuredFacts.push(fact);
-    }
-    if (groupFacts.length > 0) continue;
+    if (!isSpecificRawFallbackField(field)) continue;
     let best: { fact: string; alias: string; numbers: string[]; sourceId: string; columnLabel?: string; score: number } | null = null;
     for (const fact of input.facts) {
       const normalizedFact = normalize(fact);

@@ -20,21 +20,12 @@ import { extractProcedureEvidence } from "./procedureEvidenceExtractor.js";
 import { extractSourceLimitEvidence } from "./sourceLimitEvidenceExtractor.js";
 import { extractTextClaimEvidence } from "./textClaimEvidenceExtractor.js";
 import { extractVisualLayoutEvidence } from "./visualLayoutEvidenceExtractor.js";
-import { cardText, normalizeEvidenceText, queryTokens, sourceEvidenceItem, type ArtifactExtractionInput } from "./evidenceExtractorShared.js";
-
-export interface LegacyEvidenceSeeds {
-  directAnswerFacts?: string[];
-  supportingContext?: string[];
-  usableFacts?: string[];
-  riskFacts?: string[];
-  notSupported?: string[];
-}
+import { cardText, queryTokens, type ArtifactExtractionInput } from "./evidenceExtractorShared.js";
 
 export interface EvidenceExtractorInputV2 {
   query: string;
   cards: EvidenceExtractorCardInput[];
   taskDetection?: AnswerTaskDetection;
-  legacySeeds?: LegacyEvidenceSeeds;
   sourceIds?: string[];
   structuredFacts?: StructuredFact[];
 }
@@ -78,62 +69,6 @@ function uniqueItems(items: EvidenceItem[]): EvidenceItem[] {
     out.push(item);
   }
   return out;
-}
-
-function itemFromLegacyFact(input: {
-  query: string;
-  fact: string;
-  sourceIds: string[];
-  kind: EvidenceItemKind;
-  extractor: string;
-}): EvidenceItem | null {
-  const quote = normalizeEvidenceText(input.fact);
-  if (!quote) return null;
-  const sourceId = input.sourceIds.find((id) => quote.toLocaleLowerCase("tr-TR").includes(id.toLocaleLowerCase("tr-TR"))) ??
-    input.sourceIds[0] ??
-    quote.split(":")[0]?.trim() ??
-    "unknown-source";
-  return sourceEvidenceItem({
-    kind: input.kind,
-    extractor: input.extractor,
-    extraction: {
-      query: input.query,
-      normalizedQuery: input.query,
-      queryTokens: queryTokens(input.query),
-      card: { sourceId, title: sourceId },
-      sourceLabel: sourceId,
-    },
-    quote,
-    confidence: input.kind === "source_limit" ? "medium" : "high",
-  });
-}
-
-function legacySeedItems(input: {
-  query: string;
-  seeds?: LegacyEvidenceSeeds;
-  sourceIds: string[];
-  taskType: AnswerTaskType;
-}): EvidenceItem[] {
-  const requiredKinds = TASK_TO_REQUIRED_EVIDENCE[input.taskType] ?? ["text_fact"];
-  const primaryKind = requiredKinds[0] ?? "text_fact";
-  const values: Array<{ facts?: string[]; kind: EvidenceItemKind; extractor: string }> = [
-    { facts: input.seeds?.directAnswerFacts, kind: primaryKind, extractor: "legacy-direct-fact-adapter-v2" },
-    { facts: input.seeds?.usableFacts, kind: primaryKind, extractor: "legacy-usable-fact-adapter-v2" },
-    { facts: input.seeds?.supportingContext, kind: primaryKind, extractor: "legacy-supporting-fact-adapter-v2" },
-    { facts: input.seeds?.riskFacts, kind: "text_fact", extractor: "legacy-risk-fact-adapter-v2" },
-    { facts: input.seeds?.notSupported, kind: "source_limit", extractor: "legacy-source-limit-adapter-v2" },
-  ];
-  return values.flatMap((entry) =>
-    (entry.facts ?? [])
-      .map((fact) => itemFromLegacyFact({
-        query: input.query,
-        fact,
-        sourceIds: input.sourceIds,
-        kind: entry.kind,
-        extractor: entry.extractor,
-      }))
-      .filter((item): item is EvidenceItem => Boolean(item)),
-  );
 }
 
 function coverageFor(input: {
@@ -243,21 +178,12 @@ export function extractEvidenceV2(input: EvidenceExtractorInputV2): EvidenceExtr
     query: input.query,
     facts: [
       ...input.cards.map((card) => `${card.title || card.sourceId}: ${cardText(card)}`),
-      ...(input.legacySeeds?.directAnswerFacts ?? []),
-      ...(input.legacySeeds?.usableFacts ?? []),
-      ...(input.legacySeeds?.supportingContext ?? []),
       ...items.map((item) => item.quote),
     ],
     sourceIds,
   });
   const structuredFacts = [...(input.structuredFacts ?? []), ...tableStructuredFacts];
   items.push(...structuredFacts.map(evidenceItemFromStructuredFact));
-  items.push(...legacySeedItems({
-    query: input.query,
-    seeds: input.legacySeeds,
-    sourceIds,
-    taskType: taskDetection.taskType,
-  }));
 
   const unique = uniqueItems(items);
   const coverage = coverageFor({ taskDetection, items: unique, structuredFacts });

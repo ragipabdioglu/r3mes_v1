@@ -89,7 +89,7 @@ describe("extractTableNumericFacts", () => {
     expect(structuredFacts).toEqual([]);
   });
 
-  it("splits requested share group cash/rate rows into separate structured facts", () => {
+  it("does not infer grouped rows from raw text without table artifacts", () => {
     const structuredFacts = extractTableNumericFacts({
       query: "KCHOL A Grubu ve B Grubu için nakit tutarı ve oran satırları ne?",
       facts: [
@@ -98,30 +98,48 @@ describe("extractTableNumericFacts", () => {
       sourceIds: ["kchol-doc"],
     });
 
-    expect(structuredFacts.map((fact) => fact.field)).toEqual(
-      expect.arrayContaining(["A Grubu Grouped Numeric Values", "B Grubu Grouped Numeric Values"]),
-    );
-    expect(structuredFacts.find((fact) => fact.field?.startsWith("A Grubu"))?.value).toContain("6,830000");
-    expect(structuredFacts.find((fact) => fact.field?.startsWith("B Grubu"))?.value).toContain("11.258.904.726,02");
+    expect(structuredFacts).toEqual([]);
   });
 
-  it("extracts A/B/C share group rows when all groups are requested", () => {
+  it("uses generic table facts instead of raw row regex when artifact fields match", () => {
     const structuredFacts = extractTableNumericFacts({
-      query: "FROTO A, B ve C grupları için nakit tutarları ve oranları hangi satırlarda geçiyor?",
-      facts: [
-        "FROTO tablo: A Grubu 2.132.563.440 0 3,0940 309,40 B Grubu 5.022.733.697 0 3,6400 364,00 C Grubu 4.979.417.531 0 3,4580 345,80 TOPLAM 12.134.714.668",
+      query: "İlk kalem tutarı ve ikinci kalem tutarı kaç?",
+      facts: [],
+      sourceIds: ["table-doc"],
+      tableFacts: [
+        {
+          tableId: "table-1",
+          fieldId: "ilk_kalem_tutari",
+          label: "İlk Kalem Tutarı",
+          rawValue: "123",
+          valueType: "number",
+          rowLabel: "İlk Kalem",
+          columnLabel: "Tutar",
+          headerPath: ["Nakit Tutar"],
+          sourceId: "table-doc",
+          address: { rowIndex: 1, columnIndex: 1 },
+          provenance: { extractor: "regex_fallback", confidence: 0.86 },
+        },
+        {
+          tableId: "table-1",
+          fieldId: "ikinci_kalem_tutari",
+          label: "İkinci Kalem Tutarı",
+          rawValue: "456",
+          valueType: "number",
+          rowLabel: "İkinci Kalem",
+          columnLabel: "Tutar",
+          headerPath: ["Tutar"],
+          sourceId: "table-doc",
+          address: { rowIndex: 2, columnIndex: 1 },
+          provenance: { extractor: "regex_fallback", confidence: 0.86 },
+        },
       ],
-      sourceIds: ["froto-doc"],
     });
 
-    expect(structuredFacts.map((fact) => fact.field)).toEqual(
-      expect.arrayContaining([
-        "A Grubu Grouped Numeric Values",
-        "B Grubu Grouped Numeric Values",
-        "C Grubu Grouped Numeric Values",
-      ]),
+    expect(structuredFacts.map((fact) => fact.table?.rowLabel)).toEqual(
+      expect.arrayContaining(["İlk Kalem", "İkinci Kalem"]),
     );
-    expect(structuredFacts.find((fact) => fact.field?.startsWith("C Grubu"))?.value).toContain("4.979.417.531");
-    expect(structuredFacts.find((fact) => fact.field?.startsWith("C Grubu"))?.value).toContain("345,80");
+    expect(structuredFacts.find((fact) => fact.table?.rowLabel === "İkinci Kalem")?.value).toBe("456");
+    expect(structuredFacts.every((fact) => fact.sourceId === "table-doc")).toBe(true);
   });
 });

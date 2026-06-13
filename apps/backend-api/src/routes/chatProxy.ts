@@ -78,7 +78,12 @@ import {
 } from "../lib/sourceResolutionPlan.js";
 import type { DomainRoutePlan } from "../lib/queryRouter.js";
 import type { EvidenceExtractorOutput, QueryPlannerOutput } from "../lib/skillPipeline.js";
-import { runQueryPlannerSkill } from "../lib/skillPipeline.js";
+import {
+  evidenceOutputLimitText,
+  evidenceOutputRiskText,
+  evidenceOutputUsableTextFacts,
+  runQueryPlannerSkill,
+} from "../lib/skillPipeline.js";
 import { walletAuthPreHandler } from "../lib/walletAuth.js";
 import {
   assertOperatorCanPayChatFee,
@@ -1058,7 +1063,7 @@ function applyRenderedAnswer(
     expectations: qualityExpectations,
     answerPlan,
     sourceCount: sources.length,
-    evidenceFactCount: retrievalDebug?.evidence?.usableFacts.length ?? answerSpec.facts.length,
+    evidenceFactCount: retrievalDebug?.evidence ? evidenceOutputUsableTextFacts(retrievalDebug.evidence).length : answerSpec.facts.length,
     evidenceBundleItemCount: evidenceBundle?.items.length ?? 0,
     noSourceExpected: sources.length === 0 && !retrievalWasUsed,
   });
@@ -1071,7 +1076,7 @@ function applyRenderedAnswer(
         expectations: qualityExpectations,
         answerPlan,
         sourceCount: sources.length,
-        evidenceFactCount: retrievalDebug?.evidence?.usableFacts.length ?? answerSpec.facts.length,
+        evidenceFactCount: retrievalDebug?.evidence ? evidenceOutputUsableTextFacts(retrievalDebug.evidence).length : answerSpec.facts.length,
         evidenceBundleItemCount: evidenceBundle?.items.length ?? 0,
         noSourceExpected: sources.length === 0 && !retrievalWasUsed,
       });
@@ -1144,7 +1149,7 @@ function applyRenderedAnswer(
       expectations: qualityExpectations,
       answerPlan,
       sourceCount: sources.length,
-      evidenceFactCount: retrievalDebug?.evidence?.usableFacts.length ?? answerSpec.facts.length,
+      evidenceFactCount: retrievalDebug?.evidence ? evidenceOutputUsableTextFacts(retrievalDebug.evidence).length : answerSpec.facts.length,
       evidenceBundleItemCount: evidenceBundle?.items.length ?? 0,
       noSourceExpected: sources.length === 0 && !retrievalWasUsed,
     });
@@ -1703,9 +1708,9 @@ function enrichAnswerWithEvidence(
   evidence: EvidenceExtractorOutput | null,
 ): GroundedMedicalAnswer {
   if (!evidence) return answer;
-  const facts = evidence.usableFacts.map(stripSourcePrefix).filter((value) => Boolean(value) && !isSourceIdentifierLike(value));
-  const redFlags = evidence.redFlags.map(stripSourcePrefix).filter(Boolean);
-  const uncertain = [...evidence.uncertainOrUnusable, ...evidence.missingInfo]
+  const facts = evidenceOutputUsableTextFacts(evidence).map(stripSourcePrefix).filter((value) => Boolean(value) && !isSourceIdentifierLike(value));
+  const redFlags = evidenceOutputRiskText(evidence).map(stripSourcePrefix).filter(Boolean);
+  const uncertain = evidenceOutputLimitText(evidence)
     .map(stripSourcePrefix)
     .filter(Boolean);
   if (answer.answer.trim()) {
@@ -2467,8 +2472,8 @@ export async function registerChatProxyRoutes(app: FastifyInstance) {
       const evidenceBundle = retrieval.evidence?.evidenceBundle ?? compiledEvidence?.evidenceBundle;
       const routeDecisionQuality = {
         sourceCount: retrieval.sources.length,
-        directFactCount: retrieval.evidence?.directAnswerFacts.length ?? retrieval.evidence?.usableFacts.length ?? 0,
-        riskFactCount: retrieval.evidence?.riskFacts.length ?? retrieval.evidence?.redFlags.length ?? 0,
+        directFactCount: retrieval.evidence ? evidenceOutputUsableTextFacts(retrieval.evidence).length : 0,
+        riskFactCount: retrieval.evidence ? evidenceOutputRiskText(retrieval.evidence).length : 0,
         hasUsableGrounding:
           retrieval.sources.length > 0 &&
           (retrieval.groundingConfidence !== "low" || hasCompiledUsableGrounding(compiledEvidence)),

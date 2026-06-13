@@ -2,7 +2,12 @@ import type { KnowledgeCard } from "./knowledgeCard.js";
 import type { GroundingConfidence } from "./answerSchema.js";
 import type { CompiledEvidence } from "./compiledEvidence.js";
 import { hasUsableEvidenceItem, type EvidenceItem } from "./evidenceBundle.js";
-import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import {
+  evidenceOutputLimitText,
+  evidenceOutputRiskText,
+  evidenceOutputUsableTextFacts,
+  type EvidenceExtractorOutput,
+} from "./skillPipeline.js";
 
 interface GroundedBriefOptions {
   lowGroundingConfidence?: boolean;
@@ -55,10 +60,9 @@ export function buildEvidenceGroundedBrief(
   const lines: string[] = [`GROUNDING DURUMU: ${groundingConfidence.toUpperCase()}`];
   lines.push(`CEVAP NIYETI: ${opts.answerIntent ?? evidence.answerIntent}`);
 
-  bulletSection(lines, "KULLANILABILIR GERCEKLER:", evidence.directAnswerFacts, 3);
-  bulletSection(lines, "DESTEKLEYICI BAGLAM:", evidence.supportingContext, 2);
-  bulletSection(lines, "BELIRSIZ / KULLANILAMAYAN:", [...evidence.notSupported, ...evidence.missingInfo], 3);
-  bulletSection(lines, "RED FLAGS:", evidence.riskFacts, 3);
+  bulletSection(lines, "KULLANILABILIR TYPED KANITLAR:", evidenceOutputUsableTextFacts(evidence), 3);
+  bulletSection(lines, "BELIRSIZ / KULLANILAMAYAN:", evidenceOutputLimitText(evidence), 3);
+  bulletSection(lines, "RISK / DIKKAT:", evidenceOutputRiskText(evidence), 3);
 
   if (opts.sourceRefs && opts.sourceRefs.length > 0) {
     lines.push("KAYNAK KIMLIKLARI:");

@@ -1,6 +1,11 @@
 import type { AnswerTaskType } from "./answerTaskDetector.js";
-import { buildEvidenceBundle } from "./evidenceBundle.js";
-import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import {
+  createEmptyEvidenceOutput,
+  evidenceOutputLimitText,
+  evidenceOutputStructuredFacts,
+  evidenceOutputUsableTextFacts,
+  type EvidenceExtractorOutput,
+} from "./skillPipeline.js";
 
 export interface EnsureNoSourceEvidenceInput {
   userQuery: string;
@@ -24,14 +29,12 @@ function unique(values: Array<string | null | undefined>): string[] {
 }
 
 function hasUsableEvidence(evidence: EvidenceExtractorOutput): boolean {
-  return evidence.directAnswerFacts.length > 0 ||
-    evidence.supportingContext.length > 0 ||
-    evidence.usableFacts.length > 0 ||
-    (evidence.structuredFacts?.length ?? 0) > 0;
+  return evidenceOutputUsableTextFacts(evidence).length > 0 ||
+    evidenceOutputStructuredFacts(evidence).length > 0;
 }
 
 export function ensureNoSourceEvidence(input: EnsureNoSourceEvidenceInput): EvidenceExtractorOutput {
-  if (hasUsableEvidence(input.evidence) || input.evidence.notSupported.length > 0) {
+  if (hasUsableEvidence(input.evidence) || evidenceOutputLimitText(input.evidence).length > 0) {
     return input.evidence;
   }
 
@@ -39,32 +42,14 @@ export function ensureNoSourceEvidence(input: EnsureNoSourceEvidenceInput): Evid
     ...input.evidence.sourceIds,
     ...(input.attemptedSourceIds ?? []),
   ]);
-  const notSupported = unique([
-    ...input.evidence.notSupported,
-    "Kaynaklarda bu soru için doğrudan yeterli destek bulunamadı.",
-  ]);
-  const next: EvidenceExtractorOutput = {
-    ...input.evidence,
-    notSupported,
+  return createEmptyEvidenceOutput({
+    userQuery: input.userQuery,
+    sourceIds: attemptedSourceIds,
     missingInfo: unique([
       ...input.evidence.missingInfo,
+      "Kaynaklarda bu soru için doğrudan yeterli destek bulunamadı.",
       "Kaynak desteği sınırlı veya yetersiz.",
     ]),
-    sourceIds: attemptedSourceIds,
-  };
-
-  return {
-    ...next,
-    evidenceBundle: buildEvidenceBundle({
-      userQuery: input.userQuery,
-      textFacts: next.usableFacts,
-      riskFacts: next.riskFacts,
-      notSupported: next.notSupported,
-      structuredFacts: next.structuredFacts,
-      sourceIds: attemptedSourceIds,
-      requestedFieldIds: input.evidence.evidenceBundle?.requestedFieldIds,
-      extractor: "no-source-evidence-v1",
-      taskType: input.taskType,
-    }),
-  };
+    reason: input.taskType ? `no_source_${input.taskType}` : "no_source",
+  });
 }

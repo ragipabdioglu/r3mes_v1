@@ -36,7 +36,16 @@ import {
   type RetrievalPlanV2,
   type HybridCandidatePoolTelemetry,
 } from "./retrievalQualityContracts.js";
-import { getEvidenceExtractorBudget, runEvidenceExtractorSkill, type EvidenceExtractorOutput } from "./skillPipeline.js";
+import {
+  createEmptyEvidenceOutput,
+  evidenceOutputLimitText,
+  evidenceOutputRiskText,
+  evidenceOutputUsableItems,
+  evidenceOutputUsableTextFacts,
+  getEvidenceExtractorBudget,
+  runEvidenceExtractorSkill,
+  type EvidenceExtractorOutput,
+} from "./skillPipeline.js";
 import { buildExpandedQueryText, buildExpandedQueryTokens } from "./turkishQueryNormalizer.js";
 import type { RetrievalBudgetMode } from "./retrievalBudget.js";
 
@@ -87,27 +96,12 @@ function buildNoSourceEvidenceDiagnostics(input: {
   const evidence = ensureNoSourceEvidence({
     userQuery: input.userQuery,
     attemptedSourceIds: input.attemptedSourceIds,
-    evidence: {
-      answerIntent: "unknown",
-      intentResolution: {
-        intent: "unknown",
-        primarySignal: "no_source",
-        confidence: "high",
-        scores: { no_source: 1 },
-        weakIntent: "unknown",
-        reasons: ["no retrieval candidates reached evidence extraction"],
-      },
-      directAnswerFacts: [],
-      supportingContext: [],
-      riskFacts: [],
-      notSupported: [],
-      usableFacts: [],
-      uncertainOrUnusable: [],
-      redFlags: [],
+    evidence: createEmptyEvidenceOutput({
+      userQuery: input.userQuery,
       sourceIds: [],
       missingInfo: [],
-      structuredFacts: [],
-    },
+      reason: "no retrieval candidates reached evidence extraction",
+    }),
   });
   return {
     evidence,
@@ -261,14 +255,10 @@ function relativeScoreFloor(): number {
 }
 
 function evidenceHasOnlyScopeExclusion(evidence: EvidenceExtractorOutput): boolean {
-  if (evidence.usableFacts.length > 0 || evidence.directAnswerFacts.length > 0 || evidence.supportingContext.length > 0) {
+  if (evidenceOutputUsableItems(evidence).length > 0) {
     return false;
   }
-  const notSupported = normalizeConceptText([
-    ...evidence.notSupported,
-    ...evidence.uncertainOrUnusable,
-    ...evidence.missingInfo,
-  ].join(" "));
+  const notSupported = normalizeConceptText(evidenceOutputLimitText(evidence).join(" "));
   return [
     "dogrudan dayanak olmadigini belirtiyor",
     "kaynak degildir",
@@ -278,7 +268,7 @@ function evidenceHasOnlyScopeExclusion(evidence: EvidenceExtractorOutput): boole
 }
 
 function evidenceHasUsableGrounding(evidence: EvidenceExtractorOutput): boolean {
-  return evidence.usableFacts.length > 0 || evidence.directAnswerFacts.length > 0 || evidence.supportingContext.length > 0;
+  return evidenceOutputUsableItems(evidence).length > 0;
 }
 
 function filterSourcesByEvidence(sources: ChatSourceCitation[], evidence: EvidenceExtractorOutput): ChatSourceCitation[] {
@@ -378,10 +368,10 @@ function buildBudgetDiagnostics(opts: {
     evidenceSupportingFactLimit: evidenceBudget.supportingFactLimit,
     evidenceRiskFactLimit: evidenceBudget.riskFactLimit,
     evidenceUsableFactLimit: evidenceBudget.usableFactLimit,
-    evidenceDirectFactCount: opts.evidence?.directAnswerFacts.length ?? 0,
-    evidenceSupportingFactCount: opts.evidence?.supportingContext.length ?? 0,
-    evidenceRiskFactCount: opts.evidence?.riskFacts.length ?? 0,
-    evidenceUsableFactCount: opts.evidence?.usableFacts.length ?? 0,
+    evidenceDirectFactCount: opts.evidence ? evidenceOutputUsableTextFacts(opts.evidence).length : 0,
+    evidenceSupportingFactCount: 0,
+    evidenceRiskFactCount: opts.evidence ? evidenceOutputRiskText(opts.evidence).length : 0,
+    evidenceUsableFactCount: opts.evidence ? evidenceOutputUsableItems(opts.evidence).length : 0,
   };
 }
 
@@ -410,11 +400,7 @@ function toQdrantEmbeddingDiagnostics(embedding: EmbeddingResult): QdrantEmbeddi
 
 function countContradictionSignals(evidence: EvidenceExtractorOutput | null | undefined): number {
   if (!evidence) return 0;
-  const values = [
-    ...evidence.notSupported,
-    ...evidence.uncertainOrUnusable,
-    ...evidence.missingInfo,
-  ];
+  const values = evidenceOutputLimitText(evidence);
   return values.filter((value) => /çeliş|celis|contradict/iu.test(normalizeConceptText(value))).length;
 }
 
@@ -1617,10 +1603,9 @@ function renderDetailedEvidenceBrief(
   return [
     `GROUNDING DURUMU: ${opts.groundingConfidence}${opts.lowGroundingConfidence ? " (düşük güven; kesin konuşma)" : ""}`,
     `CEVAP NIYETI: ${evidence.answerIntent}`,
-    section("DOGRUDAN CEVAP KANITLARI:", evidence.directAnswerFacts.slice(0, budget.directFactLimit)),
-    section("DESTEKLEYICI BAGLAM:", evidence.supportingContext.slice(0, budget.supportingFactLimit)),
-    section("BELIRSIZ / KULLANILAMAYAN:", evidence.notSupported.slice(0, budget.notSupportedLimit)),
-    section("RED FLAGS:", evidence.riskFacts.slice(0, budget.riskFactLimit)),
+    section("KULLANILABILIR TYPED KANITLAR:", evidenceOutputUsableTextFacts(evidence).slice(0, budget.directFactLimit)),
+    section("BELIRSIZ / KULLANILAMAYAN:", evidenceOutputLimitText(evidence).slice(0, budget.notSupportedLimit)),
+    section("RISK / DIKKAT:", evidenceOutputRiskText(evidence).slice(0, budget.riskFactLimit)),
     section("KAYNAK KIMLIKLARI:", evidence.sourceIds.slice(0, budget.sourceIdLimit)),
   ].filter(Boolean).join("\n\n");
 }
@@ -2507,7 +2492,7 @@ export async function retrieveKnowledgeContextTrueHybrid(opts: {
             answerIntent: evidenceOutput.answerIntent,
             sourceRefs,
           })
-        : evidenceOutput.usableFacts.length > 0 || evidenceOutput.notSupported.length > 0
+        : evidenceOutputUsableItems(evidenceOutput).length > 0 || evidenceOutputLimitText(evidenceOutput).length > 0
         ? buildEvidenceGroundedBrief(evidenceOutput, {
             groundingConfidence,
             lowGroundingConfidence,

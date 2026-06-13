@@ -9,7 +9,13 @@ import {
   type EvidenceItemKind,
 } from "./evidenceBundle.js";
 import { fieldTextMatchesFact } from "./fieldCoverageResolver.js";
-import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import {
+  evidenceOutputLimitText,
+  evidenceOutputRiskText,
+  evidenceOutputStructuredFacts,
+  evidenceOutputUsableTextFacts,
+  type EvidenceExtractorOutput,
+} from "./skillPipeline.js";
 import type { StructuredFact } from "./structuredFact.js";
 
 export type CompiledEvidenceConfidence = "low" | "medium" | "high";
@@ -505,19 +511,13 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV
   const decisionConfig = getDecisionConfig();
   const budget = decisionConfig.evidenceBudget;
   const evidenceBundle = evidence?.evidenceBundle;
-  const rawFacts = uniqueText([
-    ...(evidence?.directAnswerFacts ?? []),
-    ...(evidence?.usableFacts ?? []),
-    ...(evidence?.supportingContext ?? []),
-  ]);
-  const rawRisks = uniqueText([...(evidence?.riskFacts ?? []), ...(evidence?.redFlags ?? [])]);
+  const rawFacts = uniqueText(evidenceOutputUsableTextFacts(evidence));
+  const rawRisks = uniqueText(evidenceOutputRiskText(evidence));
   const rawUnknowns = uniqueText([
-    ...(evidence?.missingInfo ?? []),
-    ...(evidence?.notSupported ?? []),
-    ...(evidence?.uncertainOrUnusable ?? []),
+    ...evidenceOutputLimitText(evidence),
   ]);
   const facts = rawFacts.slice(0, budget.usableFactLimit);
-  const structuredFacts = uniqueStructuredFacts(evidence?.structuredFacts ?? []).slice(0, budget.usableFactLimit);
+  const structuredFacts = uniqueStructuredFacts(evidenceOutputStructuredFacts(evidence)).slice(0, budget.usableFactLimit);
   const risks = rawRisks.slice(0, budget.riskFactLimit);
   const unknowns = rawUnknowns.slice(0, budget.notSupportedLimit);
   const contradictions = uniqueText(

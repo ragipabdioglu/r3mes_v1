@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildDeterministicEvidenceExtraction,
   buildDeterministicQueryPlan,
+  evidenceOutputUsableTextFacts,
   getEvidenceExtractorBudget,
   resolveAnswerIntent,
   runEvidenceExtractorSkill,
@@ -10,267 +11,105 @@ import {
 } from "./skillPipeline.js";
 
 describe("skill pipeline query planner", () => {
-  it("expands short abdominal pain queries into retrieval-ready symptom searches", () => {
-    const plan = buildDeterministicQueryPlan({ userQuery: "karnım ağrıyor", language: "tr" });
+  it("derives expected evidence type from the generic query task contract", () => {
+    const plan = buildDeterministicQueryPlan({ userQuery: "Desteklenen özellikleri madde madde yaz.", language: "tr" });
 
-    expect(plan.expectedEvidenceType).toBe("symptom_card");
-    expect(plan.routePlan.domain).toBe("medical");
-    expect(plan.routePlan.subtopics).toEqual(expect.arrayContaining(["karin_agrisi"]));
-    expect(plan.searchQueries).toContain("karın ağrısı genel triyaj");
-    expect(plan.searchQueries).toContain("karın ağrısı ateş kusma kanama acil belirtiler");
-    expect(plan.mustIncludeTerms).toEqual(
-      expect.arrayContaining(["karın", "ağrı", "ateş", "kusma", "kanama"]),
-    );
-    expect(plan.retrievalQuery).toContain("karnım ağrıyor");
-    expect(plan.retrievalQuery).toContain("karın ağrısı genel triyaj");
+    expect(plan.expectedEvidenceType).toBe("list");
+    expect(plan.searchQueries).toContain("Desteklenen özellikleri madde madde yaz.");
+    expect(plan.retrievalQuery).toContain("Desteklenen özellikleri madde madde yaz.");
   });
 
-  it("keeps LoRA skill execution behind a stable envelope", async () => {
-    const run = await runQueryPlannerSkill({ userQuery: "akıntım var", language: "tr" });
+  it("keeps query planner execution behind the v2 skill envelope", async () => {
+    const run = await runQueryPlannerSkill({ userQuery: "saveHandler içinde ne yapılıyor?", language: "tr" });
 
     expect(run.skill).toBe("query-planner");
     expect(run.runtime).toBe("deterministic");
-    expect(run.output.routePlan.domain).toBe("medical");
-    expect(run.output.routePlan.subtopics).toContain("akinti");
-    expect(run.output.expectedEvidenceType).toBe("symptom_card");
-    expect(run.output.searchQueries).toContain("vajinal akıntı triyaj");
+    expect(run.output.expectedEvidenceType).toBe("code");
   });
 });
 
 describe("skill pipeline evidence extractor", () => {
-  it("resolves answer intent from query and evidence signals", () => {
+  it("resolves answer intent from query task and typed evidence counts", () => {
     const checklist = resolveAnswerIntent({
-      userQuery: "Production migration öncesi kısa bir kontrol listesi verir misin?",
+      userQuery: "Migration öncesi kısa bir kontrol listesi verir misin?",
       weakIntent: "steps",
       directFactCount: 2,
-      supportingFactCount: 1,
       sourceCount: 1,
     });
 
     expect(checklist.intent).toBe("steps");
-    expect(checklist.primarySignal).toBe("checklist");
+    expect(checklist.primarySignal).toBe("steps");
     expect(checklist.confidence).toBe("high");
-    expect(checklist.reasons).toEqual(expect.arrayContaining(["query asks for checklist/list output"]));
+    expect(checklist.reasons).toEqual(expect.arrayContaining(["intent derived from query contract and typed evidence"]));
 
     const noSource = resolveAnswerIntent({
       userQuery: "Bu belgeye göre kesin sonuç nedir?",
       weakIntent: "explain",
       directFactCount: 0,
-      supportingFactCount: 0,
       missingInfoCount: 1,
       sourceCount: 0,
     });
 
     expect(noSource.primarySignal).toBe("no_source");
     expect(noSource.intent).toBe("unknown");
-    expect(noSource.reasons).toEqual(expect.arrayContaining(["no directly usable evidence was found"]));
+    expect(noSource.reasons).toEqual(expect.arrayContaining(["no usable typed evidence was found"]));
   });
 
   it("reads evidence extractor budgets from config", () => {
-    vi.stubEnv("R3MES_EVIDENCE_DIRECT_FACT_LIMIT", "2");
     vi.stubEnv("R3MES_EVIDENCE_USABLE_FACT_LIMIT", "3");
 
     expect(getEvidenceExtractorBudget()).toMatchObject({
-      directFactLimit: 2,
       usableFactLimit: 3,
     });
 
     vi.unstubAllEnvs();
   });
 
-  it("infers action intent from preparation questions before generic risk wording", () => {
-    expect(
-      resolveAnswerIntent({
-        userQuery: "Production migration öncesi ne yapmalıyım? Riskleri abartmadan açıkla.",
-      }).intent,
-    ).toBe("steps");
-
-    expect(
-      resolveAnswerIntent({
-        userQuery: "Boşanma davası için hangi belgeleri hazırlamalıyım?",
-      }).intent,
-    ).toBe("steps");
-
-    expect(
-      resolveAnswerIntent({
-        userQuery: "Trafik cezasına itiraz etmek istiyorum. Süre ve belge açısından neye dikkat etmeliyim?",
-      }).intent,
-    ).toBe("steps");
-
-    expect(
-      resolveAnswerIntent({
-        userQuery: "Boşanma sürecinde mal paylaşımı için hangi kayıtları toplamam gerekir?",
-      }).intent,
-    ).toBe("steps");
-
-    expect(
-      resolveAnswerIntent({
-        userQuery: "Özel eğitim için RAM raporu ve BEP planı hakkında okulda ne sormalıyım?",
-      }).intent,
-    ).toBe("steps");
-  });
-
-  it("turns retrieved cards into compact usable evidence and limits unsafe inference", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Smear temiz ama kasık ağrım var",
-      cards: [
-        {
-          sourceId: "doc-1",
-          title: "smear-kasik-karti",
-          clinicalTakeaway:
-            "Temiz smear iyi bir bulgudur, ancak kasık ağrısını tek başına açıklamaz.",
-          safeGuidance:
-            "Ağrı sürüyor veya artıyorsa kadın hastalıkları değerlendirmesi uygundur.",
-          redFlags: "Şiddetli ağrı, ateş veya anormal kanama varsa daha hızlı değerlendirme gerekir.",
-          doNotInfer: "Soruda açık dayanak yoksa CA-125 veya ileri tetkik gerekliliği çıkarma.",
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("Temiz smear iyi bir bulgudur"),
-      ]),
-    );
-    expect(extraction.supportingContext).toEqual(
-      expect.arrayContaining([expect.stringContaining("Ağrı sürüyor veya artıyorsa")]),
-    );
-    expect(extraction.redFlags).toEqual(expect.arrayContaining([expect.stringContaining("Şiddetli ağrı")]));
-    expect(extraction.uncertainOrUnusable).toEqual(
-      expect.arrayContaining([expect.stringContaining("CA-125")]),
-    );
-    expect(extraction.intentResolution.intent).toBe("triage");
-    expect(extraction.intentResolution.reasons).toEqual(expect.arrayContaining(["retrieved evidence contains risk facts"]));
-    expect(extraction.sourceIds).toContain("doc-1");
-  });
-
-  it("keeps evidence extraction behind the same stable skill envelope", async () => {
-    const run = await runEvidenceExtractorSkill({
-      userQuery: "karın ağrısı var",
-      cards: [{ sourceId: "doc-2", title: "karin-karti", safeGuidance: "Karın ağrısının şiddeti izlenmelidir." }],
-    });
-
-    expect(run.skill).toBe("evidence-extractor");
-    expect(run.runtime).toBe("deterministic");
-    expect(run.output.usableFacts).toContain("karin-karti: Karın ağrısının şiddeti izlenmelidir.");
-  });
-
-  it("does not promote weak generic guidance without enough query overlap", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Bebeğim çok terliyor neden olabilir?",
-      cards: [
-        {
-          sourceId: "doc-generic",
-          title: "generic",
-          clinicalTakeaway: "Genel değerlendirme gerekebilir.",
-          safeGuidance: "Belirtiler devam ederse uygun uzmana başvurulmalıdır.",
-          doNotInfer: "Kaynakta açık dayanak yoksa neden uydurma.",
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts).toEqual([]);
-    expect(extraction.missingInfo).toEqual(
-      expect.arrayContaining(["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]),
-    );
-  });
-
-  it("keeps nearby list items when a matching heading carries the query terms", () => {
+  it("extracts typed list evidence without legacy supporting or risk buckets", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Sistemin temel bileşenleri nelerdir?",
       cards: [
         {
           sourceId: "generic-system-components",
           title: "generic-system-components",
-          patientSummary: [
-            "• Algılama: Ortamdan veri toplar.",
-            "• Bağlantı: Veriyi merkeze iletir.",
-            "• İşleme: Gelen veriyi analiz eder.",
-            "Sistemin Temel Bileşenleri başlığı altında bu adımlar listelenir.",
+          rawContent: [
+            "Sistemin Temel Bileşenleri:",
+            "- Algılama: Ortamdan veri toplar.",
+            "- Bağlantı: Veriyi merkeze iletir.",
+            "- İşleme: Gelen veriyi analiz eder.",
           ].join("\n"),
         },
       ],
     });
 
-    expect(extraction.usableFacts).toEqual(expect.arrayContaining([
-      expect.stringContaining("Algılama"),
-      expect.stringContaining("Bağlantı"),
-    ]));
+    const joined = evidenceOutputUsableTextFacts(extraction).join(" ");
+    expect(joined).toContain("Algılama");
+    expect(joined).toContain("Bağlantı");
     expect(extraction.evidenceBundle?.diagnostics.kindCounts.list_item).toBeGreaterThanOrEqual(2);
     expect(extraction.missingInfo).toEqual([]);
   });
 
-  it("materializes inline bullets near a matching heading as list evidence", () => {
+  it("keeps method body details as typed code evidence", () => {
     const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Desteklenen proje türlerini madde madde yaz.",
-      cards: [
-        {
-          sourceId: "generic-project-types",
-          title: "generic-project-types",
-          rawContent:
-            "Desteklenen proje türleri: • Desktop application • Web application • Console application • Shared library",
-        },
-      ],
-    });
-
-    const joined = extraction.usableFacts.join(" ");
-    expect(joined).toContain("Desktop application");
-    expect(joined).toContain("Web application");
-    expect(joined).toContain("Console application");
-    expect(extraction.evidenceBundle?.diagnostics.kindCounts.list_item).toBeGreaterThanOrEqual(3);
-  });
-
-  it("prioritizes concise list items over heading prose inside list evidence budget", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Desteklenen çıktı türlerini madde madde yaz.",
-      cards: [
-        {
-          sourceId: "generic-output-types",
-          title: "generic-output-types",
-          rawContent: [
-            "Platform uzun bir açıklama cümlesiyle farklı geliştirme araçlarının ne işe yaradığını anlatır.",
-            "Desteklenen çıktı türleri: çıktı türleri aşağıdaki seçeneklerden oluşur.",
-            "• Desktop output",
-            "• Web output",
-            "• Console output",
-            "• Library output",
-            "• Service output",
-          ].join("\n"),
-        },
-      ],
-    });
-
-    const joined = extraction.usableFacts.join(" ");
-    expect(joined).toContain("Desktop output");
-    expect(joined).toContain("Web output");
-    expect(joined).toContain("Console output");
-    expect(joined).toContain("Library output");
-    expect(joined).toContain("Service output");
-    expect(joined).not.toContain("uzun bir açıklama");
-  });
-
-  it("keeps method body details as code evidence for handler explanation questions", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "saveButton_Click içinde ne yapılıyor?",
+      userQuery: "saveHandler içinde ne yapılıyor?",
       cards: [
         {
           sourceId: "generic-handler-source",
           title: "generic-handler-source",
           rawContent:
-            "private void saveButton_Click(object sender, EventArgs e) { // The handler validates the input. if (nameTextBox.Text.Length > 0) { itemList.Items.Add(nameTextBox.Text); } nameTextBox.Clear(); nameTextBox.Focus(); }",
+            "function saveHandler() { if (input.value.length > 0) { list.push(input.value); } input.value = ''; input.focus(); }",
         },
       ],
     });
 
-    const joined = extraction.usableFacts.join(" ");
-    expect(joined).toContain("saveButton_Click");
-    expect(joined).toContain("nameTextBox.Text.Length");
-    expect(joined).toContain("itemList.Items.Add");
-    expect(joined).toContain("nameTextBox.Focus");
+    const joined = evidenceOutputUsableTextFacts(extraction).join(" ");
+    expect(joined).toContain("saveHandler");
+    expect(joined).toContain("input.value.length");
+    expect(joined).toContain("list.push");
     expect(extraction.evidenceBundle?.diagnostics.kindCounts.code_fact).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps adjacent subject context for comparison evidence", () => {
+  it("extracts adjacent subject context for generic comparison evidence", () => {
     const extraction = buildDeterministicEvidenceExtraction({
       userQuery: "Alpha ile Beta arasındaki fark nedir?",
       cards: [
@@ -278,408 +117,49 @@ describe("skill pipeline evidence extractor", () => {
           sourceId: "generic-comparison-source",
           title: "generic-comparison-source",
           rawContent:
-            "Beta nesnesi gelişmiş içeriklerle çalışabilen bir kutudur. Alpha'ya göre biçimlendirilebilir metin, aktif bağlantı ve medya gibi farkları vardır.",
+            "Beta nesnesi gelişmiş içeriklerle çalışır. Alpha'ya göre biçimlendirilebilir metin, aktif bağlantı ve medya gibi farkları vardır.",
         },
       ],
     });
 
-    const joined = extraction.usableFacts.join(" ");
-    expect(joined).toContain("Beta nesnesi");
+    const joined = evidenceOutputUsableTextFacts(extraction).join(" ");
     expect(joined).toContain("Alpha'ya göre");
     expect(extraction.evidenceBundle?.diagnostics.kindCounts.comparison_point).toBeGreaterThanOrEqual(1);
   });
 
-  it("prioritizes labeled list items over nearby explanatory prose for list questions", () => {
+  it("returns no-source when the v2 extractor finds no usable typed evidence", () => {
     const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Sistemin temel özellikleri nelerdir?",
+      userQuery: "Bambaşka bir konuda kesin cevap nedir?",
       cards: [
         {
-          sourceId: "generic-list-source",
-          title: "generic-list-source",
-          patientSummary: [
-            "• Sistem sadece tek bir özellikten oluşmaz; onu tanımlayan temel özellikler vardır:",
-            "• Algılama: Çevreden veri toplar.",
-            "• Bağlantı: Veriyi merkeze iletir.",
-            "• İşleme: Gelen veriyi analiz eder.",
-            "• Tepki: Sonuca göre çıktı üretir.",
-            "• Değer: Elde edilen sonucu kullanılabilir hale getirir.",
-            "• İşleme özelliği bazı sistemlerde daha ayrıntılı açıklanabilir.",
-          ].join("\n"),
+          sourceId: "unrelated-source",
+          title: "unrelated-source",
+          rawContent: "Bu kaynak sadece farklı bir prosedürün kurulum notlarını içerir.",
         },
       ],
     });
 
-    const joined = extraction.usableFacts.join(" ");
-    expect(joined).toContain("Algılama");
-    expect(joined).toContain("Bağlantı");
-    expect(joined).toContain("İşleme");
-    expect(joined).toContain("Tepki");
-    expect(joined).toContain("Değer");
-    expect(extraction.evidenceBundle?.diagnostics.kindCounts.list_item).toBeGreaterThanOrEqual(5);
-  });
-
-  it("extracts actionable education guidance with inflected query terms", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Özel eğitim desteği için okulda ilk hangi adımları konuşmalıyım?",
-      cards: [
-        {
-          sourceId: "education-special-ram-bep",
-          title: "education-special-ram-bep",
-          clinicalTakeaway:
-            "BEP planı öğrencinin ihtiyacına göre hazırlanır; veli, okul ve rehberlik birimi düzenli değerlendirme ve güncelleme yapmalıdır.",
-          safeGuidance:
-            "Veli rapor, okul görüşmesi, gözlem notu ve BEP hedeflerini saklamalı; belirsizlikte rehberlik servisi veya RAM ile görüşmelidir.",
-          redFlags:
-            "Çocuğun güvenliği, eğitimden kopma, raporun yanlış uygulanması veya ciddi uyum sorunu varsa hızlı okul/RAM değerlendirmesi gerekir.",
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("rehberlik")]));
-    expect(extraction.missingInfo).toEqual([]);
-  });
-
-  it("uses source summaries and canonical Turkish tokens for legal knowledge cards", () => {
-    const deposit = buildDeterministicEvidenceExtraction({
-      userQuery: "Ev sahibi depozitomu iade etmiyor. Elimde sözleşme ve dekont var, ilk ne yapmalıyım?",
-      cards: [
-        {
-          sourceId: "multi-legal-rent-deposit",
-          title: "multi-legal-rent-deposit",
-          patientSummary:
-            "Kiracı depozitonun iadesi için sözleşme, ödeme dekontu, teslim tutanağı ve yazışmaları saklamalıdır.",
-          clinicalTakeaway:
-            "Depozito uyuşmazlığında sözleşme hükümleri, hasar tespiti, ödeme kaydı ve teslim tarihi birlikte değerlendirilir.",
-          safeGuidance:
-            "Kişi belgeleri düzenlemeli, yazılı başvuru yapmalı ve hak kaybı riski varsa avukat veya yetkili kurumdan destek almalıdır.",
-        },
-      ],
-    });
-
-    expect(deposit.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("depozitonun iadesi")]));
-    expect(deposit.missingInfo).toEqual([]);
-
-    const protocol = buildDeterministicEvidenceExtraction({
-      userQuery: "Anlaşmalı boşanma protokolünde hangi başlıkları netleştirmeliyim? Kısa açıkla.",
-      cards: [
-        {
-          sourceId: "legal-divorce-agreed-protocol",
-          title: "legal-divorce-agreed-protocol",
-          patientSummary:
-            "Anlaşmalı boşanma protokolünde velayet, nafaka, mal paylaşımı, kişisel ilişki, masraf ve taraf iradeleri açık yazılmalıdır.",
-          clinicalTakeaway:
-            "Protokolün eksik veya belirsiz olması süreçte uyuşmazlık doğurabilir; imza öncesi belgeler ve anlaşma maddeleri birlikte kontrol edilmelidir.",
-        },
-      ],
-    });
-
-    expect(protocol.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("velayet, nafaka")]));
-    expect(protocol.missingInfo).toEqual([]);
-  });
-
-  it("extracts evidence from technical runbook style raw sections", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Production migration öncesi hangi kontrolleri yapmalıyım?",
-      cards: [
-        {
-          sourceId: "runbook-1",
-          title: "db-migration-runbook",
-          rawContent: `# DB Migration Runbook
-
-Checklist:
-- Production migration öncesi yedek alınmalı, staging çıktısı doğrulanmalı ve rollback planı hazır olmalıdır.
-
-Risks:
-- Yedeksiz işlem veya veri silen komutlar yüksek risklidir.
-
-Limitations:
-- Ortama özel bağlantı ayarı kaynakta yoksa uydurulmamalıdır.`,
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("yedek alınmalı")]));
-    expect(extraction.redFlags).toEqual(expect.arrayContaining([expect.stringContaining("Yedeksiz işlem")]));
-    expect(extraction.uncertainOrUnusable).toEqual(expect.arrayContaining([expect.stringContaining("bağlantı ayarı")]));
-    expect(extraction.missingInfo).toEqual([]);
-  });
-
-  it("does not promote contradictory evidence as usable facts", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Production migration öncesi rollback planı gerekli mi?",
-      cards: [
-        {
-          sourceId: "runbook-a",
-          title: "runbook-a",
-          rawContent: `Checklist:
-Rollback planı production migration öncesi gerekli ve hazır olmalıdır.`,
-        },
-        {
-          sourceId: "runbook-b",
-          title: "runbook-b",
-          rawContent: `Checklist:
-Rollback planı production migration öncesi gerekli değil, doğrudan migration yapılabilir.`,
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts).toEqual([]);
-    expect(extraction.notSupported).toEqual(expect.arrayContaining([expect.stringContaining("Çelişen kaynak bilgisi")]));
-    expect(extraction.missingInfo).toEqual(
-      expect.arrayContaining(["Kaynaklar arasında çelişki olduğu için doğrudan öneri çıkarılmadı."]),
-    );
-  });
-
-  it("flags contradiction wording from retrieved cards instead of smoothing it over", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Production migration için rollback planı gerekli mi?",
-      cards: [
-        {
-          sourceId: "safe",
-          title: "safe-runbook",
-          rawContent: `Key Takeaway: Rollback planı olmadan production migration çalıştırılmamalıdır.`,
-        },
-        {
-          sourceId: "unsafe",
-          title: "unsafe-runbook",
-          rawContent: `Key Takeaway: Rollback planı production migration için gerekli değildir iddiası diğer kaynakla çelişir.`,
-        },
-      ],
-    });
-
-    expect(extraction.notSupported.join(" ")).toContain("çeliş");
-    expect(extraction.usableFacts.join(" ")).not.toContain("gerekli değildir");
-  });
-
-  it("detects migration safety contradictions across different wording", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Migration güvenli mi değil mi tek doğru varmış gibi konuşmadan söyle.",
-      cards: [
-        {
-          sourceId: "safe-runbook",
-          title: "safe-runbook",
-          rawContent: "Key Takeaway: Production migration öncesinde yedek almak, staging denemesi yapmak, rollback planını yazmak ve logları izlemek gerekir.",
-        },
-        {
-          sourceId: "legacy-note",
-          title: "legacy-note",
-          rawContent: "Key Takeaway: Eski not, küçük migrationlarda yedek ve rollback planına gerek olmadığını iddia eder.",
-        },
-      ],
-    });
-
-    expect(extraction.notSupported.join(" ")).toContain("Çelişen kaynak bilgisi");
-    expect(extraction.notSupported.join(" ")).toContain("migration");
-  });
-
-  it("extracts markdown table rows as readable evidence fragments", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Migration öncesi yedek ve rollback için ne kontrol edilmeli?",
-      cards: [
-        {
-          sourceId: "table-runbook",
-          title: "table-runbook",
-          rawContent: `Checklist:
-| Kontrol | Yapılacak |
-| --- | --- |
-| Yedek | Migration öncesi yedek alınmalı |
-| Rollback | Rollback planı hazır olmalı |`,
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("Yedek - Migration öncesi yedek")]));
-    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("Rollback - Rollback planı")]));
-    expect(extraction.missingInfo).toEqual([]);
-  });
-
-  it("extracts finance table rows that answer numeric line-item questions", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "SPK'ya göre net dönem kârı kaç görünüyor?",
-      cards: [
-        {
-          sourceId: "kap-dividend-table",
-          title: "KAP Kar Dağıtım Tablosu",
-          rawContent:
-            "Source Summary: 7.000.000.000 5.762.623.738 SPK’ya Göre Yasal Kayıtlara (YK) Göre 3. Dönem Kârı 3.497.911.571 (3.777.110.075) 4. Vergiler ( - ) 2.986.110.462 - 5. Net Dönem Kârı ( = ) 511.801.109 (3.777.110.075) 6. Geçmiş Yıllar Zararları ( - ) - 8. NET DAĞITILABİLİR DÖNEM KARI (=) 511.801.109 (3.777.110.075) 9. Yıl içinde yapılan bağışlar ( + ) 67.350.354 -",
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts.join(" ")).toContain("Net Dönem Kârı");
-    expect(extraction.usableFacts.join(" ")).toContain("511.801.109");
-    expect(extraction.missingInfo).toEqual([]);
-  });
-
-  it("keeps separate requested finance table line items inside the evidence budget", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Dönem kârı ve net dönem kârı kaç? EREGL veya FROTO rakamlarını kullanma.",
-      cards: [
-        {
-          sourceId: "kap-kchol-dividend-table",
-          title: "KCHOL Kar Payı Dağıtım Tablosu",
-          rawContent:
-            "Source Summary: SPK'ya Göre Yasal Kayıtlara Göre 1. Ödenmiş Sermaye 7.000.000.000 5.762.623.738 2. Genel Kanuni Yedek Akçe 3.112.991.000 3. Dönem Kârı 87.713.503.000,00 44.999.997.398,02 4. Vergiler 65.713.002.000,00 1.787.670.432,02 5. Net Dönem Kârı (=) 22.000.501.000,00 43.212.326.966,00 8. NET DAĞITILABİLİR DÖNEM KÂRI (=) 22.000.501.000,00 43.212.326.966,00",
-        },
-      ],
-    });
-
-    const directFacts = extraction.directAnswerFacts.join(" ");
-    expect(directFacts).toContain("3. Dönem Kârı");
-    expect(directFacts).toContain("87.713.503.000");
-    expect(directFacts).toContain("5. Net Dönem Kârı");
-    expect(directFacts).toContain("22.000.501.000");
-    expect(extraction.missingInfo).toEqual([]);
-  });
-
-  it("uses source titles as evidence for multilingual disclosure matching questions", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "EREGL 1576833 için Türkçe tablo ile İngilizce profit distribution table aynı bildirim indeksine mi ait? Kaynak başlıklarına göre cevapla.",
-      cards: [
-        {
-          sourceId: "tr-doc",
-          title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Yılı Kar Dağıtım Tablosu.pdf",
-          rawContent: "Source Summary: 5. Net Dönem Kârı 511.801.109",
-        },
-        {
-          sourceId: "en-doc",
-          title: "EREGL 1576833 Kar Payı Dağıtım İşlemlerine İlişkin Bildirim Erdemir 2025 Profit Distribution Table.pdf",
-          rawContent: "Source Summary: 5. Net Profit for the Period 511.801.109",
-        },
-      ],
-    });
-
-    const facts = extraction.directAnswerFacts.join(" ");
-    expect(facts).toContain("1576833");
-    expect(facts).toContain("Türkçe kaynak başlığı");
-    expect(facts).toContain("İngilizce kaynak başlığı");
-  });
-
-  it("promotes dense share group table rows for bonus share and rate questions", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "EREGL 1576833 İngilizce profit distribution table içinde A ve B grubu için bonus shares ve rate bilgisi ne görünüyor?",
-      cards: [
-        {
-          sourceId: "eregl-en-table",
-          title: "EREGL 1576833 Profit Distribution Table.pdf",
-          rawContent:
-            "Source Summary: General Legal Reserves CASH (TL) BONUS SHARES (TL) RATE (%) AMOUNT (TL) RATE (%) A 0,07 - 0,000000 0,467500 46,75 B 3.272.500.000 - 77,916667 0,467500 46,75 TOTAL 3.272.500.000 - 77,916667 0,467500 46,75 5. Net Profit for the Period 511.801.109",
-        },
-      ],
-    });
-
-    const firstDirectFact = extraction.directAnswerFacts[0] ?? "";
-    const directFacts = extraction.directAnswerFacts.join(" ");
-    expect(firstDirectFact).toContain("BONUS SHARES");
-    expect(directFacts).toContain("BONUS SHARES");
-    expect(directFacts).toContain("A 0,07");
-    expect(directFacts).toContain("46,75");
-    expect(directFacts).toContain("B 3.272.500.000");
-  });
-
-  it("prefers complete actionable document snippets over PDF headings and clipped fragments", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",
-      cards: [
-        {
-          sourceId: "meb-veli",
-          title: "MEB Veli Bilgilendirme Rehberi",
-          rawContent: `## Kullanılabilir Bilgiler
-VELİ BİLGİLENDİRME REHBERİ 13 ÖNEMSEYİNİZ!
-## Page 16 VELİ BİLGİLENDİRME REHBERİ 15 • Doğru ve güvenilir kaynaklardan bilgi edinerek salgın hastalıklar konusunda öğrencimizi bilinçlendiriniz.(*) • Bakanlığımız ve yetkili kurumlarca yapılan açıklamaları takip ediniz.
-Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.`,
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts[0]).toContain("Yüksek ateş");
-    expect(extraction.usableFacts[0]).toContain("okuluna göndermeyiniz");
-    expect(extraction.usableFacts.join(" ")).not.toContain("ÖNEMSEYİNİZ");
-    expect(extraction.usableFacts.join(" ")).not.toContain("…");
-    expect(extraction.usableFacts.join(" ")).not.toMatch(/bilgilendirere(?:\s|$)/u);
-  });
-
-  it("extracts evidence from education markdown headings without card-specific labels", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "RAM raporu sonrası BEP planını okulda nasıl konuşmalıyım?",
-      cards: [
-        {
-          sourceId: "education-raw-1",
-          title: "raw-bep-note",
-          rawContent: `## Kullanılabilir Bilgiler
-RAM raporu sonrası BEP planı okul rehberlik birimi, veli ve öğretmenle birlikte değerlendirilmelidir.
-
-## Ne Yapmalı
-Veli BEP hedeflerini, okul gözlem notlarını ve güncelleme tarihlerini yazılı takip etmelidir.
-
-## Uyarılar
-Raporun yanlış uygulanması veya çocuğun eğitimden kopması hızlı okul/RAM değerlendirmesi gerektirir.
-
-## Kullanılamayan
-Kaynak kesin tanı veya tedavi önerisi vermiyor.`,
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts).toEqual(expect.arrayContaining([expect.stringContaining("BEP planı")]));
-    expect(extraction.supportingContext).toEqual(expect.arrayContaining([expect.stringContaining("BEP hedeflerini")]));
-    expect(extraction.redFlags).toEqual(expect.arrayContaining([expect.stringContaining("Raporun yanlış uygulanması")]));
-    expect(extraction.notSupported).toEqual(expect.arrayContaining([expect.stringContaining("kesin tanı")]));
-    expect(extraction.missingInfo).toEqual([]);
-  });
-
-  it("does not promote unrelated raw sections just because they are present", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Bebeğim çok terliyor neden olabilir?",
-      cards: [
-        {
-          sourceId: "legal-raw-1",
-          title: "traffic-fine-note",
-          rawContent: `Gerçekler: Trafik cezasına itirazda tebliğ tarihi ve başvuru süresi kontrol edilmelidir.
-
-Öneri: Ceza tutanağı ve ödeme belgesi saklanmalıdır.
-
-Dikkat: Süre kaçarsa hak kaybı olabilir.`,
-        },
-      ],
-    });
-
-    expect(extraction.usableFacts).toEqual([]);
-    expect(extraction.answerIntent).toBe("unknown");
+    expect(evidenceOutputUsableTextFacts(extraction)).toEqual([]);
     expect(extraction.intentResolution.primarySignal).toBe("no_source");
     expect(extraction.missingInfo).toEqual(
-      expect.arrayContaining(["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]),
+      expect.arrayContaining(["No usable typed evidence item was found for this query."]),
     );
   });
 
-  it("does not promote source scope exclusions as usable evidence", () => {
-    const extraction = buildDeterministicEvidenceExtraction({
-      userQuery: "Başım ağrıyor, kısa ve sakin ne yapmalıyım?",
+  it("keeps evidence extraction behind the v2 skill envelope", async () => {
+    const run = await runEvidenceExtractorSkill({
+      userQuery: "Desteklenen adımları madde madde yaz.",
       cards: [
         {
-          sourceId: "near-miss",
-          title: "near-miss-abdominal",
-          rawContent: `Source Summary: Bu kart baş ağrısı veya smear sonucu için kaynak değildir.
-
-Safe Guidance: Ağrı şiddetliyse sağlık kuruluşuna başvurulmalıdır.
-
-Do Not Infer: Kaynakta açık dayanak yoksa baş ağrısı nedeni çıkarma.`,
+          sourceId: "doc-steps",
+          title: "doc-steps",
+          rawContent: ["Desteklenen adımlar:", "- Hazırla", "- Çalıştır", "- Doğrula"].join("\n"),
         },
       ],
     });
 
-    expect(extraction.usableFacts).toEqual([]);
-    expect(extraction.sourceIds).toEqual([]);
-    expect(extraction.notSupported.join(" ")).toContain("doğrudan dayanak");
-  });
-
-  it("plans consumer defect wording as legal retrieval", () => {
-    const plan = buildDeterministicQueryPlan({
-      userQuery: "Aldığım ürün bozuk çıktı, satıcı iade almıyor. Fatura ile ne yapmalıyım?",
-    });
-
-    expect(plan.routePlan.domain).toBe("legal");
-    expect(plan.expectedEvidenceType).toBe("guideline");
-    expect(plan.mustIncludeTerms).toEqual(expect.arrayContaining(["fatura", "iade"]));
+    expect(run.skill).toBe("evidence-extractor");
+    expect(run.runtime).toBe("deterministic");
+    expect(run.output.evidenceBundle?.items.length).toBeGreaterThan(0);
   });
 });

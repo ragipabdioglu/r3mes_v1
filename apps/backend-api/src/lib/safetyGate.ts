@@ -18,7 +18,11 @@ import {
   type SafetySeverity,
 } from "./safetyRailRegistry.js";
 import type { SafetyEvidenceSignals } from "./safetyEvidenceSignals.js";
-import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import {
+  evidenceOutputRiskText,
+  evidenceOutputUsableTextFacts,
+  type EvidenceExtractorOutput,
+} from "./skillPipeline.js";
 
 interface SafetyRailCheck {
   id: SafetyRailId;
@@ -284,7 +288,7 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   const evidence = opts.evidence ?? null;
   const routeDecision = opts.sourceSelection?.routeDecision;
   const evidenceSignals = opts.evidenceSignals;
-  const legacyUsableFactCount = evidence?.usableFacts.length ?? opts.answerSpec?.facts.length ?? 0;
+  const legacyUsableFactCount = evidence ? evidenceOutputUsableTextFacts(evidence).length : opts.answerSpec?.facts.length ?? 0;
   const usableFactCount = evidenceSignals
     ? Math.max(
       evidenceSignals.usableEvidenceBundleItemCount,
@@ -293,7 +297,7 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
     )
     : legacyUsableFactCount;
   const hasEvidenceSignals = Boolean(evidenceSignals || evidence || opts.answerSpec);
-  const evidenceRedFlagCount = evidence?.redFlags.length ?? 0;
+  const evidenceRedFlagCount = evidenceOutputRiskText(evidence).length;
   const redFlagCount = evidenceRedFlagCount || opts.answerSpec?.caution.length || 0;
   const finalCandidateCount = readFinalCandidateCount(opts.retrievalDiagnostics);
   const alignmentDiagnostics = readAlignmentDiagnostics(opts.retrievalDiagnostics);
