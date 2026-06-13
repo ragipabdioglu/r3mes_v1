@@ -106,7 +106,7 @@ export function buildCompiledEvidenceBrief(
 
   const typedItems = (evidence.items ?? []).filter(hasUsableEvidenceItem).map(typedEvidenceLine);
   bulletSection(lines, "KULLANILABILIR TYPED KANITLAR:", typedItems, 6);
-  bulletSection(lines, "LEGACY GERCEKLER:", evidence.legacyText?.facts ?? evidence.facts, 4);
+  bulletSection(lines, "TEXT KANITLAR:", evidence.facts, 4);
   bulletSection(lines, "RISK / DIKKAT:", evidence.risks, 3);
   bulletSection(lines, "BELIRSIZ / KULLANILAMAYAN:", evidence.unknowns, 3);
   bulletSection(lines, "CELISKI SINYALLERI:", evidence.contradictions, 2);
@@ -125,7 +125,7 @@ export function buildCompiledEvidenceBrief(
 
   lines.push("YANIT KURALLARI:");
   lines.push("- Öncelikle ev_ id'li typed kanıtlara dayan.");
-  lines.push("- Legacy gerçekleri yalnız typed kanıt yoksa destekleyici kullan.");
+  lines.push("- Text kanıtları yalnız typed kanıt yoksa destekleyici kullan.");
   lines.push("- Riskleri karar gibi değil, dikkat edilmesi gereken durum gibi açıkla.");
   lines.push("- Belirsiz/kullanılamayan bilgiden tanı, karar, süre, fiyat veya neden uydurma.");
   lines.push("- Çelişki sinyali varsa kesin konuşma; kaynaklarda tutarsızlık olduğunu söyle.");

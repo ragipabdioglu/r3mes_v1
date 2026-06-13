@@ -13,7 +13,7 @@ describe("buildEvalDebugContract", () => {
         },
       ],
       evidenceSignals: {
-        legacyUsableFactCount: 1,
+        textEvidenceItemCount: 1,
         usableEvidenceBundleItemCount: 2,
       },
       evidenceBundleDiagnostics: {
@@ -104,12 +104,6 @@ describe("buildEvalDebugContract", () => {
           contradictionFields: [],
           requiredEvidenceTypeMatched: true,
           reasons: ["sufficient_evidence"],
-        },
-        legacyText: {
-          facts: ["Net değer: 42"],
-          risks: [],
-          unknowns: [],
-          contradictions: [],
         },
         confidence: "high",
         coverage: {
@@ -252,7 +246,7 @@ describe("buildEvalDebugContract", () => {
     expect(contract.answerQuality?.passed).toBe(false);
     expect(contract.answerQuality?.findings).toHaveLength(1);
     expect(contract.evidenceSignals).toEqual({
-      legacyUsableFactCount: 1,
+      textEvidenceItemCount: 1,
       usableEvidenceBundleItemCount: 2,
     });
     expect(contract.evidenceBundleDiagnostics?.structuredFactCount).toBe(1);
@@ -288,7 +282,7 @@ describe("buildEvalDebugContract", () => {
         },
         sourceMapCompleteness: 1,
         typedEvidenceRatio: 0.5,
-        legacyFallbackUsed: false,
+        textFallbackUsed: false,
         factLevelDiagnostics: {
           selectedStructuredFactCount: 1,
           bundleKindCounts: {

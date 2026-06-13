@@ -7,7 +7,7 @@ import { countUsableEvidenceItems } from "./evidenceBundle.js";
 import { evidenceOutputUsableTextFacts, type EvidenceExtractorOutput } from "./skillPipeline.js";
 
 export interface SafetyEvidenceSignals {
-  legacyUsableFactCount: number;
+  textEvidenceItemCount: number;
   usableEvidenceBundleItemCount: number;
   selectedStructuredFactCount: number;
   requestedFieldCount: number;
@@ -68,7 +68,7 @@ export function buildSafetyEvidenceSignals(input: BuildSafetyEvidenceSignalsInpu
   const coveredCount = coveredRequestedFieldCount(input, requestedCount);
 
   return {
-    legacyUsableFactCount: input.evidence ? evidenceOutputUsableTextFacts(input.evidence).length : input.answerSpec?.facts.length ?? 0,
+    textEvidenceItemCount: input.evidence ? evidenceOutputUsableTextFacts(input.evidence).length : input.answerSpec?.facts.length ?? 0,
     usableEvidenceBundleItemCount: countUsableEvidenceItems(input.evidenceBundle),
     selectedStructuredFactCount: selectedStructuredFactCount(input),
     requestedFieldCount: requestedCount,

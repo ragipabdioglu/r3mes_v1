@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { buildEvidenceBundle } from "./evidenceBundle.js";
 import { buildCompiledEvidenceBrief, buildEvidenceGroundedBrief, buildGroundedBrief } from "./groundedBrief.js";
 import type { KnowledgeCard } from "./knowledgeCard.js";
 
@@ -38,18 +39,19 @@ describe("buildGroundedBrief", () => {
     const brief = buildEvidenceGroundedBrief(
       {
         answerIntent: "steps",
-        directAnswerFacts: ["source-a: Migration öncesi yedek alınmalıdır."],
-        supportingContext: ["source-a: Staging ortamında denenmelidir."],
-        riskFacts: ["source-a: Yedeksiz işlem risklidir."],
-        notSupported: ["source-a: Kaynakta kesin süre yok."],
-        usableFacts: [
-          "source-a: Migration öncesi yedek alınmalıdır.",
-          "source-a: Staging ortamında denenmelidir.",
-        ],
-        uncertainOrUnusable: ["source-a: Kaynakta kesin süre yok."],
-        redFlags: ["source-a: Yedeksiz işlem risklidir."],
         sourceIds: ["source-a"],
         missingInfo: [],
+        structuredFacts: [],
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Migration adımları nedir?",
+          textFacts: [
+            "Migration öncesi yedek alınmalıdır.",
+            "Staging ortamında denenmelidir.",
+          ],
+          notSupported: ["Kaynakta kesin süre yok."],
+          sourceIds: ["source-a"],
+          taskType: "procedure",
+        }),
       },
       {
         groundingConfidence: "high",
@@ -58,10 +60,8 @@ describe("buildGroundedBrief", () => {
     );
 
     expect(brief).toContain("CEVAP NIYETI: steps");
-    expect(brief).toContain("KULLANILABILIR GERCEKLER:");
-    expect(brief).toContain("DESTEKLEYICI BAGLAM:");
+    expect(brief).toContain("KULLANILABILIR TYPED KANITLAR:");
     expect(brief).toContain("BELIRSIZ / KULLANILAMAYAN:");
-    expect(brief).toContain("RED FLAGS:");
     expect(brief).toContain("source-a: migration-card");
   });
 
@@ -86,7 +86,7 @@ describe("buildGroundedBrief", () => {
     );
 
     expect(brief).toContain("GROUNDING DURUMU: LOW");
-    expect(brief).toContain("LEGACY GERCEKLER:");
+    expect(brief).toContain("TEXT KANITLAR:");
     expect(brief).toContain("RISK / DIKKAT:");
     expect(brief).toContain("CELISKI SINYALLERI:");
     expect(brief).toContain("kesin konuşma");
@@ -95,7 +95,7 @@ describe("buildGroundedBrief", () => {
 
   it("prioritizes typed evidence items in compiled-evidence briefs", () => {
     const brief = buildCompiledEvidenceBrief({
-      facts: ["source-a: Legacy fact."],
+      facts: ["source-a: Text fact."],
       items: [
         {
           id: "ev_typed",
@@ -138,6 +138,6 @@ describe("buildGroundedBrief", () => {
     expect(brief).toContain("EVIDENCE READINESS: answer");
     expect(brief).toContain("KULLANILABILIR TYPED KANITLAR:");
     expect(brief).toContain("[ev_typed] type=definition");
-    expect(brief).toContain("LEGACY GERCEKLER:");
+    expect(brief).toContain("TEXT KANITLAR:");
   });
 });

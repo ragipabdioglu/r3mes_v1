@@ -10,7 +10,7 @@ const source = {
 };
 
 describe("safety evidence signals", () => {
-  it("counts usable evidence bundle items independently from legacy facts", () => {
+  it("counts usable evidence bundle items independently from answer text facts", () => {
     const signals = buildSafetyEvidenceSignals({
       retrievalWasUsed: true,
       sources: [source],
@@ -51,7 +51,7 @@ describe("safety evidence signals", () => {
       },
     });
 
-    expect(signals.legacyUsableFactCount).toBe(0);
+    expect(signals.textEvidenceItemCount).toBe(0);
     expect(signals.usableEvidenceBundleItemCount).toBe(1);
     expect(signals.requestedFieldCount).toBe(1);
     expect(signals.sourceCount).toBe(1);

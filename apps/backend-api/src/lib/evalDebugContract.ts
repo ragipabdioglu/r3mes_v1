@@ -41,7 +41,7 @@ export interface EvalAnswerBaselineDiagnostics {
     evidenceConfidence: EvidenceConfidence | null;
     sourceMapCompleteness: number;
     typedEvidenceRatio: number;
-    legacyFallbackUsed: boolean;
+    textFallbackUsed: boolean;
     factLevelDiagnostics: EvidenceFactLevelDiagnostics | null;
   };
   answerPlan: {
@@ -184,11 +184,11 @@ export function buildEvalDebugContract(input: {
   const sourceMapCompleteness = compiledEvidence?.items?.length
     ? Number((sourceMappedItemCount / compiledEvidence.items.length).toFixed(3))
     : 0;
-  const legacyFactCount = compiledEvidence?.legacyText?.facts.length ?? compiledEvidence?.facts.length ?? 0;
+  const textFactCount = compiledEvidence?.facts.length ?? 0;
   const typedEvidenceRatio = compiledEvidence
-    ? Number((typedUsableCount / Math.max(1, typedUsableCount + legacyFactCount)).toFixed(3))
+    ? Number((typedUsableCount / Math.max(1, typedUsableCount + textFactCount)).toFixed(3))
     : 0;
-  const legacyFallbackUsed = Boolean(compiledEvidence && typedUsableCount === 0 && legacyFactCount > 0);
+  const textFallbackUsed = Boolean(compiledEvidence && typedUsableCount === 0 && textFactCount > 0);
   const composerPath = input.composerDiagnostics?.path ?? input.runtimeLineage?.composer?.path ?? null;
   const plannedComposerUsed = input.composerDiagnostics?.plannedComposerUsed ?? null;
   const fallbackTemplateUsed = input.composerDiagnostics?.fallbackTemplateUsed ?? null;
@@ -245,7 +245,7 @@ export function buildEvalDebugContract(input: {
         evidenceConfidence: compiledEvidence?.evidenceConfidence ?? null,
         sourceMapCompleteness,
         typedEvidenceRatio,
-        legacyFallbackUsed,
+        textFallbackUsed,
         factLevelDiagnostics,
       },
       answerPlan: {

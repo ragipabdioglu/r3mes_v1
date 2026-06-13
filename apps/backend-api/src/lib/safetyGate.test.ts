@@ -255,7 +255,7 @@ describe("deterministic safety gate", () => {
       sources: [source],
       retrievalWasUsed: true,
       evidenceSignals: {
-        legacyUsableFactCount: 0,
+        textEvidenceItemCount: 0,
         usableEvidenceBundleItemCount: 1,
         selectedStructuredFactCount: 0,
         requestedFieldCount: 1,
@@ -366,7 +366,7 @@ describe("deterministic safety gate", () => {
         },
       },
       evidenceSignals: {
-        legacyUsableFactCount: 0,
+        textEvidenceItemCount: 0,
         usableEvidenceBundleItemCount: 1,
         selectedStructuredFactCount: 1,
         requestedFieldCount: 1,
@@ -432,7 +432,7 @@ describe("deterministic safety gate", () => {
         },
       },
       evidenceSignals: {
-        legacyUsableFactCount: 0,
+        textEvidenceItemCount: 0,
         usableEvidenceBundleItemCount: 1,
         selectedStructuredFactCount: 1,
         requestedFieldCount: 1,
@@ -494,7 +494,7 @@ describe("deterministic safety gate", () => {
         },
       },
       evidenceSignals: {
-        legacyUsableFactCount: 1,
+        textEvidenceItemCount: 1,
         usableEvidenceBundleItemCount: 1,
         selectedStructuredFactCount: 0,
         requestedFieldCount: 0,

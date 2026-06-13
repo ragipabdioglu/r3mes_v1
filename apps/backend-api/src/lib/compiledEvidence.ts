@@ -55,13 +55,6 @@ export interface EvidenceAnswerReadiness {
   reasons: string[];
 }
 
-export interface LegacyEvidenceText {
-  facts: string[];
-  risks: string[];
-  unknowns: string[];
-  contradictions: string[];
-}
-
 export interface EvidenceCoverage {
   status: EvidenceCoverageStatus;
   requestedFieldIds: string[];
@@ -113,7 +106,6 @@ export interface CompiledEvidence {
   sourceMap?: EvidenceSourceMap;
   evidenceConfidence?: EvidenceConfidence;
   answerReadiness?: EvidenceAnswerReadiness;
-  legacyText?: LegacyEvidenceText;
   evidenceBundle?: EvidenceBundle;
   coverage?: EvidenceCoverage;
   sufficiency?: EvidenceSufficiencyDecision;
@@ -155,7 +147,6 @@ export interface CompiledEvidenceV2 extends CompiledEvidence {
   sourceMap: EvidenceSourceMap;
   evidenceConfidence: EvidenceConfidence;
   answerReadiness: EvidenceAnswerReadiness;
-  legacyText: LegacyEvidenceText;
   coverage: EvidenceCoverage;
   sufficiency: EvidenceSufficiencyDecision;
 }
@@ -426,20 +417,6 @@ function deriveSourceMap(opts: {
   return { byEvidenceItemId, byStructuredFactId };
 }
 
-function legacyTextFromCompiled(opts: {
-  facts: string[];
-  risks: string[];
-  unknowns: string[];
-  contradictions: string[];
-}): LegacyEvidenceText {
-  return {
-    facts: opts.facts,
-    risks: opts.risks,
-    unknowns: opts.unknowns,
-    contradictions: opts.contradictions,
-  };
-}
-
 function emptyBundleKindCounts(): Record<EvidenceItemKind, number> {
   return Object.fromEntries(EVIDENCE_ITEM_KINDS.map((kind) => [kind, 0])) as Record<EvidenceItemKind, number>;
 }
@@ -568,7 +545,6 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV
     sufficiency,
     contradictionCount: contradictions.length,
   });
-  const legacyText = legacyTextFromCompiled({ facts, risks, unknowns, contradictions });
   const factLevelDiagnostics = deriveFactLevelDiagnostics({
     evidenceBundle,
     facts,
@@ -592,7 +568,6 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV
     sourceMap,
     evidenceConfidence,
     answerReadiness,
-    legacyText,
     evidenceBundle,
     coverage,
     sufficiency,

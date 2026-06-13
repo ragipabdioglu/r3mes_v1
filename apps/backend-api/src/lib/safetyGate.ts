@@ -76,7 +76,7 @@ export interface SafetyGateResult {
     redFlagCount: number;
     finalCandidateCount: number | null;
     answerLength: number;
-    legacyUsableFactCount?: number;
+    textEvidenceItemCount?: number;
     usableEvidenceBundleItemCount?: number;
     selectedStructuredFactCount?: number;
     requestedFieldCount?: number;
@@ -131,7 +131,7 @@ function isSupportedFinanceFactAnswer(opts: {
   evidenceSignals?: SafetyEvidenceSignals;
   sourceCount: number;
   retrievalWasUsed: boolean;
-  legacyUsableFactCount: number;
+  textEvidenceItemCount: number;
 }): boolean {
   if (opts.domain !== "finance" || !opts.retrievalWasUsed || opts.sourceCount === 0) return false;
   if (isFinanceAdvisorySafetyQuestion(opts.query)) return false;
@@ -146,7 +146,7 @@ function isSupportedFinanceFactAnswer(opts: {
     (opts.evidenceSignals?.answerPlanCoverage && opts.evidenceSignals.answerPlanCoverage !== "none") ||
     (opts.evidenceSignals?.usableEvidenceBundleItemCount ?? 0) > 0 ||
     (opts.evidenceSignals?.selectedStructuredFactCount ?? 0) > 0 ||
-    opts.legacyUsableFactCount > 0;
+    opts.textEvidenceItemCount > 0;
   return Boolean(supported && (sourceGrounded || sourceGroundedTask));
 }
 
@@ -166,7 +166,7 @@ function hasCompleteShortSupportedAnswer(opts: {
   const hasUsableEvidence =
     opts.evidenceSignals.usableEvidenceBundleItemCount > 0 ||
     opts.evidenceSignals.selectedStructuredFactCount > 0 ||
-    opts.evidenceSignals.legacyUsableFactCount > 0;
+    opts.evidenceSignals.textEvidenceItemCount > 0;
   const shortOrStructuredFormat =
     opts.answerPlan?.outputFormat === "short" ||
     opts.answerPlan?.outputFormat === "table" ||
@@ -288,14 +288,14 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
   const evidence = opts.evidence ?? null;
   const routeDecision = opts.sourceSelection?.routeDecision;
   const evidenceSignals = opts.evidenceSignals;
-  const legacyUsableFactCount = evidence ? evidenceOutputUsableTextFacts(evidence).length : opts.answerSpec?.facts.length ?? 0;
+  const textEvidenceItemCount = evidence ? evidenceOutputUsableTextFacts(evidence).length : opts.answerSpec?.facts.length ?? 0;
   const usableFactCount = evidenceSignals
     ? Math.max(
       evidenceSignals.usableEvidenceBundleItemCount,
       evidenceSignals.selectedStructuredFactCount,
-      evidenceSignals.legacyUsableFactCount,
+      evidenceSignals.textEvidenceItemCount,
     )
-    : legacyUsableFactCount;
+    : textEvidenceItemCount;
   const hasEvidenceSignals = Boolean(evidenceSignals || evidence || opts.answerSpec);
   const evidenceRedFlagCount = evidenceOutputRiskText(evidence).length;
   const redFlagCount = evidenceRedFlagCount || opts.answerSpec?.caution.length || 0;
@@ -362,7 +362,7 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
     evidenceSignals,
     sourceCount: opts.sources.length,
     retrievalWasUsed: opts.retrievalWasUsed,
-    legacyUsableFactCount,
+    textEvidenceItemCount,
   });
 
   // Judge risky certainty from the final user-visible answer. Intermediate
@@ -455,7 +455,7 @@ export function evaluateSafetyGate(opts: SafetyInput): SafetyGateResult {
       finalCandidateCount,
       answerLength: answerText.length,
       ...(evidenceSignals ? {
-        legacyUsableFactCount: evidenceSignals.legacyUsableFactCount,
+        textEvidenceItemCount: evidenceSignals.textEvidenceItemCount,
         usableEvidenceBundleItemCount: evidenceSignals.usableEvidenceBundleItemCount,
         selectedStructuredFactCount: evidenceSignals.selectedStructuredFactCount,
         requestedFieldCount: evidenceSignals.requestedFieldCount,

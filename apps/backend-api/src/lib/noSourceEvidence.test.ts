@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { buildEvidenceBundle } from "./evidenceBundle.js";
 import { ensureNoSourceEvidence } from "./noSourceEvidence.js";
+import { evidenceOutputLimitText } from "./skillPipeline.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 function evidence(overrides: Partial<EvidenceExtractorOutput> = {}): EvidenceExtractorOutput {
@@ -14,15 +16,10 @@ function evidence(overrides: Partial<EvidenceExtractorOutput> = {}): EvidenceExt
       weakIntent: "grounded_answer",
       reasons: [],
     },
-    directAnswerFacts: [],
-    supportingContext: [],
-    riskFacts: [],
-    notSupported: [],
-    usableFacts: [],
-    uncertainOrUnusable: [],
-    redFlags: [],
     sourceIds: [],
     missingInfo: [],
+    structuredFacts: [],
+    evidenceBundle: buildEvidenceBundle({ userQuery: "Soru" }),
     ...overrides,
   };
 }
@@ -35,19 +32,25 @@ describe("ensureNoSourceEvidence", () => {
       attemptedSourceIds: ["doc-a"],
     });
 
-    expect(output.notSupported.join(" ")).toContain("Kaynaklarda");
+    expect(evidenceOutputLimitText(output).join(" ")).toContain("Kaynaklarda");
     expect(output.missingInfo.join(" ")).toContain("Kaynak deste");
     expect(output.sourceIds).toEqual(["doc-a"]);
-    expect(output.evidenceBundle?.items).toHaveLength(1);
-    expect(output.evidenceBundle?.items[0]).toMatchObject({
-      kind: "source_limit",
-      sourceId: "doc-a",
-      provenance: { extractor: "no-source-evidence-v1" },
+    expect(output.evidenceBundle?.items).toHaveLength(0);
+    expect(output.evidenceBundle?.coverage).toMatchObject({
+      status: "none",
+      reason: "no_source",
     });
   });
 
   it("does not alter evidence that already has usable facts", () => {
-    const original = evidence({ usableFacts: ["doc-a: Kaynakta acik bilgi var."] });
+    const original = evidence({
+      sourceIds: ["doc-a"],
+      evidenceBundle: buildEvidenceBundle({
+        userQuery: "Soru",
+        textFacts: ["Kaynakta acik bilgi var."],
+        sourceIds: ["doc-a"],
+      }),
+    });
 
     expect(ensureNoSourceEvidence({ userQuery: "Soru", evidence: original })).toBe(original);
   });

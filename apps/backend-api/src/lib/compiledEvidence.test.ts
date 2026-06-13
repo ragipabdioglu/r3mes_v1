@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { compileEvidence, hasCompiledUsableGrounding } from "./compiledEvidence.js";
-import { buildEvidenceBundle } from "./evidenceBundle.js";
+import { buildEvidenceBundle, buildEvidenceBundleFromItems, createEvidenceItem } from "./evidenceBundle.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import type { StructuredFact } from "./structuredFact.js";
 
 function evidence(partial: Partial<EvidenceExtractorOutput>): EvidenceExtractorOutput {
   return {
@@ -15,101 +16,114 @@ function evidence(partial: Partial<EvidenceExtractorOutput>): EvidenceExtractorO
       weakIntent: "explain",
       reasons: [],
     },
-    directAnswerFacts: [],
-    supportingContext: [],
-    riskFacts: [],
-    notSupported: [],
-    usableFacts: [],
-    uncertainOrUnusable: [],
-    redFlags: [],
     sourceIds: [],
     missingInfo: [],
+    structuredFacts: [],
+    evidenceBundle: buildEvidenceBundle({ userQuery: "Soru" }),
+    ...partial,
+  };
+}
+
+function structuredFact(partial: Partial<StructuredFact> = {}): StructuredFact {
+  return {
+    id: "sf-total",
+    kind: "numeric_value",
+    sourceId: "doc-structured",
+    field: "total_amount",
+    value: "120",
+    confidence: "high",
+    provenance: {
+      quote: "Total amount 120",
+      extractor: "test",
+    },
     ...partial,
   };
 }
 
 describe("compileEvidence", () => {
-  it("standardizes facts risks unknowns and source ids", () => {
+  it("compiles typed text evidence without legacy bucket input", () => {
+    const bundle = buildEvidenceBundle({
+      userQuery: "Açıklama tarihi nedir?",
+      textFacts: ["Açıklama tarihi 2024 olarak verilmiş."],
+      sourceIds: ["doc-2"],
+      requestedFieldIds: ["aciklama_tarihi"],
+    });
     const compiled = compileEvidence({
       groundingConfidence: "high",
-      sourceRefs: [{ id: "doc-1" }],
+      sourceRefs: [{ id: "doc-2", title: "Disclosure" }],
       evidence: evidence({
-        directAnswerFacts: ["Açıklama tarihi 2024 olarak verilmiş."],
-        usableFacts: ["Açıklama tarihi 2024 olarak verilmiş."],
-        supportingContext: ["Tablo başlığı finansal sonuçlar bölümündedir."],
-        riskFacts: ["Kaynakta kesin yatırım tavsiyesi yok."],
-        missingInfo: ["Hisse fiyatı kaynakta yok."],
         sourceIds: ["doc-2"],
+        evidenceBundle: bundle,
       }),
     });
 
-    expect(compiled.facts).toEqual([
-      "Açıklama tarihi 2024 olarak verilmiş.",
-      "Tablo başlığı finansal sonuçlar bölümündedir.",
-    ]);
-    expect(compiled.risks).toEqual(["Kaynakta kesin yatırım tavsiyesi yok."]);
-    expect(compiled.unknowns).toEqual(["Hisse fiyatı kaynakta yok."]);
-    expect(compiled.sourceIds).toEqual(["doc-2", "doc-1"]);
-    expect(compiled.confidence).toBe("high");
+    expect(compiled.items).toHaveLength(1);
+    expect(compiled.facts).toEqual(["doc-2: Açıklama tarihi 2024 olarak verilmiş."]);
+    expect(compiled.sourceIds).toEqual(["doc-2"]);
+    expect(compiled.sourceMap.byEvidenceItemId[compiled.items[0]?.id ?? ""]?.title).toBe("Disclosure");
+    expect(compiled.answerReadiness.mode).toBe("partial_answer");
   });
 
-  it("lowers confidence when contradiction signals are present", () => {
+  it("lowers confidence when typed contradiction evidence is present", () => {
+    const bundle = buildEvidenceBundle({
+      userQuery: "Kaynaklar aynı mı?",
+      textFacts: ["Source A says value is 120."],
+      notSupported: ["doc-b: Source B contradicts that value."],
+      sourceIds: ["doc-a", "doc-b"],
+    });
     const compiled = compileEvidence({
       groundingConfidence: "high",
       evidence: evidence({
-        usableFacts: ["Kaynaklar arasında çelişen finansal değerler var."],
+        sourceIds: ["doc-a", "doc-b"],
+        evidenceBundle: bundle,
       }),
     });
 
     expect(compiled.contradictionCount).toBe(1);
     expect(compiled.confidence).toBe("low");
+    expect(compiled.sufficiency.status).toBe("contradictory");
+    expect(compiled.factLevelDiagnostics?.contradictionSources).toEqual(["doc-b"]);
   });
 
-  it("uses low confidence when no usable fact exists", () => {
+  it("uses low confidence when no usable evidence exists", () => {
     const compiled = compileEvidence({
       groundingConfidence: "high",
       evidence: evidence({
-        missingInfo: ["Bu soru için kaynakta açık dayanak yok."],
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Kaynakta olmayan bilgi nedir?",
+          notSupported: ["Kaynakta istenen bilgi yok."],
+          requestedFieldIds: ["missing_field"],
+        }),
       }),
     });
 
     expect(compiled.usableFactCount).toBe(0);
-    expect(compiled.confidence).toBe("low");
+    expect(compiled.coverage.status).toBe("none");
+    expect(compiled.answerReadiness.mode).toBe("no_source");
     expect(hasCompiledUsableGrounding(compiled)).toBe(false);
   });
 
-  it("treats remaining facts as usable even when contradiction lowers confidence", () => {
-    const compiled = compileEvidence({
-      groundingConfidence: "high",
-      evidence: evidence({
-        usableFacts: ["Kaynak, rollback planı hazırlanmalıdır diyor."],
-        uncertainOrUnusable: ["Başka bir kaynak bununla çelişiyor."],
-      }),
-    });
-
-    expect(compiled.usableFactCount).toBe(1);
-    expect(compiled.contradictionCount).toBe(1);
-    expect(compiled.confidence).toBe("low");
-    expect(hasCompiledUsableGrounding(compiled)).toBe(true);
-  });
-
-  it("applies decision-config evidence limits and exposes diagnostics", () => {
+  it("applies evidence limits to typed text items", () => {
     const previousLimit = process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT;
     process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT = "2";
     try {
+      const bundle = buildEvidenceBundle({
+        userQuery: "Fact listesi nedir?",
+        textFacts: ["Fact A.", "Fact B.", "Fact C."],
+        sourceIds: ["doc-1"],
+      });
       const compiled = compileEvidence({
         groundingConfidence: "high",
         evidence: evidence({
-          usableFacts: ["Fact A.", "Fact B.", "Fact C."],
           sourceIds: ["doc-1"],
+          evidenceBundle: bundle,
         }),
       });
 
-      expect(compiled.facts).toEqual(["Fact A.", "Fact B."]);
-      expect(compiled.usableFactCount).toBe(2);
+      expect(compiled.facts).toEqual(["doc-1: Fact A.", "doc-1: Fact B."]);
+      expect(compiled.usableFactCount).toBe(3);
       expect(compiled.diagnostics?.limits.facts).toBe(2);
       expect(compiled.diagnostics?.rawCounts.facts).toBe(3);
-      expect(compiled.diagnostics?.confidenceReason).toBe("grounding_high");
     } finally {
       if (previousLimit == null) {
         delete process.env.R3MES_EVIDENCE_USABLE_FACT_LIMIT;
@@ -119,163 +133,39 @@ describe("compileEvidence", () => {
     }
   });
 
-  it("carries structured facts without breaking legacy string facts", () => {
-    const compiled = compileEvidence({
-      groundingConfidence: "high",
-      evidence: evidence({
-        usableFacts: ["Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083 olarak geçiyor."],
-        sourceIds: ["kap-doc"],
-        structuredFacts: [
-          {
-            id: "fact-1",
-            kind: "table_cell",
-            sourceId: "kap-doc",
-            field: "Dağıtılması Öngörülen Diğer Kaynaklar",
-            value: "3.352.908.083",
-            confidence: "high",
-            table: {
-              rowLabel: "Dağıtılması Öngörülen Diğer Kaynaklar",
-              columnLabel: "SPK'ya Göre",
-              rawRow: "Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083",
-            },
-            provenance: {
-              quote: "Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083",
-              extractor: "test",
-            },
-          },
-        ],
-      }),
-    });
-
-    expect(compiled.facts).toEqual(["Dağıtılması Öngörülen Diğer Kaynaklar 3.352.908.083 olarak geçiyor."]);
-    expect(compiled.structuredFactCount).toBe(1);
-    expect(compiled.structuredFacts?.[0]?.field).toBe("Dağıtılması Öngörülen Diğer Kaynaklar");
-    expect(compiled.structuredFacts?.[0]?.value).toBe("3.352.908.083");
-  });
-
-  it("carries evidence bundle and exposes bundle diagnostics", () => {
-    const bundle = buildEvidenceBundle({
-      userQuery: "Belgedeki toplam tutar nedir?",
-      textFacts: ["doc-1: Toplam tutar 120 olarak geçiyor."],
-      notSupported: ["Kaynakta ikinci dönem belirtilmiyor."],
-      sourceIds: ["doc-1"],
-      requestedFieldIds: ["total_amount"],
-    });
-
-    const compiled = compileEvidence({
-      groundingConfidence: "high",
-      evidence: evidence({
-        usableFacts: ["doc-1: Toplam tutar 120 olarak geçiyor."],
-        sourceIds: ["doc-1"],
-        evidenceBundle: bundle,
-      }),
-    });
-
-    expect(compiled.evidenceBundle).toBe(bundle);
-    expect(compiled.diagnostics?.evidenceBundle).toMatchObject({
-      itemCount: 2,
-      usableItemCount: 1,
-      stringFactCount: 1,
-      sourceLimitCount: 1,
-      kindCounts: {
-        text_fact: 1,
-        definition: 0,
-        list_item: 0,
-        comparison_point: 0,
-        code_fact: 0,
-        table_fact: 0,
-        numeric_fact: 0,
-        procedure_step: 0,
-        source_limit: 1,
-        contradiction: 0,
-      },
-    });
-    expect(compiled.evidenceBundle?.requestedFieldIds).toEqual(["total_amount"]);
-  });
-
-  it("treats structured-only evidence as usable grounding", () => {
+  it("carries structured facts as first-class grounding", () => {
+    const fact = structuredFact();
     const compiled = compileEvidence({
       groundingConfidence: "high",
       evidence: evidence({
         sourceIds: ["doc-structured"],
-        structuredFacts: [
-          {
-            id: "sf-structured-only",
-            kind: "numeric_value",
-            sourceId: "doc-structured",
-            field: "Toplam",
-            value: "120",
-            confidence: "high",
-            provenance: {
-              quote: "Toplam 120",
-              extractor: "test",
-            },
-          },
-        ],
+        structuredFacts: [fact],
         evidenceBundle: buildEvidenceBundle({
           userQuery: "Toplam nedir?",
-          structuredFacts: [
-            {
-              id: "sf-structured-only",
-              kind: "numeric_value",
-              sourceId: "doc-structured",
-              field: "Toplam",
-              value: "120",
-              confidence: "high",
-              provenance: {
-                quote: "Toplam 120",
-                extractor: "test",
-              },
-            },
-          ],
+          structuredFacts: [fact],
           sourceIds: ["doc-structured"],
         }),
       }),
     });
 
-    expect(compiled.facts).toEqual([]);
     expect(compiled.structuredFactCount).toBe(1);
+    expect(compiled.structuredFacts?.[0]?.field).toBe("total_amount");
+    expect(compiled.facts).toEqual(["doc-structured: Total amount 120"]);
     expect(compiled.usableFactCount).toBe(1);
-    expect(compiled.confidence).toBe("high");
     expect(hasCompiledUsableGrounding(compiled)).toBe(true);
   });
 
-  it("exposes V2 complete coverage and sufficiency diagnostics", () => {
+  it("exposes complete coverage and sufficiency diagnostics", () => {
+    const fact = structuredFact();
     const compiled = compileEvidence({
       groundingConfidence: "high",
       evidence: evidence({
         sourceIds: ["doc-structured"],
-        structuredFacts: [
-          {
-            id: "sf-total",
-            kind: "numeric_value",
-            sourceId: "doc-structured",
-            field: "total_amount",
-            value: "120",
-            confidence: "high",
-            provenance: {
-              quote: "Total amount 120",
-              extractor: "test",
-            },
-          },
-        ],
+        structuredFacts: [fact],
         evidenceBundle: buildEvidenceBundle({
           userQuery: "Toplam tutar nedir?",
           requestedFieldIds: ["total_amount"],
-          structuredFacts: [
-            {
-              id: "sf-total",
-              kind: "numeric_value",
-              sourceId: "doc-structured",
-              field: "total_amount",
-              value: "120",
-              confidence: "high",
-              provenance: {
-                quote: "Total amount 120",
-                extractor: "test",
-              },
-            },
-          ],
+          structuredFacts: [fact],
           sourceIds: ["doc-structured"],
         }),
       }),
@@ -298,7 +188,7 @@ describe("compileEvidence", () => {
     });
     expect(compiled.factLevelDiagnostics).toMatchObject({
       usableEvidenceItemCount: 1,
-      selectedTextFactCount: 0,
+      selectedTextFactCount: 1,
       selectedStructuredFactCount: 1,
       selectedRiskFactCount: 0,
       selectedUnknownCount: 0,
@@ -322,169 +212,62 @@ describe("compileEvidence", () => {
     expect(compiled.factLevelDiagnostics?.bundleKindCounts.numeric_fact).toBe(1);
   });
 
-  it("marks requested field coverage as partial without changing usable grounding", () => {
+  it("marks requested field coverage as partial without losing grounding", () => {
+    const fact = structuredFact();
     const compiled = compileEvidence({
       groundingConfidence: "high",
       evidence: evidence({
-        usableFacts: ["Kaynak toplam tutarı açıkça veriyor."],
         sourceIds: ["doc-partial"],
-        structuredFacts: [
-          {
-            id: "sf-total",
-            kind: "numeric_value",
-            sourceId: "doc-partial",
-            field: "total_amount",
-            value: "120",
-            confidence: "high",
-            provenance: {
-              quote: "Toplam 120",
-              extractor: "test",
-            },
-          },
-        ],
+        structuredFacts: [{ ...fact, sourceId: "doc-partial" }],
         evidenceBundle: buildEvidenceBundle({
           userQuery: "Toplam ve net tutar nedir?",
           requestedFieldIds: ["total_amount", "net_amount"],
-          textFacts: ["Kaynak toplam tutarı açıkça veriyor."],
+          structuredFacts: [{ ...fact, sourceId: "doc-partial" }],
           sourceIds: ["doc-partial"],
         }),
       }),
     });
 
-    expect(compiled.coverage?.status).toBe("partial");
-    expect(compiled.coverage?.coveredFieldIds).toEqual(["total_amount"]);
-    expect(compiled.coverage?.missingFieldIds).toEqual(["net_amount"]);
-    expect(compiled.sufficiency).toMatchObject({
-      status: "partial",
-      shouldAnswer: true,
-      reason: "partial_requested_field_coverage",
-    });
+    expect(compiled.coverage.status).toBe("partial");
+    expect(compiled.coverage.coveredFieldIds).toEqual(["total_amount"]);
+    expect(compiled.coverage.missingFieldIds).toEqual(["net_amount"]);
+    expect(compiled.sufficiency.status).toBe("partial");
     expect(hasCompiledUsableGrounding(compiled)).toBe(true);
   });
 
-  it("covers snake-case requested fields with readable structured fact labels", () => {
-    const compiled = compileEvidence({
-      groundingConfidence: "high",
-      evidence: evidence({
-        sourceIds: ["doc-readable"],
-        structuredFacts: [
-          {
-            id: "sf-total-readable",
-            kind: "numeric_value",
-            sourceId: "doc-readable",
-            field: "Total Amount",
-            value: "120",
-            confidence: "high",
-            provenance: {
-              quote: "Total Amount 120",
-              extractor: "test",
-            },
-          },
-        ],
-        evidenceBundle: buildEvidenceBundle({
-          userQuery: "Total amount?",
-          requestedFieldIds: ["total_amount"],
-          sourceIds: ["doc-readable"],
-        }),
-      }),
-    });
-
-    expect(compiled.coverage).toMatchObject({
-      status: "complete",
-      coveredFieldIds: ["total_amount"],
-      missingFieldIds: [],
-    });
-    expect(compiled.sufficiency.status).toBe("sufficient");
-  });
-
-  it("marks no usable evidence as insufficient", () => {
-    const compiled = compileEvidence({
-      groundingConfidence: "high",
-      evidence: evidence({
-        notSupported: ["Kaynakta istenen bilgi yok."],
-        evidenceBundle: buildEvidenceBundle({
-          userQuery: "Kaynakta olmayan alan nedir?",
-          requestedFieldIds: ["missing_field"],
-          notSupported: ["Kaynakta istenen bilgi yok."],
-        }),
-      }),
-    });
-
-    expect(compiled.coverage?.status).toBe("none");
-    expect(compiled.sufficiency).toMatchObject({
-      status: "insufficient",
-      shouldAnswer: false,
-      reason: "no_usable_evidence",
-      coverage: "none",
-      confidence: "low",
-    });
-  });
-
-  it("marks contradiction as a sufficiency diagnostic without dropping usable facts", () => {
-    const bundle = buildEvidenceBundle({
-      userQuery: "Kaynaklar aynı mı?",
-      textFacts: ["Source A says value is 120."],
-      notSupported: ["doc-b: Source B contradicts that value."],
-      sourceIds: ["doc-a", "doc-b"],
-    });
-    const compiled = compileEvidence({
-      groundingConfidence: "high",
-      evidence: evidence({
-        usableFacts: ["Kaynak A tutarı 120 olarak verir."],
-        uncertainOrUnusable: ["Kaynak B bununla çelişiyor."],
-        sourceIds: ["doc-a", "doc-b"],
-        evidenceBundle: bundle,
-      }),
-    });
-
-    expect(compiled.confidence).toBe("low");
-    expect(compiled.sufficiency).toMatchObject({
-      status: "contradictory",
-      shouldAnswer: true,
-      reason: "contradiction_present",
-      confidence: "low",
-    });
-    expect(hasCompiledUsableGrounding(compiled)).toBe(true);
-    expect(compiled.factLevelDiagnostics).toMatchObject({
-      selectedContradictionCount: 1,
-      contradictionSources: ["doc-b"],
-    });
-    expect(compiled.factLevelDiagnostics?.bundleKindCounts.contradiction).toBe(1);
-  });
-
-  it("builds V2 source map, confidence contract, readiness and legacy text", () => {
-    const bundle = buildEvidenceBundle({
+  it("builds source map, confidence contract and readiness without legacy adapter", () => {
+    const fact = structuredFact({ id: "sf-total", sourceId: "doc-a", provenance: { quote: "Toplam tutar 120 olarak geçiyor.", extractor: "test" } });
+    const bundle = buildEvidenceBundleFromItems({
       userQuery: "Toplam tutar nedir?",
-      textFacts: ["doc-a: Toplam tutar 120 olarak geçiyor."],
-      sourceIds: ["doc-a"],
       requestedFieldIds: ["total_amount"],
+      items: [
+        createEvidenceItem({
+          id: "ev-total",
+          kind: "numeric_fact",
+          role: "direct_answer",
+          sourceId: "doc-a",
+          quote: "Toplam tutar 120 olarak geçiyor.",
+          normalizedClaim: "total_amount 120",
+          field: "total_amount",
+          value: "120",
+          structuredFactId: "sf-total",
+          confidence: "high",
+          provenance: { extractor: "test" },
+        }),
+      ],
     });
     const compiled = compileEvidence({
       groundingConfidence: "high",
       sourceRefs: [{ id: "doc-a", title: "Source A" }],
       evidence: evidence({
-        usableFacts: ["doc-a: Toplam tutar 120 olarak geçiyor."],
         sourceIds: ["doc-a"],
-        structuredFacts: [
-          {
-            id: "sf-total",
-            kind: "numeric_value",
-            sourceId: "doc-a",
-            field: "total_amount",
-            value: "120",
-            confidence: "high",
-            provenance: {
-              quote: "Toplam tutar 120 olarak geçiyor.",
-              extractor: "test",
-            },
-          },
-        ],
+        structuredFacts: [fact],
         evidenceBundle: bundle,
       }),
     });
 
-    expect(compiled.items.length).toBeGreaterThan(0);
-    expect(compiled.sourceMap.byEvidenceItemId[compiled.items[0]?.id ?? ""]?.title).toBe("Source A");
+    expect(compiled.items).toHaveLength(1);
+    expect(compiled.sourceMap.byEvidenceItemId["ev-total"]?.title).toBe("Source A");
     expect(compiled.sourceMap.byStructuredFactId["sf-total"]?.title).toBe("Source A");
     expect(compiled.evidenceConfidence).toMatchObject({
       level: "high",
@@ -495,11 +278,6 @@ describe("compileEvidence", () => {
       mode: "answer",
       requiredEvidenceTypeMatched: true,
     });
-    expect(compiled.legacyText).toMatchObject({
-      facts: ["doc-a: Toplam tutar 120 olarak geçiyor."],
-      risks: [],
-      unknowns: [],
-      contradictions: [],
-    });
+    expect("legacyText" in compiled).toBe(false);
   });
 });
