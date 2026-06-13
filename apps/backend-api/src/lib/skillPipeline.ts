@@ -3,10 +3,10 @@ import type { AnswerIntent } from "./answerSchema.js";
 import { detectAnswerTask } from "./answerTaskDetector.js";
 import { expandConceptTerms, normalizeConceptText } from "./conceptNormalizer.js";
 import { getDecisionConfig } from "./decisionConfig.js";
-import { buildEvidenceBundle, type EvidenceBundle } from "./evidenceBundle.js";
+import type { EvidenceBundle } from "./evidenceBundle.js";
+import { extractEvidenceV2 } from "./evidence/evidenceExtractorOrchestrator.js";
 import { getEvidenceLexicon, normalizedIncludesAny } from "./evidenceLexicon.js";
 import type { StructuredFact } from "./structuredFact.js";
-import { extractTableNumericFacts } from "./tableNumericFactExtractor.js";
 
 export type SkillName =
   | "intent-router"
@@ -672,150 +672,10 @@ function financialEvidenceLineLimit(value: string): number {
   return isLikelyFinancialTableRow(value) ? 520 : 320;
 }
 
-function financialTableScope(text: string): string {
-  const normalized = normalizeConceptText(text);
-  const parts: string[] = [];
-  if (normalized.includes("spkya gore") || normalized.includes("spk ya gore")) parts.push("SPK'ya Göre");
-  if (normalized.includes("yasal kayitlara gore") || normalized.includes("yasal kayitlara yk gore")) {
-    parts.push("Yasal Kayıtlara Göre");
-  }
-  return parts.join(" / ");
-}
-
-function numericTableFragments(text: string, query: string, limit = 4): string[] {
-  const queryTokens = new Set(tokenizeForOverlap(query).filter((token) => !GENERIC_OVERLAP_TOKENS.has(token)));
-  const normalizedQuery = normalizeConceptText(query);
-  const scope = financialTableScope(text);
-  const rows = splitNumberedTableRows(text);
-  return rows
-    .map((row, index) => {
-      const normalized = normalizeConceptText(row);
-      const overlap = queryCoreOverlapScore(queryTokens, row);
-      const exactPhraseBonus =
-        normalized.includes("net donem") && normalizedQuery.includes("net donem")
-          ? 6
-          : normalized.includes("donem kari") && normalizedQuery.includes("donem kari")
-            ? 6
-            : 0;
-      const requestedPlainPeriodProfit =
-        normalizedQuery.includes("donem kari") && !normalizedQuery.includes("sadece net donem");
-      const plainPeriodProfitBonus =
-        requestedPlainPeriodProfit && /^\s*\d{1,2}\.\s*dönem\s+k[âa]rı/iu.test(row)
-          ? 5
-          : 0;
-      const unrequestedNetDistributablePenalty =
-        normalized.includes("dagitilabilir") && !normalizedQuery.includes("dagitilabilir")
-          ? 50
-          : 0;
-      const score =
-        overlap * 3 +
-        exactPhraseBonus +
-        plainPeriodProfitBonus +
-        (isLikelyFinancialTableRow(row) ? 5 : 0) +
-        (hasFinancialTableValue(row) ? 2 : 0) -
-        (row.length > 420 ? 2 : 0) -
-        unrequestedNetDistributablePenalty;
-      const scopedRow = scope && isLikelyFinancialTableRow(row) && !normalizeConceptText(row).includes("spkya gore")
-        ? `${scope}: ${row}`
-        : row;
-      return { row: scopedRow, index, score };
-    })
-    .filter(({ row, score }) => score >= 7 && hasFinancialTableValue(row))
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, limit)
-    .map(({ row }) => row);
-}
-
-function firstMatch(value: string, patterns: RegExp[]): string | null {
-  for (const pattern of patterns) {
-    const match = value.match(pattern);
-    if (match?.[0]) return match[0].replace(/\s+/g, " ").trim();
-  }
-  return null;
-}
-
-function firstTableSegment(value: string, patterns: RegExp[]): string | null {
-  for (const pattern of patterns) {
-    const match = value.match(pattern);
-    if (match?.[0]) return match[0].replace(/\s+/g, " ").trim();
-  }
-  return null;
-}
-
 function queryRejectsConcept(normalizedQuery: string, concept: string): boolean {
   const escaped = concept.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?:${escaped}.{0,48}(?:sanma|karistirma|karıştırma|degil|değil|not)|(?:sanma|karistirma|karıştırma|degil|değil|not).{0,48}${escaped})`, "u")
     .test(normalizedQuery);
-}
-
-function financeTargetedFragments(text: string, query: string): string[] {
-  const lexicon = getEvidenceLexicon();
-  const normalizedQuery = normalizeConceptText(query);
-  const fragments: string[] = [];
-
-  if (
-    normalizedIncludesAny(normalizedQuery, lexicon.shareGroupTerms) &&
-    normalizedIncludesAny(normalizedQuery, lexicon.cashRateTerms)
-  ) {
-    const shareGroupRows = firstTableSegment(text, [
-      /(?:GRUBU|PAY\s+GRUBU|SHARE\s+GROUP|GROUP)[\s\S]{0,260}(?:NAK\s*[İI]\s*T|NAK[İI]T|CASH)[\s\S]{0,760}(?:TOPLAM|TOTAL)[\s\S]{0,160}/iu,
-      /(?:CASH|NAK\s*[İI]\s*T|NAK[İI]T)\s*\(TL\)[\s\S]{0,760}(?:TOPLAM|TOTAL)[\s\S]{0,160}/iu,
-      /(?:TOTAL\s+DIVIDEND\s+AMOUNT|TOPLAM\s+DA[ĞG]ITILAN)[\s\S]{0,260}(?:A\s*(?:Grubu)?|A\s+[\d.,]+)[\s\S]{0,520}(?:B\s*(?:Grubu)?|B\s+[\d.,]+)[\s\S]{0,260}(?:TOPLAM|TOTAL)?[\s\S]{0,160}/iu,
-    ]);
-    if (shareGroupRows) fragments.push(`Pay grubu nakit/oran satırları: ${shareGroupRows}`);
-  }
-
-  if (normalizedIncludesAny(normalizedQuery, lexicon.netPeriodTerms) && normalizedIncludesAny(normalizedQuery, lexicon.spkTerms)) {
-    const value = firstMatch(text, [
-      /SPK[\s\S]{0,24}?Göre[\s\S]{0,260}?(?:^|[^\d])5\.\s+[\d.]+(?:,\d+)?/ium,
-      /According\s+to\s+CMB[\s\S]{0,260}?(?:^|[^\d])5\.\s+[\d.]+(?:,\d+)?/ium,
-      /Capital\s+Markets\s+Board[\s\S]{0,260}?(?:^|[^\d])5\.\s+[\d.]+(?:,\d+)?/ium,
-    ]);
-    if (value) fragments.push(`SPK'ya Göre: 5. Net Dönem Kârı = ${value.match(/(?:^|[^\d])5\.\s+([\d.]+(?:,\d+)?)/u)?.[1] ?? value}`);
-  }
-
-  if (normalizedIncludesAny(normalizedQuery, lexicon.withholdingTerms)) {
-    const withholding = firstMatch(text, [
-      /(?:stopaj|withholding\s+tax)[\s\S]{0,340}?(?:0\s*%|%\s*0|%0|0,00)[\s\S]{0,340}?(?:5\s*%|%\s*5|%5|5,00)/iu,
-      /(?:%|percent|oranı|orani|rate)[\s\S]{0,100}?(?:0|5)[\s\S]{0,260}?(?:%|percent|oranı|orani|rate)[\s\S]{0,100}?(?:0|5)/iu,
-      /(?:0\s*%|%\s*0|%0|0,00)[\s\S]{0,320}?(?:5\s*%|%\s*5|%5|5,00)/iu,
-      /withholding\s+tax\s+rate[\s\S]{0,260}?(?:0|5)/iu,
-      /stopaj\s+oran[ıi][\s\S]{0,260}?(?:0|5)/iu,
-    ]);
-    if (withholding) fragments.push(`Stopaj oranı: ${withholding}`);
-  }
-
-  if (
-    normalizedIncludesAny(normalizedQuery, lexicon.otherSourcesTerms) ||
-    (
-      normalizedIncludesAny(normalizedQuery, lexicon.otherSourcesTerms) &&
-      !queryRejectsConcept(normalizedQuery, "olaganustu yedek") &&
-      !queryRejectsConcept(normalizedQuery, "extraordinary reserves")
-    )
-  ) {
-    const wantsOnlyOtherSources =
-      normalizedIncludesAny(normalizedQuery, lexicon.otherSourcesTerms) &&
-      (
-        queryRejectsConcept(normalizedQuery, "olaganustu yedek") ||
-        queryRejectsConcept(normalizedQuery, "extraordinary reserves")
-      );
-    const otherSources = firstMatch(text, [
-      ...(wantsOnlyOtherSources
-        ? [
-            /Da[ğg]ıtılması\s+Öngörülen\s+Di[ğg]er\s+Kaynaklar\s+[\d.,-]+\s+[\d.,-]+/iu,
-            /20\.\s*Other\s+Sources[^\d]{0,80}[\d.,-]+\s+[\d.,-]+/iu,
-            /Other\s+sources\s+planned\s+for\s+distribution\s+[\d.,-]+\s+[\d.,-]+/iu,
-          ]
-        : []),
-      /20\.\s*Da[ğg]ıtılması\s+Öngörülen\s+Di[ğg]er\s+Kaynaklar[\s\S]{0,360}?Ola[ğg]an[üu]st[üu]\s+Yedekler[\s\S]{0,160}?[\d.]+(?:,\d+)?/iu,
-      /20\.\s*Da[ğg]ıtılması\s+Öngörülen\s+Di[ğg]er\s+Kaynaklar[\s\S]{0,260}?[\d.]+(?:,\d+)?[\s\S]{0,100}?[\d.]+(?:,\d+)?/iu,
-      /20\.\s*Other\s+Sources[\s\S]{0,360}?Extraordinary\s+Reserves[\s\S]{0,160}?[\d.]+(?:,\d+)?/iu,
-      /20\.\s*Other\s+Sources[\s\S]{0,260}?[\d.]+(?:,\d+)?[\s\S]{0,100}?[\d.]+(?:,\d+)?/iu,
-    ]);
-    if (otherSources) fragments.push(otherSources);
-  }
-
-  return unique(fragments).slice(0, 4);
 }
 
 function evidenceRelevanceScore(query: string, fact: string): number {
@@ -1169,6 +1029,14 @@ function compactEvidenceLine(line: string, maxChars = 320): string {
   const lastSeparator = Math.max(clipped.lastIndexOf(";"), clipped.lastIndexOf(","));
   if (lastSeparator >= 80) return clipped.slice(0, lastSeparator).trim();
   return clipped.replace(/\s+\S*$/, "").trim();
+}
+
+function structuredFactLegacyEvidenceLine(fact: StructuredFact): string {
+  const quote = fact.provenance.quote.trim();
+  const valueSummary = [fact.field, fact.value].filter(Boolean).join(": ");
+  const body = quote || valueSummary;
+  if (!body) return "";
+  return compactEvidenceLine(evidenceLine(fact.sourceId, body), financialEvidenceLineLimit(body));
 }
 
 const NEGATION_PATTERNS = [
@@ -1575,19 +1443,8 @@ export function buildDeterministicEvidenceExtraction(
           maxChars: 620,
         });
       }
-      for (const fragment of financeTargetedFragments(rawContent, input.userQuery)) {
-        addUsableIfRelevant(sourceLabel, fragment, {
-          allowGenericGuidance: true,
-          kind: "direct",
-          force: true,
-        });
-      }
-      for (const fragment of numericTableFragments(rawContent, input.userQuery, 4)) {
-        addUsableIfRelevant(sourceLabel, fragment, {
-          allowGenericGuidance: true,
-          kind: "direct",
-        });
-      }
+      // Table/numeric evidence is owned by the V2 artifact-aware extractor.
+      // Legacy string facts intentionally do not duplicate that domain-specific path.
     }
 
     for (const section of cardSections(card)) {
@@ -1632,19 +1489,8 @@ export function buildDeterministicEvidenceExtraction(
             maxChars: 520,
           });
         }
-        for (const fragment of financeTargetedFragments(section.text, input.userQuery)) {
-          addUsableIfRelevant(sourceLabel, fragment, {
-            allowGenericGuidance: true,
-            kind: section.kind === "supporting" ? "supporting" : "direct",
-            force: true,
-          });
-        }
-        for (const fragment of numericTableFragments(section.text, input.userQuery, 4)) {
-          addUsableIfRelevant(sourceLabel, fragment, {
-            allowGenericGuidance: true,
-            kind: section.kind === "supporting" ? "supporting" : "direct",
-          });
-        }
+        // Table/numeric evidence is owned by the V2 artifact-aware extractor.
+        // Legacy string facts intentionally do not duplicate that domain-specific path.
       }
       const fragmentLimit = section.text.includes("|") ? 6 : 2;
       for (const fragment of sentenceFragments(section.text, fragmentLimit)) {
@@ -1712,38 +1558,42 @@ export function buildDeterministicEvidenceExtraction(
   const finalUncertainOrUnusable = unique(uncertainOrUnusable).slice(0, budget.notSupportedLimit);
   const finalRedFlags = unique(redFlags).slice(0, budget.riskFactLimit + 1);
   const finalSourceIds = unique(sourceIds).slice(0, budget.sourceIdLimit);
-  const structuredFacts = extractTableNumericFacts({
-    query: input.userQuery,
-    facts: unique([...rankedDirectFacts, ...rankedUsableFacts, ...supportingContext]),
-    sourceIds: finalSourceIds,
-  });
   const taskDetection = detectAnswerTask(input.userQuery);
-  const requestedFieldIds = taskDetection.requestedFields.map((field) => field.id);
-  const evidenceBundle = buildEvidenceBundle({
-    userQuery: input.userQuery,
-    textFacts: unique([...finalDirectAnswerFacts, ...finalUsableFacts, ...finalSupportingContext]),
-    riskFacts: finalRiskFacts,
-    notSupported: finalNotSupported,
-    structuredFacts,
+  const evidenceV2 = extractEvidenceV2({
+    query: input.userQuery,
+    cards: input.cards,
+    taskDetection,
+    legacySeeds: {
+      directAnswerFacts: finalDirectAnswerFacts,
+      usableFacts: finalUsableFacts,
+      supportingContext: finalSupportingContext,
+      riskFacts: finalRiskFacts,
+      notSupported: finalNotSupported,
+    },
     sourceIds: finalSourceIds,
-    requestedFieldIds,
-    taskType: taskDetection.taskType,
   });
+  const structuredFactLegacyLines = evidenceV2.structuredFacts
+    .map(structuredFactLegacyEvidenceLine)
+    .filter(Boolean);
+  const finalDirectAnswerFactsV2 = unique([...structuredFactLegacyLines, ...finalDirectAnswerFacts])
+    .slice(0, budget.directFactLimit);
+  const finalUsableFactsV2 = unique([...structuredFactLegacyLines, ...finalUsableFacts])
+    .slice(0, budget.usableFactLimit);
 
   return {
     answerIntent: intentResolution.intent,
     intentResolution,
-    directAnswerFacts: finalDirectAnswerFacts,
+    directAnswerFacts: finalDirectAnswerFactsV2,
     supportingContext: finalSupportingContext,
     riskFacts: finalRiskFacts,
     notSupported: finalNotSupported,
-    usableFacts: finalUsableFacts,
+    usableFacts: finalUsableFactsV2,
     uncertainOrUnusable: finalUncertainOrUnusable,
     redFlags: finalRedFlags,
     sourceIds: finalSourceIds,
     missingInfo,
-    structuredFacts,
-    evidenceBundle,
+    structuredFacts: evidenceV2.structuredFacts,
+    evidenceBundle: evidenceV2.evidenceBundle,
   };
 }
 

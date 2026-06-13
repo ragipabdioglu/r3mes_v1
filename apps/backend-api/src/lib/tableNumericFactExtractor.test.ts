@@ -43,7 +43,7 @@ describe("extractTableNumericFacts", () => {
     });
 
     expect(structuredFacts[0]?.field).toBe("net donem kari");
-    expect(structuredFacts[0]?.table?.columnLabel).toBe("SPK'ya Göre");
+    expect(structuredFacts[0]?.table?.columnLabel).toBe("SPK");
   });
 
   it("separates generic period profit from net period profit and ignores document ids before the row", () => {

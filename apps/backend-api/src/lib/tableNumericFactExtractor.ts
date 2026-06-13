@@ -63,8 +63,7 @@ function requestedShareGroups(query: string): string[] {
   return [...groups];
 }
 
-function isFieldAliasContextAllowed(normalizedFact: string, alias: string, field: RequestedField): boolean {
-  const index = normalizedFact.indexOf(alias);
+function isFieldAliasContextAllowedAt(normalizedFact: string, alias: string, field: RequestedField, index: number): boolean {
   if (index < 0) return false;
   const aliasTokens = alias.split(/\s+/u).filter(Boolean);
   const before = normalizedFact.slice(Math.max(0, index - 28), index);
@@ -81,24 +80,39 @@ function isFieldAliasContextAllowed(normalizedFact: string, alias: string, field
   return true;
 }
 
-function bestAliasMatch(normalizedFact: string, field: RequestedField): string | null {
+function firstAllowedAliasIndex(normalizedFact: string, alias: string, field: RequestedField): number {
+  let searchFrom = 0;
+  while (searchFrom < normalizedFact.length) {
+    const index = normalizedFact.indexOf(alias, searchFrom);
+    if (index < 0) return -1;
+    if (isFieldAliasContextAllowedAt(normalizedFact, alias, field, index)) return index;
+    searchFrom = index + Math.max(1, alias.length);
+  }
+  return -1;
+}
+
+function bestAliasMatch(normalizedFact: string, field: RequestedField): { alias: string; index: number } | null {
   const aliases = [field.label, ...field.aliases]
     .map(normalize)
     .filter((alias) => alias.length >= 3)
     .sort((left, right) => right.length - left.length);
-  return aliases.find((alias) => isFieldAliasContextAllowed(normalizedFact, alias, field)) ?? null;
+  for (const alias of aliases) {
+    const index = firstAllowedAliasIndex(normalizedFact, alias, field);
+    if (index >= 0) return { alias, index };
+  }
+  return null;
 }
 
-function sliceAroundAlias(fact: string, normalizedFact: string, normalizedAlias: string): string {
+function sliceAroundAlias(fact: string, normalizedFact: string, normalizedAlias: string, aliasIndex?: number): string {
   const searchable = fact
     .normalize("NFKC")
     .toLocaleLowerCase("tr-TR")
     .replace(/[^\p{L}\p{N}.,:%\s'-]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const aliasIndex = normalizedFact.indexOf(normalizedAlias);
-  if (aliasIndex < 0) return searchable.slice(0, 420);
-  return searchable.slice(aliasIndex, aliasIndex + 420);
+  const index = aliasIndex ?? normalizedFact.indexOf(normalizedAlias);
+  if (index < 0) return searchable.slice(0, 420);
+  return searchable.slice(index, index + 420);
 }
 
 function confidenceFor(numbers: string[], field: RequestedField): StructuredFact["confidence"] {
@@ -111,25 +125,28 @@ function unitForValue(value: string): string | undefined {
   return value.includes("%") ? "%" : undefined;
 }
 
-function inferColumnLabel(fact: string): string | undefined {
-  const normalized = normalize(fact);
-  if (normalized.includes("spk ya gore") || normalized.includes("spkya gore")) return "SPK'ya Göre";
-  if (normalized.includes("yasal kayitlara gore")) return "Yasal Kayıtlara Göre";
-  return undefined;
+function columnHints(value: string): string[] {
+  const hints = new Set<string>();
+  const normalized = normalize(value);
+  for (const match of normalized.matchAll(/([\p{L}\p{N}\s]{1,48}?)(?:\s*ya|\s*a)?\s+gore\b/gu)) {
+    const hint = match[1]?.trim().split(/\s+/u).at(-1);
+    if (hint && hint.length >= 2) hints.add(hint);
+  }
+  return [...hints];
 }
 
-function desiredColumnLabel(query: string): string | undefined {
-  const normalized = normalize(query);
-  if (normalized.includes("spk ya gore") || normalized.includes("spkya gore")) return "SPK'ya Göre";
-  if (normalized.includes("yasal kayitlara gore")) return "Yasal Kayıtlara Göre";
-  return undefined;
+function displayColumnLabel(hint: string | undefined): string | undefined {
+  if (!hint) return undefined;
+  return hint
+    .split(/\s+/u)
+    .map((token) => token.length <= 4 ? token.toLocaleUpperCase("tr-TR") : token[0]?.toLocaleUpperCase("tr-TR") + token.slice(1))
+    .join(" ");
 }
 
-function columnScore(columnLabel: string | undefined, desiredColumn: string | undefined): number {
-  if (!desiredColumn) return 0;
-  if (columnLabel === desiredColumn) return 100;
-  if (columnLabel) return -80;
-  return 0;
+function columnScore(sourceHints: string[], desiredHints: string[]): number {
+  if (desiredHints.length === 0) return 0;
+  if (sourceHints.length === 0) return 0;
+  return desiredHints.some((desired) => sourceHints.includes(desired)) ? 100 : -80;
 }
 
 function tableFactSearchText(fact: TableFact): string {
@@ -303,7 +320,7 @@ export function extractTableNumericFacts(input: TableNumericFactExtractionInput)
   if (tableFactStructuredFacts.length > 0) return tableFactStructuredFacts;
   if (requestedFields.length === 0 || input.facts.length === 0) return [];
 
-  const desiredColumn = desiredColumnLabel(input.query);
+  const desiredColumnHints = columnHints(input.query);
   const structuredFacts: StructuredFact[] = [];
   const seen = new Set<string>();
 
@@ -324,17 +341,19 @@ export function extractTableNumericFacts(input: TableNumericFactExtractionInput)
     let best: { fact: string; alias: string; numbers: string[]; sourceId: string; columnLabel?: string; score: number } | null = null;
     for (const fact of input.facts) {
       const normalizedFact = normalize(fact);
-      const alias = bestAliasMatch(normalizedFact, field);
-      if (!alias) continue;
-      const snippet = alias ? sliceAroundAlias(fact, normalizedFact, alias) : fact.slice(0, 520);
+      const aliasMatch = bestAliasMatch(normalizedFact, field);
+      if (!aliasMatch) continue;
+      const snippet = sliceAroundAlias(fact, normalizedFact, aliasMatch.alias, aliasMatch.index);
       const numbers = extractNumbersForField(snippet, field).slice(0, 4);
       if (numbers.length === 0) continue;
       const sourceId = sourceIdForFact(fact, fallbackSourceId);
-      const inferredColumn = inferColumnLabel(fact);
-      if (desiredColumn && inferredColumn && inferredColumn !== desiredColumn) continue;
-      const score = columnScore(inferredColumn, desiredColumn) + numbers.length * 8 + Math.min(fact.length / 100, 12);
+      const sourceColumnHints = columnHints(fact);
+      const sourceColumnScore = columnScore(sourceColumnHints, desiredColumnHints);
+      if (sourceColumnScore < 0) continue;
+      const score = sourceColumnScore + numbers.length * 8 + Math.min(fact.length / 100, 12);
       if (!best || score > best.score) {
-        best = { fact, alias: alias ?? `row:${field.id}`, numbers, sourceId, columnLabel: inferredColumn, score };
+        const matchedColumnHint = desiredColumnHints.find((desired) => sourceColumnHints.includes(desired)) ?? sourceColumnHints[0];
+        best = { fact, alias: aliasMatch.alias, numbers, sourceId, columnLabel: displayColumnLabel(matchedColumnHint), score };
       }
     }
     if (!best) continue;

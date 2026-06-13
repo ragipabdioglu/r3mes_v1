@@ -46,6 +46,10 @@ export interface EvidenceItem {
   chunkId?: string;
   quote: string;
   normalizedClaim?: string;
+  subject?: string;
+  field?: string;
+  value?: string;
+  unit?: string;
   structuredFactId?: string;
   tableFactId?: string;
   confidence: EvidenceItemConfidence;
@@ -58,12 +62,23 @@ export interface EvidenceItem {
 }
 
 export interface EvidenceBundleDiagnostics {
+  extractorVersion?: "v1" | "v2";
   stringFactCount: number;
   structuredFactCount: number;
   tableFactCount: number;
   contradictionCount: number;
   sourceLimitCount: number;
   kindCounts: Record<EvidenceItemKind, number>;
+  extractorBreakdown?: Record<string, number>;
+}
+
+export interface EvidenceItemCoverage {
+  status: "complete" | "partial" | "none";
+  requestedItemCount: number;
+  coveredItemCount: number;
+  missingFields: string[];
+  missingEvidenceKinds: EvidenceItemKind[];
+  reason: string;
 }
 
 export interface EvidenceBundle {
@@ -72,6 +87,7 @@ export interface EvidenceBundle {
   sourceIds: string[];
   requestedFieldIds: string[];
   diagnostics: EvidenceBundleDiagnostics;
+  coverage?: EvidenceItemCoverage;
 }
 
 export interface BuildEvidenceBundleInput {
@@ -153,19 +169,24 @@ function resolveTextEvidenceKind(input: BuildEvidenceBundleInput): TextEvidenceI
   return taskKind === "text_fact" ? undefined : taskKind;
 }
 
-function diagnosticsForItems(items: EvidenceItem[]): EvidenceBundleDiagnostics {
+function diagnosticsForItems(items: EvidenceItem[], extractorVersion: "v1" | "v2" = "v1"): EvidenceBundleDiagnostics {
   const kindCounts = Object.fromEntries(EVIDENCE_ITEM_KINDS.map((kind) => [kind, 0])) as Record<EvidenceItemKind, number>;
+  const extractorBreakdown: Record<string, number> = {};
   for (const item of items) {
     kindCounts[item.kind] += 1;
+    const extractor = item.provenance.extractor || "unknown";
+    extractorBreakdown[extractor] = (extractorBreakdown[extractor] ?? 0) + 1;
   }
 
   return {
+    extractorVersion,
     stringFactCount: items.filter((item) => item.kind === "text_fact").length,
     structuredFactCount: items.filter((item) => item.structuredFactId).length,
     tableFactCount: items.filter((item) => item.kind === "table_fact").length,
     contradictionCount: items.filter((item) => item.kind === "contradiction").length,
     sourceLimitCount: items.filter((item) => item.kind === "source_limit").length,
     kindCounts,
+    extractorBreakdown,
   };
 }
 
@@ -216,6 +237,10 @@ export function evidenceItemFromStructuredFact(fact: StructuredFact): EvidenceIt
     chunkId: fact.chunkId,
     quote: fact.provenance.quote,
     normalizedClaim: [fact.subject, fact.field, fact.value, fact.unit, fact.period].filter(Boolean).join(" "),
+    subject: fact.subject,
+    field: fact.field,
+    value: fact.value,
+    unit: fact.unit,
     structuredFactId: fact.id,
     confidence: fact.confidence,
     provenance: {
@@ -265,6 +290,31 @@ export function buildEvidenceBundle(input: BuildEvidenceBundleInput): EvidenceBu
     ]),
     requestedFieldIds: uniqueStrings(input.requestedFieldIds),
     diagnostics: diagnosticsForItems(items),
+  };
+}
+
+export function buildEvidenceBundleFromItems(input: {
+  userQuery: string;
+  items: EvidenceItem[];
+  requestedFieldIds?: string[];
+  coverage?: EvidenceItemCoverage;
+}): EvidenceBundle {
+  const seen = new Set<string>();
+  const items = input.items
+    .map((item) => createEvidenceItem(item))
+    .filter((item) => {
+      const key = `${item.kind}|${item.sourceId}|${item.quote}`.toLocaleLowerCase("tr-TR");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return {
+    userQuery: input.userQuery.trim(),
+    items,
+    sourceIds: uniqueStrings(items.map((item) => item.sourceId)),
+    requestedFieldIds: uniqueStrings(input.requestedFieldIds),
+    diagnostics: diagnosticsForItems(items, "v2"),
+    coverage: input.coverage,
   };
 }
 
