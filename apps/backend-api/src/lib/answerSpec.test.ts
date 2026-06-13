@@ -1,390 +1,188 @@
 import { describe, expect, it } from "vitest";
 
 import { buildAnswerSpec } from "./answerSpec.js";
-import type { CompiledEvidence } from "./compiledEvidence.js";
-import { buildEvidenceBundle } from "./evidenceBundle.js";
+import { compileEvidence } from "./compiledEvidence.js";
+import { buildEvidenceBundle, buildEvidenceBundleFromItems, createEvidenceItem } from "./evidenceBundle.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
+import type { StructuredFact } from "./structuredFact.js";
 
 function evidence(overrides: Partial<EvidenceExtractorOutput> = {}): EvidenceExtractorOutput {
   return {
-    answerIntent: "steps",
+    answerIntent: "explain",
     intentResolution: {
-      intent: "steps",
-      primarySignal: "checklist",
+      intent: "explain",
+      primarySignal: "typed_evidence",
       confidence: "high",
-      scores: { checklist: 85, steps: 65 },
-      weakIntent: "steps",
-      reasons: ["query asks for checklist/list output"],
+      scores: {},
+      weakIntent: "explain",
+      reasons: [],
     },
-    directAnswerFacts: ["runbook: Migration öncesi yedek alınmalı ve staging çıktısı doğrulanmalıdır."],
-    supportingContext: ["runbook: Rollback planı ve log izleme adımı net olmalıdır."],
-    riskFacts: ["runbook: Yedeksiz işlem veya veri silen komutlar yüksek risklidir."],
-    notSupported: [],
-    usableFacts: ["runbook: Migration öncesi yedek alınmalı ve staging çıktısı doğrulanmalıdır."],
-    uncertainOrUnusable: ["runbook: Ortama özel bağlantı ayarı kaynakta yok."],
-    redFlags: ["runbook: Yedeksiz işlem veya veri silen komutlar yüksek risklidir."],
-    sourceIds: ["runbook"],
+    sourceIds: [],
     missingInfo: [],
+    structuredFacts: [],
+    evidenceBundle: buildEvidenceBundle({ userQuery: "Soru" }),
     ...overrides,
   };
 }
 
-function compiledEvidence(overrides: Partial<CompiledEvidence> = {}): CompiledEvidence {
+function structuredFact(overrides: Partial<StructuredFact> = {}): StructuredFact {
   return {
-    facts: ["compiler: Kaynakta rollback planı gerektiği belirtiliyor."],
-    risks: ["compiler: Yedeksiz işlem risklidir."],
-    unknowns: [],
-    contradictions: [],
-    sourceIds: ["compiler-doc"],
+    id: "sf-total",
+    kind: "numeric_value",
+    sourceId: "doc-a",
+    field: "total_amount",
+    value: "120",
     confidence: "high",
-    usableFactCount: 1,
-    riskFactCount: 1,
-    unknownCount: 0,
-    contradictionCount: 0,
+    provenance: {
+      quote: "Toplam tutar 120 olarak geçiyor.",
+      extractor: "test",
+    },
     ...overrides,
   };
 }
 
 describe("buildAnswerSpec", () => {
-  it("builds an evidence-driven answer plan for step/checklist questions", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "technical",
-      groundingConfidence: "high",
-      userQuery: "Production migration öncesi kontrol listesi verir misin?",
-      evidence: evidence(),
-    });
-
-    expect(spec.answerIntent).toBe("steps");
-    expect(spec.tone).toBe("direct");
-    expect(spec.sections).toEqual(["action", "assessment", "caution", "summary"]);
-    expect(spec.assessment).toContain("yedek alınmalı");
-    expect(spec.action).toContain("Rollback planı");
-    expect(spec.caution[0]).toContain("Yedeksiz işlem");
-    expect(spec.unknowns[0]).toContain("bağlantı ayarı");
-    expect(spec.sourceIds).toEqual(["runbook"]);
-  });
-
-  it("uses compiled evidence risks and source ids when available", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "technical",
-      groundingConfidence: "high",
-      userQuery: "Rollback gerekli mi?",
-      evidence: evidence({
-        riskFacts: [],
-        redFlags: [],
-        sourceIds: ["legacy-doc"],
-      }),
-      compiledEvidence: compiledEvidence(),
-    });
-
-    expect(spec.caution[0]).toContain("Yedeksiz işlem risklidir");
-    expect(spec.sourceIds).toEqual(["compiler-doc"]);
-    expect(spec.groundingConfidence).toBe("high");
-  });
-
-  it("downgrades answer plan when compiled evidence detects contradiction", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "technical",
-      groundingConfidence: "high",
-      userQuery: "Rollback gerekli mi?",
-      evidence: evidence({
-        uncertainOrUnusable: [],
-        missingInfo: [],
-      }),
-      compiledEvidence: compiledEvidence({
-        confidence: "low",
-        contradictions: ["Kaynaklar rollback gerekliliği konusunda çelişiyor."],
-        contradictionCount: 1,
-      }),
-    });
-
-    expect(spec.groundingConfidence).toBe("low");
-    expect(spec.tone).toBe("cautious");
-    expect(spec.caution[0]).toContain("çelişiyor");
-  });
-
-  it("keeps low-grounding/no-source answers cautious and explicit", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "legal",
-      groundingConfidence: "low",
-      userQuery: "Bu belgeye göre kesin sonuç nedir?",
-      evidence: evidence({
-        answerIntent: "unknown",
-        directAnswerFacts: [],
-        supportingContext: [],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-        uncertainOrUnusable: [],
-        missingInfo: ["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."],
-        sourceIds: [],
-      }),
-    });
-
-    expect(spec.answerIntent).toBe("unknown");
-    expect(spec.tone).toBe("cautious");
-    expect(spec.assessment).toContain("sınırlı bilgi");
-    expect(spec.action).toContain("Belgeleri saklayıp");
-    expect(spec.caution[0]).toContain("kesin sonuç");
-    expect(spec.unknowns).toEqual(
-      expect.arrayContaining(["Soruya doğrudan dayanak sağlayan yeterli kaynak cümlesi bulunamadı."]),
-    );
-  });
-
-  it("orders triage sections with caution first", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "medical",
-      groundingConfidence: "medium",
-      userQuery: "Ne zaman doktora gitmeliyim?",
-      evidence: evidence({ answerIntent: "triage" }),
-    });
-
-    expect(spec.sections[0]).toBe("caution");
-    expect(spec.tone).toBe("direct");
-  });
-
-  it("strips parser and document scaffold from evidence facts", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "medical",
-      groundingConfidence: "high",
-      userQuery: "Antikoagülan kullanan hasta nelere dikkat etmeli?",
-      evidence: evidence({
-        answerIntent: "explain",
-        directAnswerFacts: [
-          "Antikoagülan Kartı: ANTİKOAGÜLAN ( PIHTI ÖNLEYİCİ ) İLAÇ KULLANAN HASTADA DİKKAT EDİLECEK HUSUSLAR Bu ilaçların ortak özelliği kanın pıhtılaşmasını azaltmasıdır.",
-        ],
-        supportingContext: ["Antikoagülan Kartı: ## Page 2 Cerrahi işlem öncesi hekime bilgi verilmelidir."],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.assessment).toBe("Bu ilaçların ortak özelliği kanın pıhtılaşmasını azaltmasıdır.");
-    expect(spec.action).toBe("Cerrahi işlem öncesi hekime bilgi verilmelidir.");
-  });
-
-  it("keeps salient medical query context without turning it into a diagnosis", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "medical",
-      groundingConfidence: "high",
-      userQuery: "HPV pozitif çıktı, takip gerekli mi?",
-      evidence: evidence({
-        answerIntent: "reassure",
-        directAnswerFacts: ["clinical-card: Bu sonuç tek başına panik gerektiren bir anlam taşımaz."],
-        supportingContext: [],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.action).toContain("hpv");
-    expect(spec.action).toContain("takip");
-    expect(spec.action).toContain("muayene");
-    expect(spec.action).toContain("kontrol");
-    expect(spec.action).toContain("tanı koymadan");
-    expect(spec.facts[0]).toContain("hpv");
-  });
-
-  it("removes dirty OCR scaffolding before composing medical facts", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "medical",
-      groundingConfidence: "high",
-      userQuery: "Smear temiz ama kasık ağrım var, ne yapmalıyım?",
-      evidence: evidence({
-        answerIntent: "steps",
-        directAnswerFacts: [
-          "dirty-note: PDF COPY >>> Kadın doğum poliklinik notu / tarama sonucu TABLO - bulgu - yorum smear: normal gorunuyor - yakınma: ara ara kasık ağrısı OCR HATASI: kasik agriyo.",
-        ],
-        supportingContext: [],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.assessment).not.toContain("PDF COPY");
-    expect(spec.assessment).not.toContain("OCR HATASI");
-    expect(spec.assessment).toContain("smear");
-  });
-
-  it("removes repeated document headers from extracted facts", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "education",
-      groundingConfidence: "high",
-      userQuery: "Veli ateş ve öksürük durumunda ne yapmalı?",
-      evidence: evidence({
-        answerIntent: "steps",
-        directAnswerFacts: [],
-        supportingContext: [],
-        usableFacts: [
-          "VELİ BİLGİLENDİRME REHBERİ 15 • Doğru ve güvenilir kaynaklardan bilgi edinerek öğrencimizi bilinçlendiriniz.",
-          "VELİ BİLGİLENDİRME REHBERİ 13 ÖNEMSEYİNİZ!",
-        ],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.assessment).toBe("Doğru ve güvenilir kaynaklardan bilgi edinerek öğrencimizi bilinçlendiriniz.");
-    expect(spec.facts).not.toContain("ÖNEMSEYİNİZ!");
-    expect(spec.facts).not.toContain("VELİ BİLGİLENDİRME REHBERİ 13 ÖNEMSEYİNİZ!");
-  });
-
-  it("prioritizes query-aligned action facts over generic PDF guidance", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "education",
-      groundingConfidence: "high",
-      userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",
-      evidence: evidence({
-        answerIntent: "steps",
-        directAnswerFacts: [
-          "MEB Veli Bilgilendirme Rehberi: Doğru ve güvenilir kaynaklardan bilgi edinerek salgın hastalıklar konusunda öğrencimizi bilinçlendiriniz.(*) • Bakanlığımız ve yetkili kurumlarc….",
-          "MEB Veli Bilgilendirme Rehberi: Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.",
-        ],
-        supportingContext: [],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.assessment).toBe("Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.");
-    expect(spec.action).toBe("Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.");
-  });
-
-  it("prefers complete duplicate evidence over a clipped duplicate", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "education",
-      groundingConfidence: "high",
-      userQuery: "Veli çocuğunda ateş veya öksürük belirtisi görürse ne yapmalı?",
-      evidence: evidence({
-        answerIntent: "steps",
-        directAnswerFacts: [
-          "MEB Veli Bilgilendirme Rehberi: Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirere",
-          "MEB Veli Bilgilendirme Rehberi: Yüksek ateş, öksürük ya da başka bir hastalık belirtisi varsa idareyi bilgilendirerek okuluna göndermeyiniz.",
-        ],
-        supportingContext: [],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.assessment).toContain("okuluna göndermeyiniz");
-    expect(spec.assessment).not.toMatch(/bilgilendirere(?:\s|$)/u);
-  });
-
-  it("keeps both source-title facts ahead of table rows for disclosure matching questions", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "finance",
-      groundingConfidence: "high",
-      userQuery: "EREGL 1576833 için Türkçe tablo ile İngilizce profit distribution table aynı bildirim indeksine mi ait? Kaynak başlıklarına göre cevapla.",
-      evidence: evidence({
-        answerIntent: "explain",
-        directAnswerFacts: [
-          "en-doc: İngilizce kaynak başlığı: EREGL 1576833 Profit Distribution Table.pdf",
-          "en-doc: 3. Profit for the Period 3.497.911.571",
-          "tr-doc: Türkçe kaynak başlığı: EREGL 1576833 Yılı Kar Dağıtım Tablosu.pdf",
-        ],
-        supportingContext: [],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.assessment).toContain("İngilizce kaynak başlığı");
-    expect(spec.action).toContain("Türkçe kaynak başlığı");
-    expect(spec.facts.join(" ")).toContain("1576833");
-  });
-
-  it("prioritizes dense share group table evidence over generic profit rows", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "finance",
-      groundingConfidence: "medium",
-      userQuery: "EREGL 1576833 İngilizce profit distribution table içinde A ve B grubu için bonus shares ve rate bilgisi ne görünüyor?",
-      evidence: evidence({
-        answerIntent: "explain",
-        directAnswerFacts: [
-          "en-doc: 5. Net Profit for the Period 511.801.109",
-          "en-doc: CASH (TL) BONUS SHARES (TL) RATE (%) AMOUNT (TL) RATE (%) A 0,07 - 0,000000 0,467500 46,75 B 3.272.500.000 - 77,916667 0,467500 46,75 TOTAL 3.272.500.000 - 77,916667 0,467500 46,75",
-        ],
-        supportingContext: [],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.assessment).toContain("BONUS SHARES");
-    expect(spec.assessment).toContain("A 0,07");
-    expect(spec.assessment).toContain("B 3.272.500.000");
-  });
-
-  it("preserves inflected spotting terms in medical query context", () => {
-    const spec = buildAnswerSpec({
-      answerDomain: "medical",
-      groundingConfidence: "medium",
-      userQuery: "Rahimden parça alındı ve temiz çıktı ama lekelenmem sürüyor. Ne yapmalıyım?",
-      evidence: evidence({
-        answerIntent: "steps",
-        directAnswerFacts: [
-          "clinical-card: Beklenmeyen kanama jinekolojik değerlendirme gerektirebilir.",
-          "clinical-card: Kontrol planlanmalıdır.",
-        ],
-        supportingContext: [],
-        usableFacts: [],
-        redFlags: [],
-        riskFacts: [],
-      }),
-    });
-
-    expect(spec.facts.join(" ")).toContain("lekelenme");
-    expect(spec.action).toContain("lekelenme");
-  });
-
-  it("preserves typed list evidence even when individual items have weak query overlap", () => {
-    const evidenceBundle = buildEvidenceBundle({
+  it("uses typed evidence as the answer planning substrate", () => {
+    const bundle = buildEvidenceBundle({
       userQuery: "Sistemin temel bileşenleri nelerdir?",
       taskType: "list_items",
-      sourceIds: ["generic-source"],
       textFacts: [
         "Algılama: Ortamdan veri toplar.",
         "Bağlantı: Veriyi merkeze iletir.",
-        "İşleme: Gelen veriyi analiz eder.",
-        "Arayüz: Sonucu kullanıcıya gösterir.",
       ],
+      sourceIds: ["doc-list"],
     });
-
     const spec = buildAnswerSpec({
       answerDomain: "general",
       groundingConfidence: "high",
       userQuery: "Sistemin temel bileşenleri nelerdir?",
       evidence: evidence({
-        answerIntent: "explain",
-        intentResolution: {
-          intent: "explain",
-          primarySignal: "explain",
-          confidence: "high",
-          scores: { explain: 1 },
-          weakIntent: "explain",
-          reasons: [],
-        },
-        directAnswerFacts: evidenceBundle.items.map((item) => item.quote),
-        usableFacts: evidenceBundle.items.map((item) => item.quote),
-        sourceIds: evidenceBundle.sourceIds,
-        evidenceBundle,
+        answerIntent: "steps",
+        sourceIds: ["doc-list"],
+        evidenceBundle: bundle,
       }),
     });
 
-    expect(spec.facts).toEqual(expect.arrayContaining([
+    expect(spec.answerIntent).toBe("steps");
+    expect(spec.tone).toBe("direct");
+    expect(spec.sections).toEqual(["action", "assessment", "caution", "summary"]);
+    expect(spec.assessment).toBe("Algılama: Ortamdan veri toplar.");
+    expect(spec.action).toBe("Bağlantı: Veriyi merkeze iletir.");
+    expect(spec.sourceIds).toEqual(["doc-list"]);
+    expect(spec.facts).toEqual([
       "Algılama: Ortamdan veri toplar.",
       "Bağlantı: Veriyi merkeze iletir.",
-      "İşleme: Gelen veriyi analiz eder.",
-      "Arayüz: Sonucu kullanıcıya gösterir.",
-    ]));
-    expect(spec.assessment).toBe("Algılama: Ortamdan veri toplar.");
+    ]);
+  });
+
+  it("uses compiled evidence readiness and structured facts", () => {
+    const fact = structuredFact();
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        sourceIds: ["doc-a"],
+        structuredFacts: [fact],
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Toplam tutar nedir?",
+          requestedFieldIds: ["total_amount"],
+          structuredFacts: [fact],
+          sourceIds: ["doc-a"],
+        }),
+      }),
+    });
+    const spec = buildAnswerSpec({
+      answerDomain: "finance",
+      groundingConfidence: "medium",
+      userQuery: "Toplam tutar nedir?",
+      evidence: null,
+      compiledEvidence: compiled,
+    });
+
+    expect(spec.groundingConfidence).toBe("high");
+    expect(spec.structuredFacts).toHaveLength(1);
+    expect(spec.assessment).toContain("Toplam tutar 120");
+    expect(spec.sourceIds).toEqual(["doc-a"]);
+  });
+
+  it("keeps no-source as planning state instead of fabricating fallback content", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Kaynakta olmayan bilgi nedir?",
+          notSupported: ["Kaynakta istenen bilgi yok."],
+          requestedFieldIds: ["missing_field"],
+        }),
+      }),
+    });
+    const spec = buildAnswerSpec({
+      answerDomain: "legal",
+      groundingConfidence: "low",
+      userQuery: "Kaynakta olmayan bilgi nedir?",
+      evidence: null,
+      compiledEvidence: compiled,
+    });
+
+    expect(spec.tone).toBe("cautious");
+    expect(spec.assessment).toContain("yeterli kanıt bulunamadı");
+    expect(spec.action).toContain("Kaynak dışı bilgi eklenmemeli");
+    expect(spec.unknowns.join(" ")).toContain("missing_field");
+    expect(spec.facts).toEqual([]);
+  });
+
+  it("marks contradiction as cautious planning input", () => {
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      evidence: evidence({
+        evidenceBundle: buildEvidenceBundle({
+          userQuery: "Kaynaklar aynı mı?",
+          textFacts: ["Kaynak A değer 120 diyor."],
+          notSupported: ["Kaynak B bu değerle çelişiyor."],
+          sourceIds: ["doc-a", "doc-b"],
+        }),
+      }),
+    });
+    const spec = buildAnswerSpec({
+      answerDomain: "general",
+      groundingConfidence: "high",
+      userQuery: "Kaynaklar aynı mı?",
+      evidence: null,
+      compiledEvidence: compiled,
+    });
+
+    expect(spec.groundingConfidence).toBe("low");
+    expect(spec.tone).toBe("cautious");
+    expect(spec.caution.join(" ")).toContain("çelişki");
+    expect(spec.sourceIds).toEqual(["doc-a", "doc-b"]);
+  });
+
+  it("does not depend on data-specific literals or domain scoring to select allowed facts", () => {
+    const bundle = buildEvidenceBundleFromItems({
+      userQuery: "Bu özel alan ne diyor?",
+      items: [
+        createEvidenceItem({
+          id: "ev-a",
+          kind: "text_fact",
+          role: "direct_answer",
+          sourceId: "doc-x",
+          quote: "Custom Field Alpha değeri 42 olarak geçiyor.",
+          normalizedClaim: "custom field alpha 42",
+          confidence: "high",
+          provenance: { extractor: "test" },
+        }),
+      ],
+    });
+    const spec = buildAnswerSpec({
+      answerDomain: "general",
+      groundingConfidence: "high",
+      userQuery: "Bu özel alan ne diyor?",
+      evidence: evidence({
+        evidenceBundle: bundle,
+        sourceIds: ["doc-x"],
+      }),
+    });
+
+    expect(spec.assessment).toBe("Custom Field Alpha değeri 42 olarak geçiyor.");
+    expect(spec.facts).toEqual(["Custom Field Alpha değeri 42 olarak geçiyor."]);
   });
 });
