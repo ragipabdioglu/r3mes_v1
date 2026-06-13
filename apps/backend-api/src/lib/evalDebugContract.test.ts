@@ -75,6 +75,42 @@ describe("buildEvalDebugContract", () => {
         unknowns: [],
         contradictions: [],
         sourceIds: ["source_1"],
+        items: [
+          {
+            id: "fact_1",
+            kind: "numeric_fact",
+            sourceId: "source_1",
+            quote: "Net değer: 42",
+            confidence: "high",
+            provenance: { extractor: "test" },
+          },
+        ],
+        sourceMap: {
+          byEvidenceItemId: {
+            fact_1: { sourceId: "source_1" },
+          },
+          byStructuredFactId: {},
+        },
+        evidenceConfidence: {
+          level: "high",
+          score: 0.98,
+          reasons: ["grounding_high", "coverage_complete"],
+          penalties: [],
+        },
+        answerReadiness: {
+          usableForAnswer: true,
+          mode: "answer",
+          missingFields: [],
+          contradictionFields: [],
+          requiredEvidenceTypeMatched: true,
+          reasons: ["sufficient_evidence"],
+        },
+        legacyText: {
+          facts: ["Net değer: 42"],
+          risks: [],
+          unknowns: [],
+          contradictions: [],
+        },
         confidence: "high",
         coverage: {
           status: "complete",
@@ -241,6 +277,18 @@ describe("buildEvalDebugContract", () => {
           shouldAnswer: true,
           reason: "sufficient_evidence",
         },
+        answerReadiness: {
+          mode: "answer",
+          usableForAnswer: true,
+          requiredEvidenceTypeMatched: true,
+        },
+        evidenceConfidence: {
+          level: "high",
+          penalties: [],
+        },
+        sourceMapCompleteness: 1,
+        typedEvidenceRatio: 0.5,
+        legacyFallbackUsed: false,
         factLevelDiagnostics: {
           selectedStructuredFactCount: 1,
           bundleKindCounts: {

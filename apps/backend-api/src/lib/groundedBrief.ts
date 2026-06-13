@@ -1,6 +1,7 @@
 import type { KnowledgeCard } from "./knowledgeCard.js";
 import type { GroundingConfidence } from "./answerSchema.js";
 import type { CompiledEvidence } from "./compiledEvidence.js";
+import { hasUsableEvidenceItem, type EvidenceItem } from "./evidenceBundle.js";
 import type { EvidenceExtractorOutput } from "./skillPipeline.js";
 
 interface GroundedBriefOptions {
@@ -38,6 +39,11 @@ function bulletSection(lines: string[], title: string, items: string[], limit: n
   if (clean.length === 0) return;
   lines.push(title);
   for (const item of clean) lines.push(`- ${item}`);
+}
+
+function typedEvidenceLine(item: EvidenceItem): string {
+  const source = item.chunkId ? `${item.sourceId}/${item.chunkId}` : item.sourceId;
+  return `[${item.id}] type=${item.kind} source=${source} confidence=${item.confidence} - ${compactLine(item.quote, 220)}`;
 }
 
 export function buildEvidenceGroundedBrief(
@@ -82,8 +88,21 @@ export function buildCompiledEvidenceBrief(
   const groundingConfidence = opts.groundingConfidence ?? evidence.confidence;
   const lines: string[] = [`GROUNDING DURUMU: ${groundingConfidence.toUpperCase()}`];
   lines.push(`CEVAP NIYETI: ${opts.answerIntent ?? "explain"}`);
+  if (evidence.answerReadiness) {
+    lines.push(`EVIDENCE READINESS: ${evidence.answerReadiness.mode}`);
+  }
+  if (evidence.coverage) {
+    lines.push(
+      `EVIDENCE COVERAGE: ${evidence.coverage.status}` +
+        ` requested=${evidence.coverage.requestedFieldIds.length}` +
+        ` covered=${evidence.coverage.coveredFieldIds.length}` +
+        ` missing=${evidence.coverage.missingFieldIds.join(",") || "-"}`,
+    );
+  }
 
-  bulletSection(lines, "KULLANILABILIR GERCEKLER:", evidence.facts, 4);
+  const typedItems = (evidence.items ?? []).filter(hasUsableEvidenceItem).map(typedEvidenceLine);
+  bulletSection(lines, "KULLANILABILIR TYPED KANITLAR:", typedItems, 6);
+  bulletSection(lines, "LEGACY GERCEKLER:", evidence.legacyText?.facts ?? evidence.facts, 4);
   bulletSection(lines, "RISK / DIKKAT:", evidence.risks, 3);
   bulletSection(lines, "BELIRSIZ / KULLANILAMAYAN:", evidence.unknowns, 3);
   bulletSection(lines, "CELISKI SINYALLERI:", evidence.contradictions, 2);
@@ -101,7 +120,8 @@ export function buildCompiledEvidenceBrief(
   }
 
   lines.push("YANIT KURALLARI:");
-  lines.push("- Yalnızca kullanılabilir gerçeklere dayan.");
+  lines.push("- Öncelikle ev_ id'li typed kanıtlara dayan.");
+  lines.push("- Legacy gerçekleri yalnız typed kanıt yoksa destekleyici kullan.");
   lines.push("- Riskleri karar gibi değil, dikkat edilmesi gereken durum gibi açıkla.");
   lines.push("- Belirsiz/kullanılamayan bilgiden tanı, karar, süre, fiyat veya neden uydurma.");
   lines.push("- Çelişki sinyali varsa kesin konuşma; kaynaklarda tutarsızlık olduğunu söyle.");

@@ -451,4 +451,55 @@ describe("compileEvidence", () => {
     });
     expect(compiled.factLevelDiagnostics?.bundleKindCounts.contradiction).toBe(1);
   });
+
+  it("builds V2 source map, confidence contract, readiness and legacy text", () => {
+    const bundle = buildEvidenceBundle({
+      userQuery: "Toplam tutar nedir?",
+      textFacts: ["doc-a: Toplam tutar 120 olarak geçiyor."],
+      sourceIds: ["doc-a"],
+      requestedFieldIds: ["total_amount"],
+    });
+    const compiled = compileEvidence({
+      groundingConfidence: "high",
+      sourceRefs: [{ id: "doc-a", title: "Source A" }],
+      evidence: evidence({
+        usableFacts: ["doc-a: Toplam tutar 120 olarak geçiyor."],
+        sourceIds: ["doc-a"],
+        structuredFacts: [
+          {
+            id: "sf-total",
+            kind: "numeric_value",
+            sourceId: "doc-a",
+            field: "total_amount",
+            value: "120",
+            confidence: "high",
+            provenance: {
+              quote: "Toplam tutar 120 olarak geçiyor.",
+              extractor: "test",
+            },
+          },
+        ],
+        evidenceBundle: bundle,
+      }),
+    });
+
+    expect(compiled.items.length).toBeGreaterThan(0);
+    expect(compiled.sourceMap.byEvidenceItemId[compiled.items[0]?.id ?? ""]?.title).toBe("Source A");
+    expect(compiled.sourceMap.byStructuredFactId["sf-total"]?.title).toBe("Source A");
+    expect(compiled.evidenceConfidence).toMatchObject({
+      level: "high",
+      reasons: expect.arrayContaining(["grounding_high", "coverage_complete"]),
+    });
+    expect(compiled.answerReadiness).toMatchObject({
+      usableForAnswer: true,
+      mode: "answer",
+      requiredEvidenceTypeMatched: true,
+    });
+    expect(compiled.legacyText).toMatchObject({
+      facts: ["doc-a: Toplam tutar 120 olarak geçiyor."],
+      risks: [],
+      unknowns: [],
+      contradictions: [],
+    });
+  });
 });

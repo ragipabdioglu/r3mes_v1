@@ -5,6 +5,7 @@ import {
   EVIDENCE_ITEM_KINDS,
   type EvidenceBundle,
   type EvidenceBundleDiagnostics,
+  type EvidenceItem,
   type EvidenceItemKind,
 } from "./evidenceBundle.js";
 import { fieldTextMatchesFact } from "./fieldCoverageResolver.js";
@@ -14,6 +15,46 @@ import type { StructuredFact } from "./structuredFact.js";
 export type CompiledEvidenceConfidence = "low" | "medium" | "high";
 export type EvidenceCoverageStatus = "complete" | "partial" | "none";
 export type EvidenceSufficiencyStatus = "sufficient" | "partial" | "insufficient" | "contradictory";
+export type EvidenceAnswerReadinessMode = "answer" | "partial_answer" | "no_source" | "suggest_only" | "contradiction";
+
+export interface EvidenceSourceRef {
+  collectionId?: string;
+  documentId?: string;
+  chunkId?: string;
+  sourceId: string;
+  title?: string;
+  page?: number;
+  span?: { start?: number; end?: number };
+  bbox?: [number, number, number, number];
+}
+
+export interface EvidenceSourceMap {
+  byEvidenceItemId: Record<string, EvidenceSourceRef>;
+  byStructuredFactId: Record<string, EvidenceSourceRef>;
+}
+
+export interface EvidenceConfidence {
+  level: CompiledEvidenceConfidence;
+  score: number;
+  reasons: string[];
+  penalties: string[];
+}
+
+export interface EvidenceAnswerReadiness {
+  usableForAnswer: boolean;
+  mode: EvidenceAnswerReadinessMode;
+  missingFields: string[];
+  contradictionFields: string[];
+  requiredEvidenceTypeMatched: boolean;
+  reasons: string[];
+}
+
+export interface LegacyEvidenceText {
+  facts: string[];
+  risks: string[];
+  unknowns: string[];
+  contradictions: string[];
+}
 
 export interface EvidenceCoverage {
   status: EvidenceCoverageStatus;
@@ -57,11 +98,16 @@ export interface EvidenceFactLevelDiagnostics {
 export interface CompiledEvidence {
   version?: 2;
   facts: string[];
+  items?: EvidenceItem[];
   structuredFacts?: StructuredFact[];
   risks: string[];
   unknowns: string[];
   contradictions: string[];
   sourceIds: string[];
+  sourceMap?: EvidenceSourceMap;
+  evidenceConfidence?: EvidenceConfidence;
+  answerReadiness?: EvidenceAnswerReadiness;
+  legacyText?: LegacyEvidenceText;
   evidenceBundle?: EvidenceBundle;
   coverage?: EvidenceCoverage;
   sufficiency?: EvidenceSufficiencyDecision;
@@ -99,6 +145,11 @@ export interface CompiledEvidence {
 
 export interface CompiledEvidenceV2 extends CompiledEvidence {
   version: 2;
+  items: EvidenceItem[];
+  sourceMap: EvidenceSourceMap;
+  evidenceConfidence: EvidenceConfidence;
+  answerReadiness: EvidenceAnswerReadiness;
+  legacyText: LegacyEvidenceText;
   coverage: EvidenceCoverage;
   sufficiency: EvidenceSufficiencyDecision;
 }
@@ -260,6 +311,129 @@ function deriveSufficiency(opts: {
   };
 }
 
+function confidenceScore(level: CompiledEvidenceConfidence): number {
+  if (level === "high") return 0.9;
+  if (level === "medium") return 0.62;
+  return 0.28;
+}
+
+function deriveEvidenceConfidence(opts: {
+  confidence: CompiledEvidenceConfidence;
+  confidenceReason: string;
+  coverage: EvidenceCoverage;
+  contradictionCount: number;
+  usableGroundingCount: number;
+}): EvidenceConfidence {
+  const reasons = [opts.confidenceReason];
+  const penalties: string[] = [];
+  if (opts.coverage.status === "complete") reasons.push("coverage_complete");
+  if (opts.coverage.status === "partial") penalties.push("coverage_partial");
+  if (opts.coverage.status === "none") penalties.push("coverage_none");
+  if (opts.contradictionCount > 0) penalties.push("contradiction_present");
+  if (opts.usableGroundingCount === 0) penalties.push("no_usable_evidence");
+  const coverageAdjustment = opts.coverage.status === "complete" ? 0.08 : opts.coverage.status === "partial" ? -0.12 : -0.3;
+  const contradictionPenalty = opts.contradictionCount > 0 ? 0.25 : 0;
+  const score = Math.max(0, Math.min(1, confidenceScore(opts.confidence) + coverageAdjustment - contradictionPenalty));
+  return {
+    level: opts.confidence,
+    score: Number(score.toFixed(3)),
+    reasons: uniqueText(reasons),
+    penalties: uniqueText(penalties),
+  };
+}
+
+function deriveAnswerReadiness(opts: {
+  coverage: EvidenceCoverage;
+  sufficiency: EvidenceSufficiencyDecision;
+  contradictionCount: number;
+}): EvidenceAnswerReadiness {
+  const reasons = uniqueText([opts.sufficiency.reason, ...opts.coverage.missingFieldIds.map((field) => `missing:${field}`)]);
+  if (opts.contradictionCount > 0) {
+    return {
+      usableForAnswer: opts.sufficiency.shouldAnswer,
+      mode: "contradiction",
+      missingFields: opts.coverage.missingFieldIds,
+      contradictionFields: [],
+      requiredEvidenceTypeMatched: opts.coverage.status !== "none",
+      reasons,
+    };
+  }
+  if (!opts.sufficiency.shouldAnswer) {
+    return {
+      usableForAnswer: false,
+      mode: "no_source",
+      missingFields: opts.coverage.missingFieldIds,
+      contradictionFields: [],
+      requiredEvidenceTypeMatched: false,
+      reasons,
+    };
+  }
+  return {
+    usableForAnswer: true,
+    mode: opts.coverage.status === "partial" ? "partial_answer" : "answer",
+    missingFields: opts.coverage.missingFieldIds,
+    contradictionFields: [],
+    requiredEvidenceTypeMatched: opts.coverage.status !== "none",
+    reasons,
+  };
+}
+
+function sourceRefForSourceId(sourceId: string, sourceRefs?: Array<{ id: string; title?: string }>): EvidenceSourceRef {
+  const sourceRef = sourceRefs?.find((source) => source.id === sourceId);
+  return {
+    sourceId,
+    title: sourceRef?.title,
+  };
+}
+
+function sourceRefForItem(item: EvidenceItem, sourceRefs?: Array<{ id: string; title?: string }>): EvidenceSourceRef {
+  return {
+    ...sourceRefForSourceId(item.sourceId, sourceRefs),
+    documentId: item.documentId,
+    chunkId: item.chunkId,
+    page: item.provenance.page,
+    span: item.provenance.sourceSpan,
+    bbox: item.provenance.bbox,
+  };
+}
+
+function sourceRefForStructuredFact(fact: StructuredFact, sourceRefs?: Array<{ id: string; title?: string }>): EvidenceSourceRef {
+  return {
+    ...sourceRefForSourceId(fact.sourceId, sourceRefs),
+    chunkId: fact.chunkId,
+  };
+}
+
+function deriveSourceMap(opts: {
+  items: EvidenceItem[];
+  structuredFacts: StructuredFact[];
+  sourceRefs?: Array<{ id: string; title?: string }>;
+}): EvidenceSourceMap {
+  const byEvidenceItemId: Record<string, EvidenceSourceRef> = {};
+  for (const item of opts.items) {
+    byEvidenceItemId[item.id] = sourceRefForItem(item, opts.sourceRefs);
+  }
+  const byStructuredFactId: Record<string, EvidenceSourceRef> = {};
+  for (const fact of opts.structuredFacts) {
+    byStructuredFactId[fact.id] = sourceRefForStructuredFact(fact, opts.sourceRefs);
+  }
+  return { byEvidenceItemId, byStructuredFactId };
+}
+
+function legacyTextFromCompiled(opts: {
+  facts: string[];
+  risks: string[];
+  unknowns: string[];
+  contradictions: string[];
+}): LegacyEvidenceText {
+  return {
+    facts: opts.facts,
+    risks: opts.risks,
+    unknowns: opts.unknowns,
+    contradictions: opts.contradictions,
+  };
+}
+
 function emptyBundleKindCounts(): Record<EvidenceItemKind, number> {
   return Object.fromEntries(EVIDENCE_ITEM_KINDS.map((kind) => [kind, 0])) as Record<EvidenceItemKind, number>;
 }
@@ -376,6 +550,25 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV
     usableGroundingCount,
     contradictionCount: contradictions.length,
   });
+  const items = evidenceBundle?.items ?? [];
+  const sourceMap = deriveSourceMap({
+    items,
+    structuredFacts,
+    sourceRefs: opts.sourceRefs,
+  });
+  const evidenceConfidence = deriveEvidenceConfidence({
+    confidence: confidence.confidence,
+    confidenceReason: confidence.reason,
+    coverage,
+    contradictionCount: contradictions.length,
+    usableGroundingCount,
+  });
+  const answerReadiness = deriveAnswerReadiness({
+    coverage,
+    sufficiency,
+    contradictionCount: contradictions.length,
+  });
+  const legacyText = legacyTextFromCompiled({ facts, risks, unknowns, contradictions });
   const factLevelDiagnostics = deriveFactLevelDiagnostics({
     evidenceBundle,
     facts,
@@ -390,11 +583,16 @@ export function compileEvidence(opts: CompileEvidenceOptions): CompiledEvidenceV
   return {
     version: 2,
     facts,
+    items,
     structuredFacts,
     risks,
     unknowns,
     contradictions,
     sourceIds,
+    sourceMap,
+    evidenceConfidence,
+    answerReadiness,
+    legacyText,
     evidenceBundle,
     coverage,
     sufficiency,

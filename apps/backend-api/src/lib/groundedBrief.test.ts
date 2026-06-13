@@ -86,10 +86,58 @@ describe("buildGroundedBrief", () => {
     );
 
     expect(brief).toContain("GROUNDING DURUMU: LOW");
-    expect(brief).toContain("KULLANILABILIR GERCEKLER:");
+    expect(brief).toContain("LEGACY GERCEKLER:");
     expect(brief).toContain("RISK / DIKKAT:");
     expect(brief).toContain("CELISKI SINYALLERI:");
     expect(brief).toContain("kesin konuşma");
     expect(brief).toContain("source-a: migration-card");
+  });
+
+  it("prioritizes typed evidence items in compiled-evidence briefs", () => {
+    const brief = buildCompiledEvidenceBrief({
+      facts: ["source-a: Legacy fact."],
+      items: [
+        {
+          id: "ev_typed",
+          kind: "definition",
+          sourceId: "source-a",
+          quote: "Typed definition evidence.",
+          confidence: "high",
+          provenance: { extractor: "test" },
+        },
+      ],
+      risks: [],
+      unknowns: [],
+      contradictions: [],
+      sourceIds: ["source-a"],
+      confidence: "high",
+      usableFactCount: 1,
+      riskFactCount: 0,
+      unknownCount: 0,
+      contradictionCount: 0,
+      answerReadiness: {
+        usableForAnswer: true,
+        mode: "answer",
+        missingFields: [],
+        contradictionFields: [],
+        requiredEvidenceTypeMatched: true,
+        reasons: ["sufficient_evidence"],
+      },
+      coverage: {
+        status: "complete",
+        requestedFieldIds: [],
+        coveredFieldIds: [],
+        missingFieldIds: [],
+        usableEvidenceItemCount: 1,
+        structuredFactCount: 0,
+        textFactCount: 1,
+        contradictionCount: 0,
+      },
+    });
+
+    expect(brief).toContain("EVIDENCE READINESS: answer");
+    expect(brief).toContain("KULLANILABILIR TYPED KANITLAR:");
+    expect(brief).toContain("[ev_typed] type=definition");
+    expect(brief).toContain("LEGACY GERCEKLER:");
   });
 });

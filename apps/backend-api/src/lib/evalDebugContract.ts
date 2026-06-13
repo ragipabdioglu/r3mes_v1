@@ -5,6 +5,8 @@ import type {
   CompiledEvidence,
   EvidenceFactLevelDiagnostics,
   EvidenceCoverage,
+  EvidenceAnswerReadiness,
+  EvidenceConfidence,
   EvidenceSufficiencyDecision,
 } from "./compiledEvidence.js";
 import {
@@ -35,6 +37,11 @@ export interface EvalAnswerBaselineDiagnostics {
     contradictionCount: number;
     coverage: EvidenceCoverage | null;
     sufficiency: EvidenceSufficiencyDecision | null;
+    answerReadiness: EvidenceAnswerReadiness | null;
+    evidenceConfidence: EvidenceConfidence | null;
+    sourceMapCompleteness: number;
+    typedEvidenceRatio: number;
+    legacyFallbackUsed: boolean;
     factLevelDiagnostics: EvidenceFactLevelDiagnostics | null;
   };
   answerPlan: {
@@ -168,6 +175,20 @@ export function buildEvalDebugContract(input: {
     compiledEvidence,
     evidenceBundle,
   });
+  const typedUsableCount = compiledEvidence?.items?.filter((item) =>
+    item.kind !== "source_limit" && item.kind !== "contradiction"
+  ).length ?? 0;
+  const sourceMappedItemCount = compiledEvidence
+    ? Object.keys(compiledEvidence.sourceMap?.byEvidenceItemId ?? {}).length
+    : 0;
+  const sourceMapCompleteness = compiledEvidence?.items?.length
+    ? Number((sourceMappedItemCount / compiledEvidence.items.length).toFixed(3))
+    : 0;
+  const legacyFactCount = compiledEvidence?.legacyText?.facts.length ?? compiledEvidence?.facts.length ?? 0;
+  const typedEvidenceRatio = compiledEvidence
+    ? Number((typedUsableCount / Math.max(1, typedUsableCount + legacyFactCount)).toFixed(3))
+    : 0;
+  const legacyFallbackUsed = Boolean(compiledEvidence && typedUsableCount === 0 && legacyFactCount > 0);
   const composerPath = input.composerDiagnostics?.path ?? input.runtimeLineage?.composer?.path ?? null;
   const plannedComposerUsed = input.composerDiagnostics?.plannedComposerUsed ?? null;
   const fallbackTemplateUsed = input.composerDiagnostics?.fallbackTemplateUsed ?? null;
@@ -220,6 +241,11 @@ export function buildEvalDebugContract(input: {
         contradictionCount: compiledEvidence?.contradictionCount ?? 0,
         coverage: compiledEvidence?.coverage ?? null,
         sufficiency: compiledEvidence?.sufficiency ?? null,
+        answerReadiness: compiledEvidence?.answerReadiness ?? null,
+        evidenceConfidence: compiledEvidence?.evidenceConfidence ?? null,
+        sourceMapCompleteness,
+        typedEvidenceRatio,
+        legacyFallbackUsed,
         factLevelDiagnostics,
       },
       answerPlan: {

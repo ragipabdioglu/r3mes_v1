@@ -41,11 +41,13 @@ export type TextEvidenceItemKind =
 export interface EvidenceItem {
   id: string;
   kind: EvidenceItemKind;
+  role?: "direct_answer" | "supporting" | "constraint" | "risk" | "unknown";
   sourceId: string;
   documentId?: string;
   chunkId?: string;
   quote: string;
   normalizedClaim?: string;
+  score?: number;
   subject?: string;
   field?: string;
   value?: string;
